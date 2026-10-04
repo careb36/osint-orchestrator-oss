@@ -354,7 +354,7 @@ def test_daily_index_survives_concurrent_writers(tmp_path: Path) -> None:
     date_dir.mkdir()
 
     def _write(i: int) -> None:
-        _write_daily_index(date_dir, f"target-{i:02d}", "success", i, "low", "en")
+        _write_daily_index(date_dir, f"target-{i:02d}", i, "success", i, "low", "en")
 
     threads = [threading.Thread(target=_write, args=(i,)) for i in range(30)]
     for thread in threads:

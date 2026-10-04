@@ -1,7 +1,9 @@
 """
 Deterministic daily report generation (Phase 2).
 
-Outputs under daily_reports/YYYY-MM-DD/<target_id>/:
+Outputs under daily_reports/YYYY-MM-DD/<target_id>/run-<run_id>/ (one
+directory per run, so several runs of a target on the same day never
+overwrite each other's artefacts):
   - report.md
   - bundle.stix.json
   - delta.json
@@ -424,6 +426,7 @@ def _read_index_rows(path: Path) -> dict[str, tuple[str, str, str, str]]:
 def _write_daily_index(
     date_dir: Path,
     target_id: str,
+    run_id: int,
     run_status: str,
     new_count: int,
     risk_level: str,
@@ -439,7 +442,7 @@ def _write_daily_index(
     # Two targets finishing in the same minute rewrite the same file; without
     # the lock the second read-modify-write silently drops the first row.
     with _index_lock(date_dir):
-        _rewrite_daily_index(index_path, target_id, run_status, new_count, risk_level, lang)
+        _rewrite_daily_index(index_path, target_id, run_id, run_status, new_count, risk_level, lang)
 
 
 @contextlib.contextmanager
@@ -457,6 +460,7 @@ def _index_lock(date_dir: Path):
 def _rewrite_daily_index(
     index_path: Path,
     target_id: str,
+    run_id: int,
     run_status: str,
     new_count: int,
     risk_level: str,
@@ -468,7 +472,7 @@ def _rewrite_daily_index(
         run_status,
         str(new_count),
         risk_level,
-        f"[{link_text}](./{target_id}/report.md)",
+        f"[{link_text}](./{target_id}/run-{run_id}/report.md)",
     )
 
     lines = [
@@ -506,7 +510,10 @@ async def generate_report(
     """
     lang = resolve_language(language or data.language)
     day = _bundle_date(data.run_started_at)
-    base = Path(report_dir) / day / data.target_id
+    # One directory per run: runs of the same target on the same day (manual
+    # runs, retries, the demo) must not overwrite each other's evidence.
+    date_dir = Path(report_dir) / day
+    base = date_dir / data.target_id / f"run-{data.run_id}"
     base.mkdir(parents=True, exist_ok=True)
 
     merged_bundle = _merge_bundles(data.bundles)
@@ -528,7 +535,9 @@ async def generate_report(
     _write_json(delta_path, delta)
     _write_optional_pdf(pdf_path, report_md)
     risk_level = finding.risk_level if finding is not None else "—"
-    _write_daily_index(base.parent, data.target_id, data.run_status, len(delta), risk_level, lang)
+    _write_daily_index(
+        date_dir, data.target_id, data.run_id, data.run_status, len(delta), risk_level, lang
+    )
 
     logger.info(
         "Report generated: run=%d target=%s path=%s",
