@@ -40,6 +40,7 @@ from sqlmodel import col, select
 
 from orchestrator.config import settings
 from orchestrator.database import get_session
+from orchestrator.demo import consume_budget
 from orchestrator.i18n import resolve_language, t
 from orchestrator.models import Finding, FindingRecord, Run, RunObservable, RunStatus, Target
 from orchestrator.reports import CollectorReportResult, ReportObservable, RunReportData
@@ -458,6 +459,10 @@ async def synthesize(
 
     client = get_client(target)
     if client is None:
+        return None, "skipped"
+    if not await consume_budget("llm"):
+        # Public demo only: recorded like a skipped synthesis, with the reason.
+        await _annotate_run_error(run_id, "synthesis: the demo's daily LLM budget is exhausted")
         return None, "skipped"
 
     try:

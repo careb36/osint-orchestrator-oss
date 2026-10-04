@@ -72,19 +72,21 @@ observable and a Note, is qualified by Nemotron, and is recorded in
 
 ## Quickstart
 
-Requires Docker with Compose v2 and 16 GB of RAM (the stack includes OpenCTI).
+**Demo** (one container: API, demo page, Tavily and Nemotron; no OpenCTI):
 
 ```bash
-cp .env.example .env && cp targets.example.yaml targets.yaml   # fill in keys and an authorised target
-docker compose up -d --build
-KEY="$(grep '^ORCHESTRATOR_API_KEY=' .env | cut -d= -f2)"
-curl -X POST -H "X-API-Key: $KEY" http://localhost:8000/targets/example-domain/run
+cp .env.example .env    # NEBIUS_API_KEY, TAVILY_API_KEY, LLM_PROVIDER=nebius, the two LLM_MODEL_* ids, ORCHESTRATOR_API_KEY, ORCHESTRATOR_SECRET_KEY
+docker compose -f docker-compose.demo.yml up -d --build
+open http://localhost:7860/demo
 ```
 
-Then read the result at `/runs/{id}/report`, `/runs/{id}/evidence` and
-`/runs/{id}/finding`, or in the console at <http://localhost:8000/console>.
-Set `LLM_PROVIDER=nebius`, `NEBIUS_API_KEY`, the two model settings and
-`TAVILY_API_KEY` in `.env`. Full guide: [operations](docs/operations.md) ·
+Pick an entity, run an investigation, read the qualified evidence and verify
+the evidence chain. The entities are an allowlist
+([`demo/targets.demo.yaml`](demo/targets.demo.yaml)) and usage is limited per
+visitor and per day.
+
+**Full stack** (OpenCTI, SpiderFoot, scheduled runs, alerts; 16 GB of RAM):
+`docker compose up -d --build`, then see [operations](docs/operations.md) and
 [configuration](docs/configuration.md).
 
 ## Built during the hackathon
@@ -116,7 +118,8 @@ is an aid for an analyst, not a determination. See [SECURITY](SECURITY.md).
 | Item | Status |
 | --- | --- |
 | Evidence qualification and evidence chain | Done |
-| Lightweight public demo with usage limits | Planned ([#18](https://github.com/careb36/osint-orchestrator-oss/issues/18)) |
+| Lightweight demo mode with usage limits | Done |
+| Public deployment of the demo | Planned ([deploy guide](docs/deploy.md)) |
 | Qualification of relationships between entities | Planned |
 | Data-quality indicators per source | Planned |
 | Document NLP (filings, court records) | Planned |
@@ -125,7 +128,7 @@ is an aid for an analyst, not a determination. See [SECURITY](SECURITY.md).
 ## Documentation
 
 [Architecture](docs/architecture.md) · [Configuration](docs/configuration.md) ·
-[Operations](docs/operations.md) · [Decisions](docs/adr/) ·
+[Operations](docs/operations.md) · [Deploy](docs/deploy.md) · [Decisions](docs/adr/) ·
 [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) ·
 [Changelog](CHANGELOG.md)
 

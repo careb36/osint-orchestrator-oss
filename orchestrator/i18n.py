@@ -156,6 +156,38 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "es": "La versión del manifiesto no es compatible",
         "en": "Manifest version is unsupported",
     },
+    "demo.disabled": {
+        "es": "El modo demo no está habilitado",
+        "en": "Demo mode is not enabled",
+    },
+    "demo.target_not_found": {
+        "es": "'{target_id}' no está en la lista de entidades de la demo",
+        "en": "'{target_id}' is not on the demo's list of entities",
+    },
+    "demo.limit_per_ip": {
+        "es": "Alcanzó el límite diario de investigaciones de la demo; vuelva a intentar mañana",
+        "en": "You reached the demo's daily limit of investigations; try again tomorrow",
+    },
+    "demo.limit_global": {
+        "es": "La demo alcanzó su límite diario de investigaciones; vuelva a intentar mañana",
+        "en": "The demo reached its daily limit of investigations; try again tomorrow",
+    },
+    "demo.synthesis_withheld": {
+        "es": "_La síntesis del modelo no se publica en la demo; está disponible para el operador._",
+        "en": "_The model's synthesis is not published in the demo; it is available to the operator._",
+    },
+    "demo.disclaimer": {
+        "es": (
+            "Demostración con información pública. Los resultados se generan automáticamente, "
+            "no están verificados y no constituyen una evaluación ni una afirmación sobre "
+            "ninguna persona o entidad."
+        ),
+        "en": (
+            "Demonstration on public information. Results are generated automatically, are "
+            "not verified, and are not an assessment of or a statement about any person or "
+            "entity."
+        ),
+    },
     "landing_title": {
         "es": "Orquestador OSINT",
         "en": "OSINT Orchestrator",

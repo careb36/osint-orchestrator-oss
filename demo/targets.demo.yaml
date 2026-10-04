@@ -1,27 +1,34 @@
+# Allowlist of the public demo: the only entities a visitor can investigate.
+# Same schema as targets.yaml. In demo mode the service refuses to start unless
+# every target here enables the tavily collector and nothing else.
+#
+# The entries below are placeholders on reserved example domains. Replace them
+# with the entities you want to show; put the entity's names in search_terms.
+
 targets:
-  - id: acme-demo
-    enabled: true
-    fqdn: acme.example.com
-    authorization: "Public demo allowlist; demonstration only."
-    purpose: "Public walkthrough of the OSINT pipeline"
+  - id: example-corp
+    fqdn: example.com
+    authorization: "Public demo on public information; no access to the entity's systems."
+    purpose: "Demonstration of open-source due diligence"
+    llm: nebius
+    language: en
     collectors:
-      openosint: {enabled: true}
-      spiderfoot: {enabled: true}
-      tavily: {enabled: true, max_calls_per_run: 1}
-    llm: local
-    schedule:
-      cron: "0 9 * * *"
-      misfire_grace_time_seconds: 3600
-  - id: beta-demo
-    enabled: true
-    fqdn: beta.example.com
-    authorization: "Public demo allowlist; demonstration only."
-    purpose: "Public walkthrough of the OSINT pipeline"
+      openosint: {enabled: false}
+      spiderfoot: {enabled: false}
+      tavily:
+        enabled: true
+        search_terms: ["Example Corp"]
+        max_calls_per_run: 3
+  - id: example-org
+    fqdn: example.org
+    authorization: "Public demo on public information; no access to the entity's systems."
+    purpose: "Demonstration of open-source due diligence"
+    llm: nebius
+    language: en
     collectors:
-      openosint: {enabled: true}
-      spiderfoot: {enabled: true}
-      tavily: {enabled: false}
-    llm: local
-    schedule:
-      cron: "0 10 * * *"
-      misfire_grace_time_seconds: 3600
+      openosint: {enabled: false}
+      spiderfoot: {enabled: false}
+      tavily:
+        enabled: true
+        search_terms: ["Example Organization"]
+        max_calls_per_run: 3

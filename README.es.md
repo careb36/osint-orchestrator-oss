@@ -75,19 +75,22 @@ Nota, es calificada por Nemotron y queda registrada en
 
 ## Inicio rápido
 
-Requiere Docker con Compose v2 y 16 GB de RAM (el stack incluye OpenCTI).
+**Demo** (un contenedor: API, página de demo, Tavily y Nemotron; sin OpenCTI):
 
 ```bash
-cp .env.example .env && cp targets.example.yaml targets.yaml   # complete las claves y un objetivo autorizado
-docker compose up -d --build
-curl -X POST -H "X-API-Key: $KEY" http://localhost:8000/targets/example-domain/run
+cp .env.example .env    # NEBIUS_API_KEY, TAVILY_API_KEY, LLM_PROVIDER=nebius, los dos LLM_MODEL_*, ORCHESTRATOR_API_KEY, ORCHESTRATOR_SECRET_KEY
+docker compose -f docker-compose.demo.yml up -d --build
+open http://localhost:7860/demo
 ```
 
-El resultado se lee en `/runs/{id}/report`, `/runs/{id}/evidence` y
-`/runs/{id}/finding`, o en la consola: <http://localhost:8000/console>.
-Defina `LLM_PROVIDER=nebius`, `NEBIUS_API_KEY`, los dos modelos y
-`TAVILY_API_KEY` en `.env`. Guía completa (en inglés):
-[operación](docs/operations.md) · [configuración](docs/configuration.md).
+Elija una entidad, lance una investigación, lea la evidencia calificada y
+verifique la cadena de evidencia. Las entidades son una lista cerrada
+([`demo/targets.demo.yaml`](demo/targets.demo.yaml)) y el uso está limitado por
+visitante y por día.
+
+**Stack completo** (OpenCTI, SpiderFoot, corridas programadas, alertas; 16 GB
+de RAM): `docker compose up -d --build`; ver [operación](docs/operations.md) y
+[configuración](docs/configuration.md) (en inglés).
 
 ## Construido durante el hackathon
 
@@ -119,7 +122,8 @@ salida de los modelos es una ayuda para el analista, no una determinación. Ver
 | Ítem | Estado |
 | --- | --- |
 | Calificación de evidencia y cadena de evidencia | Hecho |
-| Demo pública liviana con límites de uso | Planificado ([#18](https://github.com/careb36/osint-orchestrator-oss/issues/18)) |
+| Modo demo liviano con límites de uso | Hecho |
+| Despliegue público de la demo | Planificado ([guía de despliegue](docs/deploy.md)) |
 | Calificación de relaciones entre entidades | Planificado |
 | Indicadores de calidad de datos por fuente | Planificado |
 | NLP de documentos (balances, expedientes) | Planificado |
@@ -129,7 +133,7 @@ salida de los modelos es una ayuda para el analista, no una determinación. Ver
 
 La documentación de referencia está en inglés:
 [Arquitectura](docs/architecture.md) · [Configuración](docs/configuration.md) ·
-[Operación](docs/operations.md) · [Decisiones](docs/adr/) ·
+[Operación](docs/operations.md) · [Despliegue](docs/deploy.md) · [Decisiones](docs/adr/) ·
 [Contribuir](CONTRIBUTING.md) · [Seguridad](SECURITY.md) ·
 [Changelog](CHANGELOG.md)
 

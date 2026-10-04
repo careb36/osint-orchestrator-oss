@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="{{ language }}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OSINT Orchestrator · demo</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem auto; max-width: 62rem; line-height: 1.5; padding: 0 1rem; color: #1a1a1a; }
+      h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+      .note { background: #fff8e1; border-left: 4px solid #f0b400; padding: 0.6rem 0.9rem; font-size: 0.92rem; }
+      .bar { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; margin: 1.2rem 0; }
+      select, button { font: inherit; padding: 0.4rem 0.7rem; }
+      button { cursor: pointer; }
+      table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+      th, td { border-bottom: 1px solid #ddd; padding: 0.45rem 0.5rem; text-align: left; vertical-align: top; }
+      th { background: #f6f6f6; }
+      pre { background: #f6f6f6; padding: 0.8rem; overflow-x: auto; white-space: pre-wrap; font-size: 0.85rem; }
+      .muted { color: #666; font-size: 0.9rem; }
+      .ok { color: #0a7a2f; } .bad { color: #b00020; }
+    </style>
+  </head>
+  <body>
+    <h1>OSINT Orchestrator</h1>
+    <p class="muted">Tavily · NVIDIA Nemotron on Nebius Token Factory · STIX 2.1 · signed evidence chain</p>
+    <p class="note">{{ disclaimer }}</p>
+
+    <div class="bar">
+      <label for="target">Entity</label>
+      <select id="target"></select>
+      <select id="run"></select>
+      <button id="start">Run a new investigation</button>
+      <button id="verify">Verify evidence chain</button>
+      <span id="status" class="muted"></span>
+    </div>
+
+    <h2>Qualified evidence</h2>
+    <table>
+      <thead><tr><th>Category</th><th>Relevance</th><th>Confidence</th><th>Source</th><th>Rationale</th></tr></thead>
+      <tbody id="evidence"></tbody>
+    </table>
+
+    <h2>Synthesis</h2>
+    <p id="summary" class="muted"></p>
+
+    <h2>Report</h2>
+    <pre id="report"></pre>
+
+    <script>
+      const el = (id) => document.getElementById(id);
+      const say = (text, cls) => { el("status").textContent = text; el("status").className = cls || "muted"; };
+      async function api(path, options) {
+        const response = await fetch(path, options);
+        const text = await response.text();
+        let body = text;
+        try { body = JSON.parse(text); } catch (e) { /* plain text */ }
+        if (!response.ok) { throw new Error((body && body.detail) || response.status); }
+        return body;
+      }
+      function cell(text) { const td = document.createElement("td"); td.textContent = text; return td; }
+      async function showRun(runId) {
+        el("evidence").replaceChildren(); el("summary").textContent = ""; el("report").textContent = "";
+        if (!runId) { return; }
+        const order = { high: 0, medium: 1, low: 2 };
+        const rows = await api(`/demo/runs/${runId}/evidence`);
+        rows.sort((a, b) => (order[a.relevance] - order[b.relevance]) || (b.confidence - a.confidence));
+        for (const row of rows) {
+          const tr = document.createElement("tr");
+          const source = document.createElement("td");
+          const link = document.createElement("a");
+          // Only http(s) links are ever rendered as links.
+          if (/^https?:\/\//i.test(row.url)) { link.href = row.url; link.rel = "noopener noreferrer nofollow"; link.target = "_blank"; }
+          link.textContent = row.title || row.url;
+          source.appendChild(link);
+          tr.append(cell(row.category), cell(row.relevance), cell(Number(row.confidence).toFixed(2)), source, cell(row.rationale));
+          el("evidence").appendChild(tr);
+        }
+        try {
+          const finding = await api(`/demo/runs/${runId}/finding`);
+          el("summary").textContent = `Written by ${finding.model} (${finding.provider}) in ${(finding.duration_ms / 1000).toFixed(1)} s. The synthesis and its risk assessment are shown to the operator only; this page shows the evidence it was built on.`;
+        } catch (e) { el("summary").textContent = "No synthesis for this run."; }
+        try { el("report").textContent = await api(`/demo/runs/${runId}/report`); } catch (e) { el("report").textContent = "—"; }
+      }
+      async function loadRuns(selectId) {
+        const runs = await api(`/demo/targets/${el("target").value}/runs`);
+        el("run").replaceChildren();
+        for (const run of runs) {
+          const option = document.createElement("option");
+          option.value = run.run_id;
+          option.textContent = `Run ${run.run_id} · ${run.status} · ${(run.started_at || "").slice(0, 16)}`;
+          el("run").appendChild(option);
+        }
+        if (selectId) { el("run").value = selectId; }
+        await showRun(el("run").value);
+      }
+      async function poll(runId) {
+        for (let i = 0; i < 90; i += 1) {
+          const run = await api(`/demo/runs/${runId}`);
+          say(`Run ${runId}: ${run.status}`);
+          if (!["pending", "running"].includes(run.status) && run.sealed) { return; }
+          await new Promise((resolve) => setTimeout(resolve, 4000));
+        }
+      }
+      el("start").addEventListener("click", async () => {
+        try {
+          el("start").disabled = true;
+          const accepted = await api(`/demo/targets/${el("target").value}/run`, { method: "POST" });
+          await poll(accepted.run_id);
+          await loadRuns(accepted.run_id);
+        } catch (error) { say(String(error.message), "bad"); } finally { el("start").disabled = false; }
+      });
+      el("verify").addEventListener("click", async () => {
+        try {
+          const result = await api(`/demo/targets/${el("target").value}/chain/verify`);
+          say(result.ok ? `Chain verified: ${result.checked} sealed run(s)` : `Chain broken at run ${result.first_broken_run_id}: ${result.message || result.reason}`, result.ok ? "ok" : "bad");
+        } catch (error) { say(String(error.message), "bad"); }
+      });
+      el("target").addEventListener("change", () => loadRuns().catch((error) => say(String(error.message), "bad")));
+      el("run").addEventListener("change", () => showRun(el("run").value).catch((error) => say(String(error.message), "bad")));
+      (async () => {
+        const targets = await api("/demo/targets");
+        for (const target of targets) {
+          const option = document.createElement("option");
+          option.value = target.id;
+          option.textContent = (target.search_terms[0] || target.fqdn) + ` (${target.fqdn})`;
+          el("target").appendChild(option);
+        }
+        await loadRuns();
+      })().catch((error) => say(String(error.message), "bad"));
+    </script>
+  </body>
+</html>
