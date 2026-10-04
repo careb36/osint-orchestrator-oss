@@ -102,6 +102,15 @@ class Settings(BaseSettings):
     orchestrator_secret_key: str = "insecure-dev-key"
     orchestrator_database_url: str = "sqlite+aiosqlite:///./orchestrator.db"
     targets_file: str = "targets.yaml"
+    # Public demo mode: allowlisted company targets only, no free-text targets,
+    # budgeted Tavily and LLM spend, and a minimal public API surface.
+    demo_mode: bool = False
+    demo_targets_file: str = "demo/targets.demo.yaml"
+    demo_max_runs_per_ip_per_day: int = 3
+    demo_max_runs_per_day: int = 50
+    demo_tavily_calls_per_day: int = 150
+    demo_llm_calls_per_day: int = 300
+    demo_trusted_proxy_hops: int = 1
 
     # LLM
     # ollama | anthropic | openai | nebius | none. "none" switches synthesis off for
