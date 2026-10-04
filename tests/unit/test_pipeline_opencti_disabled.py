@@ -15,6 +15,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 import orchestrator.pipeline as pipeline_module
 from orchestrator import metrics
 from orchestrator.api import app
+from orchestrator.i18n import t
 from orchestrator.models import (
     CollectorName,
     CollectorResult,
@@ -184,13 +185,14 @@ async def test_second_run_has_no_new_observables_when_disabled(
 
 def test_outbox_replay_is_409_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("orchestrator.config.settings.opencti_enabled", False)
-    monkeypatch.setattr("orchestrator.config.settings.orchestrator_api_key", "")
+    monkeypatch.setattr("orchestrator.config.settings.orchestrator_api_key", "test-token")
+    monkeypatch.setattr("orchestrator.config.settings.orchestrator_language", "es")
 
     with TestClient(app, raise_server_exceptions=True) as client:
-        response = client.post("/opencti/outbox/replay")
+        response = client.post("/opencti/outbox/replay", headers={"X-API-Key": "test-token"})
 
     assert response.status_code == 409
-    assert "OPENCTI_ENABLED=false" in response.json()["detail"]
+    assert response.json()["detail"] == t("opencti_sink_disabled")
 
 
 def test_scheduler_skips_outbox_job_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:

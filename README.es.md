@@ -1194,6 +1194,7 @@ El pipeline de CI ejecuta `alembic upgrade head` sobre una base de datos SQLite 
 - [ADR-004: Español para Operadores, Inglés para Código](docs/adr/ADR-004-language-policy-es.md)
 - [ADR-005: Claves de API estáticas, observabilidad estructurada y despliegue de instancia única](docs/adr/ADR-005-api-auth-and-single-instance-es.md)
 - [ADR-006: Proxy OIDC opcional como capa de perímetro](docs/adr/ADR-006-oidc-proxy-es.md)
+- [ADR-007: Manifiestos de evidencia firmados por ejecución y encadenados por objetivo](docs/adr/ADR-007-evidence-chain-es.md)
 - [ADR-008: Sink opcional de OpenCTI mediante OPENCTI_ENABLED](docs/adr/ADR-008-optional-opencti-sink-es.md)
 
 Cada ADR tiene su original en inglés junto al archivo `-es.md`.

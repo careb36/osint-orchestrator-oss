@@ -1171,6 +1171,7 @@ The CI pipeline runs `alembic upgrade head` on a temporary SQLite database and t
 - [ADR-004: Spanish for Operators, English for Code](docs/adr/ADR-004-language-policy.md)
 - [ADR-005: Static API Keys, Structured Observability and a Single-Instance Deployment](docs/adr/ADR-005-api-auth-and-single-instance.md)
 - [ADR-006: Optional OIDC Proxy as a Perimeter Layer](docs/adr/ADR-006-oidc-proxy.md)
+- [ADR-007: Signed Per-Run Evidence Manifests Chained per Target](docs/adr/ADR-007-evidence-chain.md)
 - [ADR-008: Optional OpenCTI Sink via OPENCTI_ENABLED](docs/adr/ADR-008-optional-opencti-sink.md)
 
 Each ADR has a Spanish companion alongside it (`-es.md`).
