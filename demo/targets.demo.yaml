@@ -1,0 +1,27 @@
+targets:
+  - id: acme-demo
+    enabled: true
+    fqdn: acme.example.com
+    authorization: "Public demo allowlist; demonstration only."
+    purpose: "Public walkthrough of the OSINT pipeline"
+    collectors:
+      openosint: {enabled: true}
+      spiderfoot: {enabled: true}
+      tavily: {enabled: true, max_calls_per_run: 1}
+    llm: local
+    schedule:
+      cron: "0 9 * * *"
+      misfire_grace_time_seconds: 3600
+  - id: beta-demo
+    enabled: true
+    fqdn: beta.example.com
+    authorization: "Public demo allowlist; demonstration only."
+    purpose: "Public walkthrough of the OSINT pipeline"
+    collectors:
+      openosint: {enabled: true}
+      spiderfoot: {enabled: true}
+      tavily: {enabled: false}
+    llm: local
+    schedule:
+      cron: "0 10 * * *"
+      misfire_grace_time_seconds: 3600
