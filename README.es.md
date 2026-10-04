@@ -62,6 +62,12 @@ no vistos antes para ese objetivo se marcan como nuevos; `synthesizer/` pide a
 un LLM una lectura de riesgo; `reports/` escribe los artefactos Markdown y STIX
 del día; `alerts/` notifica si las reglas del objetivo lo piden.
 
+La ingesta hacia OpenCTI se puede desactivar con `OPENCTI_ENABLED=false` (ver
+[ADR-008](docs/adr/ADR-008-optional-opencti-sink-es.md)). En ese modo el
+pipeline sigue ejecutando recolectores, síntesis, reportes, findings, tracking
+de delta y alertas; lo que se desactiva es enviar STIX a OpenCTI (y por tanto el
+grafo de conocimiento de OpenCTI y flujos aguas abajo vía OpenCTI, como MISP).
+
 **MISP** se integra a través del [conector oficial OpenCTI↔MISP](https://github.com/OpenCTI-Platform/connectors/tree/master/external-import/misp), no mediante código propio.
 
 ---
@@ -518,6 +524,7 @@ En el mismo `.env` conviven dos grupos de variables:
 | `ORCHESTRATOR_ENV_FILE` | `.env` | Ruta bootstrap del dotenv usada al construir `Settings()`. Déjela vacía para desactivar la carga de dotenv (los tests hacen esto para no leer el `.env` local del desarrollador). |
 | `ORCHESTRATOR_DATABASE_URL` | `sqlite+aiosqlite:////app/data/orchestrator.db` | Dentro del contenedor esa ruta es el volumen persistente; fuera de Docker use `./orchestrator.db`. |
 | `TARGETS_FILE` | `targets.yaml` | Se relee en cada llamada de la API y del scheduler. |
+| `OPENCTI_ENABLED` | `true` | Ponga `false` para operar sin ingesta/outbox de OpenCTI, manteniendo reportes, findings, delta y alertas. |
 | `OPENCTI_SSL_VERIFY` | `true` | Use `false` solo en dev con TLS local/autofirmado. |
 | `SPIDERFOOT_MODULES` | `sfp_dnsresolve,sfp_whois,sfp_sslcert` | Valor de respaldo cuando un objetivo no lista módulos. |
 | `SPIDERFOOT_URL` | `http://spiderfoot:5001` | URL del servicio SpiderFoot en la red interna. |
@@ -1187,6 +1194,7 @@ El pipeline de CI ejecuta `alembic upgrade head` sobre una base de datos SQLite 
 - [ADR-004: Español para Operadores, Inglés para Código](docs/adr/ADR-004-language-policy-es.md)
 - [ADR-005: Claves de API estáticas, observabilidad estructurada y despliegue de instancia única](docs/adr/ADR-005-api-auth-and-single-instance-es.md)
 - [ADR-006: Proxy OIDC opcional como capa de perímetro](docs/adr/ADR-006-oidc-proxy-es.md)
+- [ADR-008: Sink opcional de OpenCTI mediante OPENCTI_ENABLED](docs/adr/ADR-008-optional-opencti-sink-es.md)
 
 Cada ADR tiene su original en inglés junto al archivo `-es.md`.
 

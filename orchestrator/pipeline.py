@@ -660,7 +660,11 @@ async def _run_target_pipeline(target: Target, run_id: int, log_ctx: dict) -> Ru
 
     # Ingest into OpenCTI; track which bundles succeeded for Issue #8.
     successful_bundle_observables: list[tuple[str, str, str, bool]] = []
-    if bundles:
+    if not settings.opencti_enabled:
+        logger.info("OpenCTI ingest skipped (OPENCTI_ENABLED=false)", extra=log_ctx)
+        for _, bundle_obs in bundles:
+            successful_bundle_observables.extend(bundle_obs)
+    elif bundles:
         sink = OpenCTISink()
         for bundle, bundle_obs in bundles:
             work_name = f"osint-orchestrator/{target.id}/{run_id}"

@@ -59,6 +59,12 @@ bundle through pycti; observables not seen before for that target are marked new
 `synthesizer/` asks an LLM for a risk read; `reports/` writes the day's Markdown
 and STIX artifacts; `alerts/` dispatches if the target's rules match.
 
+OpenCTI ingest can be disabled with `OPENCTI_ENABLED=false` (see
+[ADR-008](docs/adr/ADR-008-optional-opencti-sink.md)). In that mode the
+pipeline still runs collectors, synthesis, reports, findings, delta tracking and
+alerts; what is disabled is pushing STIX into OpenCTI (and therefore the OpenCTI
+knowledge graph and downstream OpenCTI connector flows such as MISP via OpenCTI).
+
 **MISP** integrates via the [official OpenCTI↔MISP connector](https://github.com/OpenCTI-Platform/connectors/tree/master/external-import/misp), not custom code.
 
 ---
@@ -498,6 +504,7 @@ Two groups of variables live in the same `.env`:
 | `ORCHESTRATOR_ENV_FILE` | `.env` | Bootstrap dotenv path used while building `Settings()`. Set empty to disable dotenv loading (tests do this to avoid reading a developer's local `.env`). |
 | `ORCHESTRATOR_DATABASE_URL` | `sqlite+aiosqlite:////app/data/orchestrator.db` | Container path is the persistent volume; use `./orchestrator.db` bare-metal. |
 | `TARGETS_FILE` | `targets.yaml` | Re-read on every API and scheduler call. |
+| `OPENCTI_ENABLED` | `true` | Set `false` to run without OpenCTI ingest/outbox while keeping reports, findings, delta and alerts. |
 | `OPENCTI_SSL_VERIFY` | `true` | Set `false` only for local/self-signed TLS in dev. |
 | `SPIDERFOOT_MODULES` | `sfp_dnsresolve,sfp_whois,sfp_sslcert` | Fallback when a target lists no modules. |
 | `SPIDERFOOT_URL` | `http://spiderfoot:5001` | SpiderFoot service URL on the internal network. |
@@ -1164,6 +1171,7 @@ The CI pipeline runs `alembic upgrade head` on a temporary SQLite database and t
 - [ADR-004: Spanish for Operators, English for Code](docs/adr/ADR-004-language-policy.md)
 - [ADR-005: Static API Keys, Structured Observability and a Single-Instance Deployment](docs/adr/ADR-005-api-auth-and-single-instance.md)
 - [ADR-006: Optional OIDC Proxy as a Perimeter Layer](docs/adr/ADR-006-oidc-proxy.md)
+- [ADR-008: Optional OpenCTI Sink via OPENCTI_ENABLED](docs/adr/ADR-008-optional-opencti-sink.md)
 
 Each ADR has a Spanish companion alongside it (`-es.md`).
 
