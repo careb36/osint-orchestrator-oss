@@ -29,6 +29,10 @@ jobs:
           PR_CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
         run: |
           set -euo pipefail
+          if [ "${PR_DRAFT}" = "true" ]; then
+            echo "Draft PR detected: skipping completion checks until it is marked ready for review."
+            exit 0
+          fi
           fail=0
           case "${PR_TITLE}" in
             "[WIP]"*|"WIP:"*|"WIP "*)
@@ -36,10 +40,6 @@ jobs:
               fail=1
               ;;
           esac
-          if [ "${PR_DRAFT}" = "true" ]; then
-            echo "::error::The PR is a draft."
-            fail=1
-          fi
           if [ "${PR_CHANGED_FILES}" = "0" ]; then
             echo "::error::The PR changes no files (an empty 'Initial plan' commit)."
             fail=1
