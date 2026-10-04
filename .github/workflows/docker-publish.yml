@@ -84,10 +84,12 @@ jobs:
           docker run --rm osint-orchestrator:smoke \
             python -c "from orchestrator.config import settings; print(settings.llm_provider)"
 
+      - name: Generate smoke API key
+        if: github.event_name == 'pull_request'
+        run: echo "ORCHESTRATOR_API_KEY=$(openssl rand -hex 32)" >> "${GITHUB_ENV}"
+
       - name: Smoke-test /health
         if: github.event_name == 'pull_request'
-        env:
-          ORCHESTRATOR_API_KEY: ci-smoke-${{ github.run_id }}
         run: |
           set -euo pipefail
           cid="$(docker run -d \
