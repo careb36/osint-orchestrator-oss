@@ -220,6 +220,10 @@ def test_row_values_are_validated_per_stix_type(caplog):
         _row(str(2**32), "BGP_AS_OWNER"),
         _row("0", "IP_ADDRESS"),
         _row("2606:4700::1", "IP_ADDRESS"),
+        # Unicode digits pass str.isdigit() but int() rejects them.
+        _row("AS\u00b2", "BGP_AS_OWNER"),
+        # Netmask notation is canonicalised to a prefix.
+        _row("10.8.0.0/255.255.0.0", "NETBLOCK_OWNER"),
     ]
 
     with caplog.at_level(logging.WARNING, logger=spiderfoot_module.__name__):
@@ -231,8 +235,9 @@ def test_row_values_are_validated_per_stix_type(caplog):
     assert ("autonomous-system", "13335") in values
     assert ("autonomous-system", "209242") in values
     assert not any(o.type == "autonomous-system" and o.value == "0" for o in result.observables)
-    assert len(result.observables) == 5  # root domain + the four valid rows
-    assert "5 of 9 result rows were unreadable" in caplog.text
+    assert ("ipv4-addr", "10.8.0.0/16") in values
+    assert len(result.observables) == 6  # root domain + the five valid rows
+    assert "6 of 11 result rows were unreadable" in caplog.text
 
 
 def test_netblock_and_asn_observables_normalise_to_valid_stix():

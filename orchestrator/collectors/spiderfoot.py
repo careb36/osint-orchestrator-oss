@@ -200,7 +200,8 @@ class SpiderFootCollector(BaseCollector):
                 number = raw
             elif isinstance(raw, str):
                 digits = html.unescape(raw).strip().upper().removeprefix("AS")
-                if not digits.isdigit():
+                # isascii: str.isdigit() accepts digits int() rejects (e.g. "²").
+                if not (digits.isascii() and digits.isdigit()):
                     return None
                 number = int(digits)
             else:
@@ -216,6 +217,9 @@ class SpiderFootCollector(BaseCollector):
                 return None
             if network.version != (4 if stix_type == "ipv4-addr" else 6):
                 return None
+            # Canonical form: STIX wants prefix notation, and ip_network also
+            # accepts a netmask ("104.16.0.0/255.248.0.0").
+            value = str(network) if "/" in value else str(network.network_address)
         return value or None
 
     @staticmethod
