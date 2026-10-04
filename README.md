@@ -412,16 +412,17 @@ entity. It is intentionally opt-in, and it stays off unless a target enables
 - beneficial ownership and legal-entity relationships
 - source URLs and summarised excerpts from public web results
 
-Each query searches the target's domain name as a quoted exact term across
-third-party sources (news, registries, court records); it never scopes the
-search to the target's own domain, because adverse media is published
-elsewhere. Use `include_domains` / `exclude_domains` to restrict the sources.
-The exact match is deliberate for due diligence (no false positives from a
-generic word), but it also means mentions of the entity's trade name alone are
-not reached: a target is a domain, not a company name. A page returned by
-several queries, in any scheme/case/trailing-slash variant, yields one `url`
-observable and one note. A query that fails after its retries is recorded in
-a note; the run fails only when every query failed.
+Each query searches a quoted exact term across third-party sources (news,
+registries, court records); by default that term is the target's domain name.
+You can override it per target with `search_terms` (for entity names, brands or
+aliases). The collector never scopes the search to the target's own domain,
+because adverse media is published elsewhere. Use `include_domains` /
+`exclude_domains` to restrict the sources. A page returned by several queries,
+in any scheme/case/trailing-slash variant, yields one `url` observable and one
+note. A query that fails after its retries is recorded in a note; the run fails
+only when every query failed. With several terms, query order alternates by
+term inside each template so a tighter call budget still reaches every term
+with the first template(s).
 
 ### Usage
 
@@ -443,6 +444,7 @@ collectors:
 | `search_depth` | `basic` | `basic` or `advanced` (Tavily pricing differs) |
 | `max_results` | `5` | Results requested and kept per query, 1–20, clamped by `TAVILY_MAX_RESULTS` |
 | `include_domains` / `exclude_domains` | `[]` | Result-domain allowlist / denylist; empty falls back to the global settings |
+| `search_terms` | `[]` | Optional list of quoted query terms (for example trade names), up to 5 entries of at most 80 characters each; empty keeps the default domain term |
 | `include_answer` | `false` | Also request Tavily's synthesised answer, kept as one bounded note per query |
 | `max_calls_per_run` | `3` | Search requests per run, 1–20, clamped by `TAVILY_MAX_CALLS_PER_RUN`; three query templates ship, so the default covers all of them |
 | `timeout_seconds` | `TAVILY_TIMEOUT_SECONDS` (`120`) | Wall-clock budget for the whole collector run, retries and backoff included |

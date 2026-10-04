@@ -429,18 +429,19 @@ habilita `collectors.tavily.enabled: true`.
 - beneficiarios finales y relaciones jurídicas
 - URLs origen y fragmentos resumidos de resultados públicos
 
-Cada consulta busca el nombre de dominio del objetivo como término exacto
-entrecomillado en fuentes de terceros (prensa, registros, expedientes
-judiciales); nunca acota la búsqueda al dominio del propio objetivo, porque la
-prensa adversa se publica en otros sitios. Usá `include_domains` /
-`exclude_domains` para restringir las fuentes. La coincidencia exacta es
-deliberada para diligencia debida (sin falsos positivos de una palabra
-genérica), pero implica que las menciones sólo por nombre comercial no se
-alcanzan: un objetivo es un dominio, no una razón social. Una página devuelta
-por varias consultas, en cualquier variante de esquema, mayúsculas o barra
-final, produce un único observable `url` y una única nota. Una consulta que
-falla tras sus reintentos queda registrada en una nota; la ejecución falla sólo
-cuando fallaron todas las consultas.
+Cada consulta busca un término exacto entrecomillado en fuentes de terceros
+(prensa, registros, expedientes judiciales); por defecto ese término es el
+nombre de dominio del objetivo. Podés sobreescribirlo por objetivo con
+`search_terms` (para nombres de entidad, marcas o alias). Nunca acota la
+búsqueda al dominio del propio objetivo, porque la prensa adversa se publica en
+otros sitios. Usá `include_domains` / `exclude_domains` para restringir las
+fuentes. Una página devuelta por varias consultas, en cualquier variante de
+esquema, mayúsculas o barra final, produce un único observable `url` y una
+única nota. Una consulta que falla tras sus reintentos queda registrada en una
+nota; la ejecución falla sólo cuando fallaron todas las consultas. Con varios
+términos, el orden de consultas alterna por término dentro de cada plantilla,
+así un presupuesto de llamadas más bajo igual alcanza todos los términos con
+la(s) primera(s) plantilla(s).
 
 ### Uso
 
@@ -462,6 +463,7 @@ collectors:
 | `search_depth` | `basic` | `basic` o `advanced` (el precio de Tavily difiere) |
 | `max_results` | `5` | Resultados pedidos y conservados por consulta, 1–20, recortado por `TAVILY_MAX_RESULTS` |
 | `include_domains` / `exclude_domains` | `[]` | Lista blanca / negra de dominios de resultados; vacío usa los valores globales |
+| `search_terms` | `[]` | Lista opcional de términos de consulta entrecomillados (por ejemplo nombres comerciales), hasta 5 entradas de como máximo 80 caracteres cada una; vacío mantiene el dominio como término por defecto |
 | `include_answer` | `false` | Pide además la respuesta sintetizada de Tavily, conservada como una nota acotada por consulta |
 | `max_calls_per_run` | `3` | Peticiones de búsqueda por ejecución, 1–20, recortado por `TAVILY_MAX_CALLS_PER_RUN`; se incluyen tres plantillas de consulta, así que el valor por defecto las cubre todas |
 | `timeout_seconds` | `TAVILY_TIMEOUT_SECONDS` (`120`) | Presupuesto de tiempo de pared de toda la ejecución del recolector, reintentos y esperas incluidos |

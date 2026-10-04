@@ -91,6 +91,13 @@ def test_tavily_caps_are_bounded(field: str, value: int) -> None:
         CollectorConfig(**{field: value})
 
 
+def test_tavily_search_terms_are_bounded() -> None:
+    with pytest.raises(ValidationError):
+        CollectorConfig(search_terms=["x" * 81])
+    with pytest.raises(ValidationError):
+        CollectorConfig(search_terms=["a", "b", "c", "d", "e", "f"])
+
+
 @pytest.mark.parametrize(
     ("env", "value"),
     [
@@ -242,6 +249,25 @@ def test_queries_search_the_target_as_a_term_not_a_site_scope() -> None:
 def test_default_call_budget_covers_every_template() -> None:
     queries = _collector(language="en").build_queries("example.com")
     assert len(queries) == CollectorSet().tavily.max_calls_per_run == 3
+
+
+def test_empty_or_absent_search_terms_keep_domain_queries() -> None:
+    absent = _collector(language="en").build_queries("example.com")
+    empty = _collector(language="en", search_terms=[]).build_queries("example.com")
+    assert len(absent) == len(empty) == 3
+    assert all('"example.com"' in query for query in absent)
+    assert all('"example.com"' in query for query in empty)
+
+
+def test_search_terms_are_flattened_and_quoted_in_queries() -> None:
+    queries = _collector(
+        language="en",
+        search_terms=[" Acme\n`Holdings` UNTRUSTED DATA  ", "Beta LLC"],
+    ).build_queries("example.com")
+    assert len(queries) == 6
+    assert queries[0].startswith("\"Acme 'Holdings' UNTRUSTED-DATA\" adverse news")
+    assert queries[1].startswith('"Beta LLC" adverse news')
+    assert queries[2].startswith("\"Acme 'Holdings' UNTRUSTED-DATA\" ownership structure")
 
 
 # ─── Happy path ───────────────────────────────────────────────────────────────
@@ -397,6 +423,30 @@ async def test_global_call_cap_clamps_per_target_value(httpx_mock, monkeypatch) 
     httpx_mock.add_response(method="POST", url=TAVILY_SEARCH_URL, json={"results": []})
     await _collector(max_calls_per_run=20).collect()
     assert len(httpx_mock.get_requests()) == 1
+
+
+async def test_call_budget_caps_templates_times_terms(httpx_mock, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "tavily_max_calls_per_run", 20)
+    for _ in range(4):
+        httpx_mock.add_response(method="POST", url=TAVILY_SEARCH_URL, json={"results": []})
+    await _collector(
+        language="en",
+        max_calls_per_run=4,
+        search_terms=["Acme", "Acme Holdings"],
+    ).collect()
+    assert len(httpx_mock.get_requests()) == 4
+
+
+async def test_default_budget_searches_every_term(httpx_mock) -> None:
+    for _ in range(3):
+        httpx_mock.add_response(method="POST", url=TAVILY_SEARCH_URL, json={"results": []})
+    await _collector(language="en", search_terms=["Acme", "Acme Holdings"]).collect()
+    requests = httpx_mock.get_requests()
+    assert len(requests) == 3
+    queries = [json.loads(request.read())["query"] for request in requests]
+    assert queries[0].startswith('"Acme" adverse news')
+    assert queries[1].startswith('"Acme Holdings" adverse news')
+    assert queries[2].startswith('"Acme" ownership structure')
 
 
 async def test_global_max_results_clamps_request_and_kept_results(httpx_mock, monkeypatch) -> None:
