@@ -88,13 +88,13 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           set -euo pipefail
-          cid="$(docker run -d --rm \
+          cid="$(docker run -d \
             --name osint-orchestrator-smoke \
             -e ORCHESTRATOR_API_KEY=ci-smoke \
             -p 18080:8000 \
             osint-orchestrator:smoke)"
           cleanup() {
-            docker stop "${cid}" >/dev/null 2>&1 || true
+            docker rm -f "${cid}" >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
 
