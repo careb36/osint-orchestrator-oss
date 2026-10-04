@@ -4,10 +4,14 @@ SpiderFoot collector.
 SpiderFoot exposes a CherryPy web UI + unofficial REST endpoints at port 5001.
 There is NO versioned /api/v1/ prefix — all endpoints are at root path.
 
-Key endpoints used:
-  POST /startscan   → start a scan, returns scan ID
-  GET  /scanstatus?id=<id>  → poll for FINISHED/ERROR/ABORT/RUNNING
-  GET  /scaneventresults?id=<id>&eventType=  → get all results as JSON
+Key endpoints used (shapes checked against SpiderFoot 4.0 sfwebui.py):
+  POST /startscan   → with ``Accept: application/json``: ["SUCCESS", "<scan id>"]
+                      or ["ERROR", "<message>"]; without that header it
+                      answers 303 to the HTML scan page
+  GET  /scanstatus?id=<id>  → [name, target, created, started, ended, status, risk]
+  GET  /scaneventresults?id=<id>&eventType=  → rows of
+                      [last_seen, data, source_data, module, ..., event_type]
+                      with data/source HTML-escaped and the type last
   GET  /ping        → health check
 
 Reference: smicallef/spiderfoot:sfwebui.py (port 5001, @cherrypy.expose methods)
@@ -16,6 +20,7 @@ Reference: smicallef/spiderfoot:sfwebui.py (port 5001, @cherrypy.expose methods)
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -107,6 +112,8 @@ class SpiderFootCollector(BaseCollector):
 
         resp = await client.post(
             "/startscan",
+            # Without this header SpiderFoot answers 303 to the HTML scan page.
+            headers={"Accept": "application/json"},
             data={
                 "scanname": scan_name,
                 "scantarget": fqdn,
@@ -117,11 +124,17 @@ class SpiderFootCollector(BaseCollector):
         )
         resp.raise_for_status()
         data = resp.json()
-        # SpiderFoot returns {"id": "...", ...} or a list; normalise
+        # SpiderFoot 4 returns ["SUCCESS", "<id>"] or ["ERROR", "<message>"];
+        # a dict with an id is accepted for other builds.
         if isinstance(data, dict):
-            return data.get("id") or data.get("scanId") or data.get("scan_id", "")
-        if isinstance(data, list) and data:
-            return str(data[0])
+            scan_id = data.get("id") or data.get("scanId") or data.get("scan_id")
+            if scan_id:
+                return str(scan_id)
+        if isinstance(data, list) and len(data) >= 2:
+            if data[0] == "SUCCESS" and data[1]:
+                return str(data[1])
+            if data[0] == "ERROR":
+                raise RuntimeError(f"SpiderFoot refused the scan: {data[1]}")
         raise ValueError(f"Unexpected /startscan response: {data}")
 
     async def _wait_for_scan(self, client: httpx.AsyncClient, scan_id: str) -> None:
@@ -134,8 +147,8 @@ class SpiderFootCollector(BaseCollector):
             resp = await client.get("/scanstatus", params={"id": scan_id})
             resp.raise_for_status()
             data = resp.json()
-            # /scanstatus returns a list of [name, target, starttime, endtime, status, id]
-            # or a dict depending on SpiderFoot version
+            # /scanstatus returns [name, target, created, started, ended, status, risk]
+            # (or a dict on other builds)
             status = self._extract_status(data)
             logger.debug("SpiderFoot scan %s status: %s", scan_id, status)
             if status in ("FINISHED", "ABORT-REQUESTED", "ABORTED"):
@@ -150,13 +163,8 @@ class SpiderFootCollector(BaseCollector):
         """Normalise the scan status out of SpiderFoot's dict-or-rows response."""
         if isinstance(data, dict):
             return data.get("status", "UNKNOWN")
-        if isinstance(data, list):
-            # SpiderFoot returns rows; status is typically index 4
-            for row in data:
-                if isinstance(row, list) and len(row) >= 5:
-                    return str(row[4])
-                if isinstance(row, dict):
-                    return row.get("status", "UNKNOWN")
+        if isinstance(data, list) and len(data) >= 6 and isinstance(data[5], str):
+            return data[5]
         return "UNKNOWN"
 
     async def _fetch_results(self, client: httpx.AsyncClient, scan_id: str) -> list[dict]:
@@ -176,9 +184,11 @@ class SpiderFootCollector(BaseCollector):
         """
         Convert SpiderFoot event rows to CollectorResult.
 
-        SpiderFoot /scaneventresults returns rows like:
-          [generated, type, module, source_data, data, last_seen, fp, confidence, visibility, risk]
-        or dicts with "type", "data", etc.
+        SpiderFoot 4 /scaneventresults returns rows like:
+          [last_seen, data, source_data, module, confidence, visibility, risk,
+           hash, false_positive, ..., event_type]
+        with ``data`` HTML-escaped and the event type in the last column, or
+        dicts with "type", "data", etc. on other builds.
         """
         observables: list[Observable] = []
         relationships: list[Relationship] = []
@@ -189,9 +199,9 @@ class SpiderFootCollector(BaseCollector):
         seen_values.add(fqdn)
 
         for event in events:
-            if isinstance(event, list) and len(event) >= 4:
-                event_type = str(event[1])
-                data = str(event[3])
+            if isinstance(event, list) and len(event) >= 11:
+                event_type = str(event[-1])
+                data = html.unescape(str(event[1]))
             elif isinstance(event, dict):
                 event_type = event.get("type", "")
                 data = event.get("data", "")
