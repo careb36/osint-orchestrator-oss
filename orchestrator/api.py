@@ -8,6 +8,7 @@ Data/control endpoints sit behind the API-key dependency
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -37,7 +38,7 @@ from sqlmodel import select
 
 from orchestrator import metrics
 from orchestrator.auth import log_auth_status, log_secret_key_status, require_api_key
-from orchestrator.config import settings
+from orchestrator.config import NEBIUS_DEFAULT_BASE_URL, settings
 from orchestrator.database import create_db_and_tables, get_session
 from orchestrator.evidence import load_manifest_file, manifest_path_for_report, verify_target_chain
 from orchestrator.i18n import console_i18n_catalogue, resolve_language, t
@@ -59,6 +60,7 @@ from orchestrator.scheduler import (
     shutdown_scheduler,
     start_scheduler,
 )
+from orchestrator.synthesizer.providers.openai_compat import preflight_configured_models
 from orchestrator.targets import load_targets
 
 logger = logging.getLogger(__name__)
@@ -67,6 +69,7 @@ logger = logging.getLogger(__name__)
 # GET /health and the build_info metric).
 VERSION = "0.1.0"
 REQUEST_ID_HEADER = "X-Request-ID"
+_LLM_MODEL_PREFLIGHT_TIMEOUT_SECONDS = 10.0
 # A caller-supplied request id is echoed into a response header and every log
 # line, so it is reduced to printable ASCII without whitespace: no CR/LF
 # (header/log injection), no control or non-ASCII bytes, and a hard cap so a
@@ -96,6 +99,7 @@ async def lifespan(app: FastAPI):
     configure_logging()
     log_auth_status()
     log_secret_key_status()
+    await _run_llm_model_preflight()
     metrics.set_build_info(VERSION)
     await create_db_and_tables()
     interrupted = await mark_interrupted_runs()
@@ -122,6 +126,35 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         shutdown_scheduler()
+
+
+async def _run_llm_model_preflight() -> None:
+    provider = settings.llm_provider.strip().lower()
+    if provider == "openai":
+        api_key = settings.openai_api_key.strip()
+        base_url = settings.openai_base_url.strip()
+    elif provider == "nebius":
+        api_key = settings.nebius_api_key.strip()
+        base_url = settings.nebius_base_url.strip() or NEBIUS_DEFAULT_BASE_URL
+    else:
+        return
+    if not api_key:
+        return
+    try:
+        await asyncio.wait_for(
+            preflight_configured_models(
+                provider_name=provider,
+                api_key=api_key,
+                base_url=base_url,
+            ),
+            timeout=_LLM_MODEL_PREFLIGHT_TIMEOUT_SECONDS,
+        )
+    except TimeoutError:
+        logger.warning(
+            "LLM model preflight timed out; continuing startup provider=%s",
+            provider,
+            extra={"provider": provider},
+        )
 
 
 _OPENAPI_TAGS = [

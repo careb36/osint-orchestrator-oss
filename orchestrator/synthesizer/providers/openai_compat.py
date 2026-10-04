@@ -30,6 +30,9 @@ import re
 import time
 from typing import Any, Literal
 
+import httpx
+
+from orchestrator import metrics
 from orchestrator.config import NEBIUS_DEFAULT_BASE_URL, settings
 from orchestrator.synthesizer.model_routing import resolve_model_for_route
 from orchestrator.synthesizer.providers._policy import (
@@ -78,6 +81,113 @@ _SCHEMA_REJECTION_RE = re.compile(
 _BACKOFF_BASE_SECONDS = 1.0
 _BACKOFF_CAP_SECONDS = 30.0
 _BACKOFF_JITTER_RATIO = 0.25
+_OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
+_PREFLIGHT_HTTP_TIMEOUT_SECONDS = 10.0
+
+
+def _model_route_pairs() -> tuple[tuple[Literal["reasoning", "fast"], str], ...]:
+    return tuple((route, resolve_model_for_route(route)) for route in ("reasoning", "fast"))
+
+
+def _parse_model_ids(payload: Any) -> list[str]:
+    if not isinstance(payload, dict):
+        raise ValueError("models payload must be an object")
+    data = payload.get("data")
+    if not isinstance(data, list):
+        raise ValueError("models payload missing list field 'data'")
+    model_ids: list[str] = []
+    for item in data:
+        if isinstance(item, dict) and isinstance(item.get("id"), str):
+            model_id = item["id"].strip()
+            if model_id:
+                model_ids.append(model_id)
+    return model_ids
+
+
+def _prefix_before_slash(model_id: str) -> str:
+    return model_id.split("/", 1)[0]
+
+
+def _resolve_preflight_api_key(provider_name: str, api_key: str | None) -> str:
+    if api_key is not None:
+        return api_key.strip()
+    if provider_name == "openai":
+        return settings.openai_api_key.strip()
+    if provider_name == "nebius":
+        return settings.nebius_api_key.strip()
+    return ""
+
+
+def _resolve_preflight_base_url(provider_name: str, base_url: str | None) -> str:
+    cleaned = (base_url or "").strip()
+    if cleaned:
+        return cleaned
+    if provider_name == "openai":
+        return settings.openai_base_url.strip() or _OPENAI_DEFAULT_BASE_URL
+    if provider_name in _PRESET_BASE_URLS:
+        return _PRESET_BASE_URLS[provider_name]
+    return _OPENAI_DEFAULT_BASE_URL
+
+
+async def preflight_configured_models(
+    *,
+    provider_name: str = "openai",
+    api_key: str | None = None,
+    base_url: str | None = None,
+) -> None:
+    """Log and expose whether configured cloud models are served by this provider."""
+    resolved_base_url = _resolve_preflight_base_url(provider_name, base_url)
+    url = f"{resolved_base_url.rstrip('/')}/models"
+    token = _resolve_preflight_api_key(provider_name, api_key)
+    headers = {"Authorization": "Bearer " + token}
+    try:
+        async with httpx.AsyncClient(
+            headers=headers, timeout=httpx.Timeout(_PREFLIGHT_HTTP_TIMEOUT_SECONDS)
+        ) as http_client:
+            response = await http_client.get(url)
+            response.raise_for_status()
+            served_model_ids = _parse_model_ids(response.json())
+    except TimeoutError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - preflight must not stop startup
+        logger.warning(
+            "LLM model preflight failed; continuing startup provider=%s error=%s",
+            provider_name,
+            exc,
+            extra={"provider": provider_name, "error": str(exc)},
+        )
+        return
+
+    served_model_ids_set = set(served_model_ids)
+    for route, model in _model_route_pairs():
+        available = model in served_model_ids_set
+        metrics.llm_model_available.labels(provider_name, model, route).set(1 if available else 0)
+        log_extra = {"provider": provider_name, "model": model, "route": route}
+        if available:
+            logger.info(
+                "LLM model available provider=%s model=%s route=%s",
+                provider_name,
+                model,
+                route,
+                extra=log_extra,
+            )
+            continue
+        prefix = _prefix_before_slash(model)
+        suggestions = [
+            model_id for model_id in served_model_ids if _prefix_before_slash(model_id) == prefix
+        ][:10]
+        log_extra["suggestions"] = suggestions
+        # The fields are in the message too: the text log format prints only
+        # the message, and this line exists to tell the operator what to fix.
+        logger.error(
+            "LLM model not served by provider provider=%s model=%s route=%s "
+            "served_with_same_prefix=%s",
+            provider_name,
+            model,
+            route,
+            ", ".join(suggestions) or "none",
+            extra=log_extra,
+        )
 
 
 def _usage_tokens(response: Any) -> tuple[int, int]:
