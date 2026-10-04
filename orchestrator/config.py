@@ -7,10 +7,14 @@ All settings are documented in .env.example.
 from __future__ import annotations
 
 import os
-from typing import Any
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    DotEnvSettingsSource,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
 
 # Nebius Token Factory OpenAI-compatible endpoint (default for NEBIUS_BASE_URL).
 NEBIUS_DEFAULT_BASE_URL = "https://api.tokenfactory.nebius.com/v1"
@@ -41,9 +45,26 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    def __init__(self, **values: Any) -> None:
-        values.setdefault("_env_file", _bootstrap_env_file())
-        super().__init__(**values)
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        _ = dotenv_settings
+        return (
+            init_settings,
+            env_settings,
+            DotEnvSettingsSource(
+                settings_cls,
+                env_file=_bootstrap_env_file(),
+                env_file_encoding=settings_cls.model_config.get("env_file_encoding"),
+            ),
+            file_secret_settings,
+        )
 
     # OpenCTI
     opencti_url: str = "http://localhost:8080"
