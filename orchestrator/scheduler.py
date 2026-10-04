@@ -348,6 +348,10 @@ def register_alert_retry_job() -> None:
 
 def register_opencti_outbox_job() -> None:
     """Register the OpenCTI outbox drain worker (id ``opencti-outbox``)."""
+    if not settings.opencti_enabled:
+        logger.info("OpenCTI sink disabled (OPENCTI_ENABLED=false); outbox job not registered")
+        return
+
     cron_expr = settings.opencti_outbox_cron
     trigger = _build_cron_trigger(cron_expr, context="opencti-outbox", job_id="opencti-outbox")
     if trigger is None:

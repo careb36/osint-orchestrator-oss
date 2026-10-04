@@ -360,6 +360,8 @@ async def replay_opencti_outbox(
     limit: int = _DLQ_LIMIT_QUERY,
 ) -> dict[str, Any]:
     """Move dead-letter OpenCTI bundles back to pending and drain the due ones now."""
+    if not settings.opencti_enabled:
+        raise HTTPException(status_code=409, detail=t("opencti_sink_disabled"))
     replayed = await replay_opencti_dead_letters(run_id=run_id, limit=limit)
     processed = await drain_opencti_outbox(limit=limit)
     return {"status": "replayed", **replayed, "processed_now": processed}

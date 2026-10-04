@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     # OpenCTI
     opencti_url: str = "http://localhost:8080"
     opencti_admin_token: str = ""
+    # Set to False to disable the OpenCTI sink (reports, findings, delta and
+    # alerts still work; OpenCTI graph ingestion is skipped).
+    opencti_enabled: bool = True
     opencti_ssl_verify: bool = True  # Set to False only for local/dev deployments
     # Retry policy of the OpenCTI sink. Only transient errors are retried
     # (connection refused, timeouts, 429/5xx, a platform lock); an invalid

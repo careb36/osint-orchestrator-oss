@@ -120,6 +120,10 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "es": "Las métricas están deshabilitadas (ORCHESTRATOR_METRICS_ENABLED=false)",
         "en": "Metrics are disabled (ORCHESTRATOR_METRICS_ENABLED=false)",
     },
+    "opencti_sink_disabled": {
+        "es": "La ingesta a OpenCTI está deshabilitada (OPENCTI_ENABLED=false)",
+        "en": "OpenCTI ingest is disabled (OPENCTI_ENABLED=false)",
+    },
     "manifest.not_found": {
         "es": "No existe el manifiesto de la ejecución {run_id}",
         "en": "Manifest for run {run_id} not found",
