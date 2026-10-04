@@ -25,7 +25,6 @@ jobs:
           # Untrusted text: passed through the environment, never interpolated
           # into the script.
           PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_DRAFT: ${{ github.event.pull_request.draft }}
           PR_CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
         run: |
           set -euo pipefail
@@ -48,4 +47,4 @@ jobs:
             echo "Do not merge: wait until the author marks it finished and it has been reviewed."
             exit 1
           fi
-          echo "Title, draft state and file count are consistent with a finished PR (${PR_CHANGED_FILES} files)."
+          echo "The title and file count are consistent with a finished PR (${PR_CHANGED_FILES} files)."
