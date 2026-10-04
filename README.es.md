@@ -443,6 +443,21 @@ collectors:
     timeout_seconds: 120
 ```
 
+| Campo | Por defecto | Significado |
+| --- | --- | --- |
+| `enabled` | `false` | Interruptor opt-in; el recolector solo se registra en una ejecución cuando vale `true` |
+| `search_depth` | `basic` | `basic` o `advanced` (el precio de Tavily difiere) |
+| `max_results` | `5` | Resultados pedidos y conservados por consulta, 1–20, recortado por `TAVILY_MAX_RESULTS` |
+| `include_domains` / `exclude_domains` | `[]` | Lista blanca / negra de dominios de resultados; vacío usa los valores globales |
+| `include_answer` | `false` | Pide además la respuesta sintetizada de Tavily, conservada como una nota acotada por consulta |
+| `max_calls_per_run` | `3` | Peticiones de búsqueda por ejecución, 1–20, recortado por `TAVILY_MAX_CALLS_PER_RUN`; se incluyen tres plantillas de consulta, así que el valor por defecto las cubre todas |
+| `timeout_seconds` | `TAVILY_TIMEOUT_SECONDS` (`120`) | Presupuesto de tiempo de pared de toda la ejecución del recolector, reintentos y esperas incluidos |
+
+Las peticiones se reintentan con espera exponencial solo ante HTTP 429, 5xx y
+errores de transporte; cualquier otro 4xx (clave inválida, payload rechazado)
+hace fallar la consulta de inmediato. Las URLs de los resultados se conservan
+solo con esquema `http` o `https`.
+
 ---
 
 ## Configuración
@@ -514,11 +529,11 @@ En el mismo `.env` conviven dos grupos de variables:
 | `AMASS_TIMEOUT_SECONDS` | `1800` | Límite de tiempo de pared por defecto de una ejecución completa de Amass (enum + subs). |
 | `TAVILY_API_KEY` | *(vacío)* | Requerida cuando `collectors.tavily.enabled=true`; dejarla vacía mantiene el recolector apagado. |
 | `TAVILY_SEARCH_DEPTH` | `basic` | Profundidad de la búsqueda Tavily: `basic` o `advanced`. |
-| `TAVILY_MAX_RESULTS` | `5` | Número máximo de resultados por consulta. |
-| `TAVILY_TIMEOUT_SECONDS` | `120` | Tiempo máximo por petición Tavily. |
-| `TAVILY_MAX_CALLS_PER_RUN` | `3` | Tope duro de llamadas Tavily por ejecución del recolector. |
-| `TAVILY_INCLUDE_DOMAINS` | *(vacío)* | Lista opcional de dominios permitidos en resultados Tavily. |
-| `TAVILY_EXCLUDE_DOMAINS` | *(vacío)* | Lista opcional de dominios a excluir. |
+| `TAVILY_MAX_RESULTS` | `5` | Techo global de resultados por consulta; el `max_results` por objetivo se recorta a este valor. |
+| `TAVILY_TIMEOUT_SECONDS` | `120` | Presupuesto de tiempo de pared por defecto de toda la ejecución de Tavily por objetivo, reintentos incluidos (`timeout_seconds` en `targets.yaml` lo sobreescribe). |
+| `TAVILY_MAX_CALLS_PER_RUN` | `3` | Techo global de peticiones de búsqueda por ejecución; el `max_calls_per_run` por objetivo se recorta a este valor. |
+| `TAVILY_INCLUDE_DOMAINS` | *(vacío)* | Lista opcional de dominios permitidos en los resultados, separados por coma (`example.com,news.example.com`). |
+| `TAVILY_EXCLUDE_DOMAINS` | *(vacío)* | Lista opcional de dominios a excluir de los resultados, separados por coma. |
 | `ALERT_TIMEOUT_SECONDS` | `10` | Tiempo máximo por intento de envío de alerta (webhook/email). |
 | `ALERT_SMTP_PORT` | `587` | Puerto SMTP para alertas por correo. |
 | `ALERT_SMTP_USER` | *(vacío)* | Usuario SMTP para alertas por correo. |

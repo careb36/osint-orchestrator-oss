@@ -426,6 +426,20 @@ collectors:
     timeout_seconds: 120
 ```
 
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `false` | Opt-in switch; the collector is only registered for a run when it is `true` |
+| `search_depth` | `basic` | `basic` or `advanced` (Tavily pricing differs) |
+| `max_results` | `5` | Results requested and kept per query, 1–20, clamped by `TAVILY_MAX_RESULTS` |
+| `include_domains` / `exclude_domains` | `[]` | Result-domain allowlist / denylist; empty falls back to the global settings |
+| `include_answer` | `false` | Also request Tavily's synthesised answer, kept as one bounded note per query |
+| `max_calls_per_run` | `3` | Search requests per run, 1–20, clamped by `TAVILY_MAX_CALLS_PER_RUN`; three query templates ship, so the default covers all of them |
+| `timeout_seconds` | `TAVILY_TIMEOUT_SECONDS` (`120`) | Wall-clock budget for the whole collector run, retries and backoff included |
+
+Requests are retried with exponential backoff only on HTTP 429, 5xx and
+transport errors; any other 4xx (an invalid key, a rejected payload) fails the
+query immediately. Result URLs are kept only with an `http` or `https` scheme.
+
 ---
 
 ## Configuration
@@ -497,11 +511,11 @@ Two groups of variables live in the same `.env`:
 | `AMASS_TIMEOUT_SECONDS` | `1800` | Default wall-clock bound for a full Amass run (enum + subs). |
 | `TAVILY_API_KEY` | *(empty)* | Required when `collectors.tavily.enabled=true`; leave blank to keep the collector off. |
 | `TAVILY_SEARCH_DEPTH` | `basic` | Tavily query depth: `basic` or `advanced`. |
-| `TAVILY_MAX_RESULTS` | `5` | Maximum search results to request per query. |
-| `TAVILY_TIMEOUT_SECONDS` | `120` | Timeout for each Tavily request. |
-| `TAVILY_MAX_CALLS_PER_RUN` | `3` | Hard cap on Tavily API calls per collector execution. |
-| `TAVILY_INCLUDE_DOMAINS` | *(empty)* | Optional allowlist of domains for Tavily search results. |
-| `TAVILY_EXCLUDE_DOMAINS` | *(empty)* | Optional denylist of domains that must be skipped. |
+| `TAVILY_MAX_RESULTS` | `5` | Global ceiling for results per query; the per-target `max_results` is clamped to it. |
+| `TAVILY_TIMEOUT_SECONDS` | `120` | Default wall-clock budget of a whole Tavily run per target, retries included (`timeout_seconds` in `targets.yaml` overrides it). |
+| `TAVILY_MAX_CALLS_PER_RUN` | `3` | Global ceiling for search requests per run; the per-target `max_calls_per_run` is clamped to it. |
+| `TAVILY_INCLUDE_DOMAINS` | *(empty)* | Optional comma-separated allowlist of result domains (`example.com,news.example.com`). |
+| `TAVILY_EXCLUDE_DOMAINS` | *(empty)* | Optional comma-separated denylist of result domains. |
 | `ALERT_TIMEOUT_SECONDS` | `10` | Timeout for webhook/email alert send attempts. |
 | `ALERT_SMTP_PORT` | `587` | SMTP port for email alerts. |
 | `ALERT_SMTP_USER` | *(empty)* | SMTP username for email alerts. |
