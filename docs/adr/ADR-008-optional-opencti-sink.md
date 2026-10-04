@@ -1,7 +1,5 @@
 # ADR-008: Optional OpenCTI Sink via OPENCTI_ENABLED
 
-> 🇪🇸 [Español](ADR-008-optional-opencti-sink-es.md)
-
 **Date:** 2026-10-04  
 **Status:** Accepted
 

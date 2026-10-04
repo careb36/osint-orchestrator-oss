@@ -35,7 +35,7 @@ specific to this task. Comment `/oc` on the issue once it is complete.
 - No new dependencies.
 - ADR-004: code, comments, logs and commits in English; operator-facing text
   through `orchestrator/i18n.py` with both `es` and `en`.
-- Bilingual companions (`README.es.md`, ADR `-es.md`) updated in the same PR.
+- Documentation in English under `docs/`; `README.es.md` mirrors `README.md` (ADR-009).
 
 ## Definition of done
 

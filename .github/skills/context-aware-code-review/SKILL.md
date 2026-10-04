@@ -25,10 +25,10 @@ Use this skill when reviewing pull requests or proposed patches in this reposito
 - If new settings are introduced, require updates to:
   - `orchestrator/config.py`
   - `.env.example`
-  - config tables in `README.md` and `README.es.md`
+  - the environment tables in `docs/configuration.md`
 - If metrics are introduced, require updates to:
   - `orchestrator/metrics.py`
-  - metrics tables in `README.md` and `README.es.md`
+  - the metrics table in `docs/operations.md`
 
 ## Review against the issue, not the PR text
 

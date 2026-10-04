@@ -1,7 +1,5 @@
 # ADR-001: Modular Monolith Architecture
 
-> 🇪🇸 [Español](ADR-001-modular-monolith-es.md)
-
 **Date:** 2026-09-04  
 **Status:** Accepted
 

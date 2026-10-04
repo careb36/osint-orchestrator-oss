@@ -7,7 +7,7 @@ of them and for human contributors; `CONTRIBUTING.md` is the long form.
 
 ## What this project is
 
-A FastAPI + APScheduler service that runs OSINT collectors (OpenOSINT, SpiderFoot and, opt-in per target, SocialOSINT), normalises their findings to STIX 2.1 and ingests them into OpenCTI, then writes daily reports and sends alerts. Architecture decisions live in `docs/adr/`: modular monolith (ADR-001), STIX 2.1 as the internal contract (ADR-002), OpenCTI as the single source of truth (ADR-003), Spanish for operators / English for code (ADR-004), static API keys and a single-instance deployment (ADR-005). Read the relevant ADR before changing architecture; do not contradict one without proposing a new ADR.
+A FastAPI + APScheduler service that runs OSINT collectors (OpenOSINT, SpiderFoot and, opt-in per target, Tavily, Amass and SocialOSINT), qualifies web evidence and synthesises a risk read with an LLM, normalises findings to STIX 2.1 and ingests them into OpenCTI, then writes a signed report per run and sends alerts. Architecture decisions live in `docs/adr/` and are summarised in `docs/architecture.md`: modular monolith (ADR-001), STIX 2.1 as the internal contract (ADR-002), OpenCTI as the single source of truth (ADR-003), Spanish for operators / English for code (ADR-004), static API keys and a single-instance deployment (ADR-005), optional OIDC proxy (ADR-006), signed evidence chain (ADR-007), optional OpenCTI sink (ADR-008), documentation language (ADR-009). Read the relevant ADR before changing architecture; do not contradict one without proposing a new ADR.
 
 ## Language policy (ADR-004) — non-negotiable
 
@@ -66,14 +66,15 @@ uses the *Agent task* template), the contract is:
   `.github/workflows/`, `.gitignore`, `AGENTS.md`, `opencode.json`,
   dependency pins in `pyproject.toml`, and any existing file under `docs/adr/`.
 - **New metric** → declare it in `orchestrator/metrics.py` **and** add one
-  row to the metrics table of `README.md` and `README.es.md` with exactly the
-  labels declared in code. The tables are cross-checked against the module.
+  row to the metrics table of `docs/operations.md` with exactly the labels
+  declared in code.
 - **New setting** → `orchestrator/config.py`, `.env.example`, and the
-  configuration table of both READMEs (`tests/unit/test_env_coverage.py`
-  fails otherwise).
-- **Bilingual docs stay mirrors.** Any change to `README.md`, `CONTRIBUTING.md`
-  or an ADR is applied to its `.es` companion in the same PR, with the same
-  heading sequence.
+  environment tables of `docs/configuration.md`
+  (`tests/unit/test_env_coverage.py` fails otherwise).
+- **Documentation language (ADR-009).** Documentation is English and lives in
+  `docs/`; reference material is never copied into the README. `README.es.md`
+  is the only translation: change it in the same PR as `README.md`, with the
+  same sections.
 - **Fill `.github/pull_request_template.md`** and paste the real output of the
   commands in *Before you open or update a PR*. If you could not run one, say
   which and why.

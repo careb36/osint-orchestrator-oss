@@ -1,9 +1,7 @@
 # Contributing to OSINT Orchestrator
 
-> 🇪🇸 [Español](CONTRIBUTING.es.md)
-
 Thank you for your interest in contributing. This guide consolidates the rules
-that are otherwise scattered across the README, the ADRs and
+that are otherwise scattered across the documentation, the ADRs and
 `AGENTS.md`. When they disagree, this file and the ADRs
 win — and a PR fixing the disagreement is welcome.
 
@@ -12,7 +10,7 @@ win — and a PR fixing the disagreement is welcome.
 1. **Authorised use only.** This tool performs live reconnaissance. Never add
    code, tests, fixtures or examples that target systems you do not own or
    lack written authorisation to assess. See [SECURITY.md](SECURITY.md) and
-   the *Authorised use* section of the README.
+   the *Responsible use* section of the README.
 2. **Read the relevant ADR before changing architecture**
    ([`docs/adr/`](docs/adr/)). Do not contradict an ADR in code without
    proposing a new ADR (or an amendment) in the same PR.
@@ -87,21 +85,34 @@ results.
 
 A change is not done until its documentation is complete:
 
-- API changes → README **and** README.es endpoint tables.
-- New/changed settings → `.env.example` (with inline comment) and the README
-  configuration tables.
-- Operator-facing workflow changes → the relevant README or guide under `docs/`.
-- Bilingual companions (`README.es.md`, ADR `-es.md`) are updated **in the
-  same PR** as the canonical English file.
-- Business docs carry `**Última revisión:** YYYY-MM-DD`.
+- API changes → the endpoint table in `docs/operations.md`.
+- New/changed settings → `.env.example` (comment on the line above a blank
+  value) and the environment tables in `docs/configuration.md`.
+- New metrics → the metrics table in `docs/operations.md`.
+- Operator-facing workflow changes → the relevant guide under `docs/`.
+- Documentation is English ([ADR-009](docs/adr/ADR-009-documentation-language.md)).
+  The README is the only translated file: `README.es.md` is updated **in the
+  same PR** as `README.md`, with the same sections. Keep both short; reference
+  material belongs in `docs/`.
 
-## Delegating a task to OpenCode
+## Delegating a task to a coding agent
 
-Routine, well-specified work is delegated to [OpenCode](https://opencode.ai),
-a coding agent that runs inside this repository's GitHub Actions runner
-(`.github/workflows/opencode.yml`) with the model and permissions declared in
-`opencode.json`. It reads `AGENTS.md` before every task; a maintainer reviews
-and merges every PR it opens, with the same gates as a human PR.
+Routine, well-specified work is delegated to a coding agent. Two channels are
+set up; both read `AGENTS.md` before every task, and a maintainer reviews every
+PR they open with the same gates as a human PR.
+
+- **GitHub Copilot coding agent:** assign the issue to Copilot. It opens a
+  draft PR on a `copilot/…` branch. Its workflows need a maintainer's approval
+  before CI runs, and the PR is not ready while it is a draft or titled
+  `[WIP]`: at that point it may hold nothing but an empty "Initial plan"
+  commit, and merging it would close the issue with nothing implemented.
+  Follow-up requests go in a PR comment that mentions `@copilot`.
+- **[OpenCode](https://opencode.ai):** runs inside this repository's GitHub
+  Actions runner (`.github/workflows/opencode.yml`) with the model and
+  permissions declared in `opencode.json`; the steps below describe it.
+
+The review checklist both agents and reviewers follow is
+`.github/skills/context-aware-code-review/SKILL.md`.
 
 ### One-time prerequisites (repository owner)
 
@@ -111,8 +122,9 @@ and merges every PR it opens, with the same gates as a human PR.
 2. Add the repository secret `DEEPSEEK_API_KEY` (*Settings → Secrets and
    variables → Actions*). The key lives only there; `opencode.json` refers to
    it as `{env:DEEPSEEK_API_KEY}`.
-3. Recommended: branch protection on `main` requiring a pull request and a
-   green CI run, so the agent (or any bot) can never push to `main` directly.
+3. `main` is protected by a ruleset that requires the *Lint & Unit Tests*,
+   *Helm chart* and *Public-release guard* checks and forbids force pushes, so
+   nothing reaches `main` without a pull request and a green CI run.
 
 ### Delegating one task
 
@@ -142,10 +154,10 @@ head, before it is merged:
   Helm lint/render commands if `deploy/helm/` changed.
 - Each numbered item and each test of the issue, verified against the code
   rather than against the PR description.
-- Repository guards: no credentials, `README.md`/`README.es.md` and ADR
-  companions still mirrors, metric tables matching `orchestrator/metrics.py`,
-  and `.gitignore`, workflows and `pyproject.toml` untouched unless the issue
-  asked for it.
+- Repository guards: no credentials, `README.md`/`README.es.md` still
+  mirrors, the metrics table in `docs/operations.md` matching
+  `orchestrator/metrics.py`, and `.gitignore`, workflows and `pyproject.toml`
+  untouched unless the issue asked for it.
 
 ### Fallback: running OpenCode locally
 
@@ -166,9 +178,8 @@ fixture, comment or commit message:
 
 - **Credentials** of any kind (see *Secrets* above).
 - **References to specific public bodies, regulators or official government
-  portals.** The business documents describe the regulatory context in
-  generic terms on purpose; keep it that way. Laws and decrees may be cited by
-  number.
+  portals.** The documentation describes the regulatory context in generic
+  terms on purpose; keep it that way.
 
 Run the guard before opening a PR; CI runs the same script and fails the PR
 on a hit:
@@ -182,7 +193,7 @@ The forbidden-reference pattern lives in that script only. Extend it there.
 
 ### Responsible use
 
-The *Authorised use* section of the README and section 1 of
+The *Responsible use* section of the README and section 1 of
 [SECURITY.md](SECURITY.md) are part of the contribution rules: never add
 targets, fixtures or examples that point at real third parties, never add code
 that interacts with a target beyond public-source collection, and keep every

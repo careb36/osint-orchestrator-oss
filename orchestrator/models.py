@@ -132,8 +132,8 @@ class CollectorConfig(BaseModel):
     ``include_domains``, ``exclude_domains``, ``search_terms``, ``include_answer``,
     ``max_calls_per_run`` + ``timeout_seconds``). A field must be declared
     once: a repeated name silently replaces the earlier default for every
-    collector. The full field contract is documented in the README "Target
-    Configuration" section.
+    collector. The full field contract is documented in
+    docs/configuration.md (targets.yaml).
     """
 
     enabled: bool = True

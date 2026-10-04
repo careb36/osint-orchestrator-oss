@@ -1,7 +1,5 @@
 # ADR-002: STIX 2.1 as the Internal Data Contract
 
-> 🇪🇸 [Español](ADR-002-stix-as-contract-es.md)
-
 **Date:** 2026-09-04  
 **Status:** Accepted
 

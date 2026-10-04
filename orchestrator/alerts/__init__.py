@@ -53,7 +53,7 @@ class AlertEvent(BaseModel):
     rendered as plain text for the email body.
 
     This is the public webhook contract — document any field change in the
-    README under "Alerts → Webhook JSON schema".
+    docs/operations.md under "Alerts".
     """
 
     target_id: str

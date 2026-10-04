@@ -13,7 +13,7 @@
 #     --profile amass     → OWASP Amass v5 engine (subdomain enumeration)
 #     -f docker-compose.auth.yml --profile auth
 #                         → Keycloak + oauth2-proxy authenticated front door
-#                           (see README → "Optional: authenticated front door")
+#                           (see docs/operations.md → Optional services)
 #
 # Prerequisites:
 #   cp .env.example .env && vi .env     # fill in tokens & passwords

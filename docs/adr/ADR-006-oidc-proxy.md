@@ -25,7 +25,7 @@ compose stack:
 1. **Keycloak** (`--profile auth`) — an OIDC/OAuth2 identity provider.  It
    imports a realm definition from `auth/keycloak/realm.json`.  No demo users
    are shipped; operators must create their own accounts (see
-   [README → Auth overlay](../../README.md#optional-authenticated-front-door)).
+   [Operations → Optional services](../operations.md#optional-services)).
 
 2. **oauth2-proxy** (`--profile auth`) — an authentication reverse proxy that
    sits in front of the orchestrator.  It validates OIDC sessions (issued by
@@ -91,5 +91,4 @@ bearer token oauth2-proxy forwards is not an API key. So:
 ## Links
 
 - [ADR-005: Static API Keys, Structured Observability and a Single-Instance Deployment](ADR-005-api-auth-and-single-instance.md)
-- [README — Optional authenticated front door](../../README.md#optional-authenticated-front-door)
-- [README.es.md — Puerta de entrada autenticada opcional](../../README.es.md#puerta-de-entrada-autenticada-opcional-perfil-auth)
+- [Operations — Optional services](../operations.md#optional-services)
