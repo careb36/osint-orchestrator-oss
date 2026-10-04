@@ -20,7 +20,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml README.md LICENSE ./
 # Dummy package source so pip can resolve the project metadata
 RUN mkdir -p orchestrator && touch orchestrator/__init__.py
-RUN pip install --no-cache-dir .
+# The llm extra brings the cloud provider SDKs (openai for openai/nebius,
+# anthropic for anthropic); without it every cloud synthesis fails at runtime.
+RUN pip install --no-cache-dir ".[llm]"
 
 COPY orchestrator/ ./orchestrator/
 

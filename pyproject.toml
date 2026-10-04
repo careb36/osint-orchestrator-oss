@@ -60,6 +60,14 @@ dev = [
     "mypy>=1.10.0",
     "types-PyYAML>=6.0.12",
 ]
+# llm: SDKs of the cloud synthesis providers. Both are imported lazily, so the
+# unit tests run without them, but LLM_PROVIDER=openai|nebius needs `openai`
+# and LLM_PROVIDER=anthropic needs `anthropic` at runtime. The Docker image
+# installs this extra; a local install without it fails every synthesis.
+llm = [
+    "openai>=1.40.0",
+    "anthropic>=0.34.0",
+]
 # socialosint: the OWASP SocialOSINT Agent is NOT pip-installable (no pyproject.toml
 # in the upstream repo). The integration uses the Docker service (see Dockerfile.socialosint
 # and docs/socialosint.md). No extra Python dependencies are needed in the orchestrator
