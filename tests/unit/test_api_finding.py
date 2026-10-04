@@ -87,7 +87,7 @@ async def test_corrupt_stored_list_returns_empty_and_logs(
     warning_calls: list[dict[str, object]] = []
 
     def _warning_spy(msg: str, *args: object, **kwargs: object) -> None:
-        warning_calls.append({"msg": msg, "kwargs": kwargs})
+        warning_calls.append({"msg": msg, "args": args, "kwargs": kwargs})
 
     monkeypatch.setattr(models_mod.logger, "warning", _warning_spy)
 
