@@ -229,7 +229,7 @@
           blob = new Blob([JSON.stringify(await response.json(), null, 2)], {
             type: "application/json;charset=utf-8",
           });
-          filename = "run-" + String(runId) + "-finding.json";
+          filename = "run-" + String(runId) + "-" + artifactType + ".json";
         }
         const blobUrl = URL.createObjectURL(blob);
         const link = document.createElement("a");
@@ -241,6 +241,148 @@
         link.click();
         link.remove();
         setTimeout(() => URL.revokeObjectURL(blobUrl), 3000);
+      }
+
+      function artifactTitle(artifactType) {
+        if (artifactType === "report") return t("report");
+        if (artifactType === "finding") return t("finding");
+        if (artifactType === "evidence") return t("evidence");
+        if (artifactType === "manifest") return t("manifest");
+        return artifactType;
+      }
+
+      function renderArtifactEmpty(container, artifactType) {
+        const label = artifactTitle(artifactType);
+        container.innerHTML = `<p class="muted">${esc(t("emptyArtifact").replace("{artifact}", label))}</p>`;
+      }
+
+      function renderErrorState(container, artifactType, error) {
+        const label = artifactTitle(artifactType);
+        const message = error && error.message ? error.message : "";
+        const detailText = /404/.test(message) ? t("artifactMissing").replace("{artifact}", label) : `${t("errorPrefix")}: ${esc(message)}`;
+        container.innerHTML = `<p class="error">${esc(detailText)}</p>`;
+      }
+
+      function renderEvidenceTable(items) {
+        const rows = items && items.length ? items.map((item) => {
+          const title = item.title || "-";
+          const url = item.url || "-";
+          const category = item.category || "-";
+          const relevance = item.relevance || "-";
+          const confidence = item.confidence != null ? Number(item.confidence).toFixed(2) : "-";
+          const rationale = item.rationale || "-";
+          return `
+            <tr>
+              <td>${esc(title)}</td>
+              <td><a href="${esc(url)}" target="_blank" rel="noopener">${esc(url)}</a></td>
+              <td>${esc(category)}</td>
+              <td>${esc(relevance)}</td>
+              <td>${esc(confidence)}</td>
+              <td>${esc(rationale)}</td>
+            </tr>
+          `;
+        }).join("") : `<tr><td colspan="6" class="muted">${esc(t("empty"))}</td></tr>`;
+
+        return `
+          <div style="overflow:auto; max-height:420px; border:1px solid #e2e8f0; border-radius:8px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>${t("title")}</th>
+                  <th>${t("url")}</th>
+                  <th>${t("category")}</th>
+                  <th>${t("relevance")}</th>
+                  <th>${t("confidence")}</th>
+                  <th>${t("rationale")}</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        `;
+      }
+
+      function renderManifest(payload) {
+        if (!payload || !Object.keys(payload).length) {
+          return `<p class="muted">${esc(t("empty"))}</p>`;
+        }
+        const pretty = JSON.stringify(payload, null, 2);
+        return `
+          <pre style="white-space:pre-wrap; word-break:break-word; background:#f8fafc; padding:12px; border-radius:8px; max-height:420px; overflow:auto;">${esc(pretty)}</pre>
+        `;
+      }
+
+      async function loadRunArtifactPanel(container, runId, artifactType) {
+        container.innerHTML = `<p class="muted">${t("loading")}</p>`;
+        try {
+          const response = await apiFetch(`/runs/${encodeURIComponent(runId)}/${artifactType}`);
+          if (artifactType === "report") {
+            const text = await response.text();
+            container.innerHTML = `
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
+                <strong>${artifactTitle(artifactType)}</strong>
+                <button type="button" class="run-artifact-download" data-run-id="${esc(runId)}" data-artifact="${esc(artifactType)}">${t("download")}</button>
+              </div>
+              <pre style="white-space:pre-wrap; background:#f8fafc; padding:12px; border-radius:8px; max-height:420px; overflow:auto;">${esc(text)}</pre>
+            `;
+          } else if (artifactType === "finding") {
+            const payload = await response.json();
+            const summary = payload.summary || "-";
+            const risk = payload.risk_level || "-";
+            container.innerHTML = `
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
+                <strong>${artifactTitle(artifactType)}</strong>
+                <button type="button" class="run-artifact-download" data-run-id="${esc(runId)}" data-artifact="${esc(artifactType)}">${t("download")}</button>
+              </div>
+              <p><strong>${t("status")}:</strong> ${esc(risk)}</p>
+              <p><strong>${t("summary")}:</strong> ${esc(summary)}</p>
+              <pre style="white-space:pre-wrap; background:#f8fafc; padding:12px; border-radius:8px; max-height:420px; overflow:auto;">${esc(JSON.stringify(payload, null, 2))}</pre>
+            `;
+          } else if (artifactType === "evidence") {
+            const payload = await response.json();
+            container.innerHTML = `
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
+                <strong>${artifactTitle(artifactType)}</strong>
+                <button type="button" class="run-artifact-download" data-run-id="${esc(runId)}" data-artifact="${esc(artifactType)}">${t("download")}</button>
+              </div>
+              ${renderEvidenceTable(payload)}
+            `;
+          } else if (artifactType === "manifest") {
+            const payload = await response.json();
+            container.innerHTML = `
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
+                <strong>${artifactTitle(artifactType)}</strong>
+                <button type="button" class="run-artifact-download" data-run-id="${esc(runId)}" data-artifact="${esc(artifactType)}">${t("download")}</button>
+              </div>
+              ${renderManifest(payload)}
+            `;
+          } else {
+            container.innerHTML = `<p class="muted">${esc(t("empty"))}</p>`;
+          }
+          for (const button of container.querySelectorAll(".run-artifact-download")) {
+            button.addEventListener("click", async (event) => {
+              const source = event.currentTarget;
+              const artifactRunId = source.getAttribute("data-run-id");
+              const artifactName = source.getAttribute("data-artifact");
+              try {
+                await downloadRunArtifact(artifactRunId, artifactName);
+                setAuthHelp("");
+              } catch (error) {
+                if (error.name === "AuthRequiredError") {
+                  handleAuthError();
+                  return;
+                }
+                renderError(container, error);
+              }
+            });
+          }
+        } catch (error) {
+          if (error.name === "AuthRequiredError") {
+            handleAuthError();
+            return;
+          }
+          renderErrorState(container, artifactType, error);
+        }
       }
 
       function buildTargetFilter() {
@@ -412,23 +554,21 @@
               <button type="button" class="run-artifact-btn" data-run-id="${esc(runId)}" data-artifact="report">${t("report")}</button>
               ·
               <button type="button" class="run-artifact-btn" data-run-id="${esc(runId)}" data-artifact="finding">${t("finding")}</button>
+              ·
+              <button type="button" class="run-artifact-btn" data-run-id="${esc(runId)}" data-artifact="evidence">${t("evidence")}</button>
+              ·
+              <button type="button" class="run-artifact-btn" data-run-id="${esc(runId)}" data-artifact="manifest">${t("manifest")}</button>
             </p>
+            <div class="run-artifact-panel" aria-live="polite"></div>
           `;
           for (const button of container.querySelectorAll(".run-artifact-btn")) {
             button.addEventListener("click", async (event) => {
               const source = event.currentTarget;
               const artifactRunId = source.getAttribute("data-run-id");
               const artifactType = source.getAttribute("data-artifact");
-              try {
-                await downloadRunArtifact(artifactRunId, artifactType);
-                setAuthHelp("");
-              } catch (error) {
-                if (error.name === "AuthRequiredError") {
-                  handleAuthError();
-                  return;
-                }
-                renderError(container, error);
-              }
+              const panel = container.querySelector(".run-artifact-panel");
+              if (!panel) return;
+              await loadRunArtifactPanel(panel, artifactRunId, artifactType);
             });
           }
         } catch (error) {
