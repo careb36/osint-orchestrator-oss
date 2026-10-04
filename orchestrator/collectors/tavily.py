@@ -289,6 +289,10 @@ class TavilyCollector(BaseCollector):
         parts = urlsplit(url)
         if parts.scheme.lower() not in _ALLOWED_SCHEMES or not parts.netloc:
             return None
+        try:
+            parts.port  # noqa: B018 — raises ValueError on a non-numeric or out-of-range port
+        except ValueError:
+            return None
         return url
 
     @staticmethod

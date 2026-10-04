@@ -190,6 +190,8 @@ def _tavily_default_timeout() -> int:
     return settings.tavily_timeout_seconds
 
 
+# Blocks whose timeout default comes from a global setting; the tuple of the
+# CollectorSet validator below is derived from these keys.
 _GLOBAL_TIMEOUT_DEFAULTS: dict[str, Callable[[], int]] = {
     "socialosint": _socialosint_default_timeout,
     "amass": _amass_default_timeout,
@@ -225,7 +227,7 @@ class CollectorSet(BaseModel):
         )
     )
 
-    @field_validator("socialosint", "amass", "tavily")
+    @field_validator(*_GLOBAL_TIMEOUT_DEFAULTS)
     @classmethod
     def _global_timeout_default(cls, cfg: CollectorConfig, info: ValidationInfo) -> CollectorConfig:
         # A partial block such as ``amass: {enabled: true}`` bypasses the

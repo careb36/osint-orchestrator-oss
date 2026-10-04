@@ -337,6 +337,20 @@ async def test_same_page_from_two_queries_yields_one_observable_and_one_note(
     assert result.notes[0].startswith("tavily | First |")
 
 
+@pytest.mark.parametrize(
+    "bad_url", ["https://news.example.com:notaport/a", "https://news.example.com:99999/a"]
+)
+async def test_malformed_port_in_a_result_does_not_abort_the_run(httpx_mock, bad_url: str) -> None:
+    httpx_mock.add_response(
+        method="POST",
+        url=TAVILY_SEARCH_URL,
+        json={"results": [_result(bad_url), _result("https://news.example.com/ok")]},
+    )
+    result = await _collector(max_calls_per_run=1).collect()
+    assert result.success is True
+    assert [o.value for o in result.observables] == ["https://news.example.com/ok"]
+
+
 def test_dedupe_key_keeps_distinct_pages_apart() -> None:
     key = TavilyCollector._dedupe_key
     assert key("https://a.example/x") != key("https://a.example/y")
