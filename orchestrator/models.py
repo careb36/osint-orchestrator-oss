@@ -8,6 +8,8 @@ These models define the data flowing through the pipeline:
 from __future__ import annotations
 
 import hashlib
+import json
+import logging
 import re
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -18,6 +20,8 @@ from pydantic import BaseModel, Field, ValidationInfo, field_validator
 from sqlalchemy import Index
 from sqlmodel import Column, DateTime, SQLModel
 from sqlmodel import Field as SQLField
+
+logger = logging.getLogger(__name__)
 
 # ─── Enums ───────────────────────────────────────────────────────────────────
 
@@ -436,6 +440,40 @@ class FindingRecord(SQLModel, table=True):
     model: str = ""
     duration_ms: int = 0
     raw_response: str = ""
+
+    @staticmethod
+    def _decode_string_list(value: str | None, *, run_id: int, field: str) -> list[str]:
+        def _log_invalid() -> None:
+            logger.warning(
+                "FindingRecord field could not be decoded as list[str]; using empty list",
+                extra={"run_id": run_id, "field": field},
+            )
+
+        if value is None:
+            return []
+        try:
+            decoded = json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            _log_invalid()
+            return []
+        if not isinstance(decoded, list) or not all(isinstance(item, str) for item in decoded):
+            _log_invalid()
+            return []
+        return decoded
+
+    def to_api_dict(self) -> dict[str, Any]:
+        payload = self.model_dump()
+        payload["new_since_last_run"] = self._decode_string_list(
+            self.new_since_last_run,
+            run_id=self.run_id,
+            field="new_since_last_run",
+        )
+        payload["suggested_pivots"] = self._decode_string_list(
+            self.suggested_pivots,
+            run_id=self.run_id,
+            field="suggested_pivots",
+        )
+        return payload
 
 
 # ─── Alert audit ──────────────────────────────────────────────────────────────

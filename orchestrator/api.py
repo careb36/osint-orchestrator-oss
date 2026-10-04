@@ -545,7 +545,7 @@ async def get_run_finding(run_id: int) -> dict[str, Any]:
         record = result.first()
     if record is None:
         raise HTTPException(status_code=404, detail=t("finding_not_found", run_id=run_id))
-    return record.model_dump()
+    return record.to_api_dict()
 
 
 app.include_router(router)

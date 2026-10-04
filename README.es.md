@@ -602,6 +602,9 @@ y `GET /console/i18n.json`. Todo lo demás exige una clave de API; véanse
 | `GET` | `/runs/{id}/report` | Reporte Markdown de una ejecución completada (`text/plain`) |
 | `GET` | `/runs/{id}/finding` | Finding sintetizado por el LLM de una ejecución completada |
 
+`GET /runs/{id}/finding` devuelve `new_since_last_run` y
+`suggested_pivots` como arreglos JSON de cadenas (no como cadenas con JSON).
+
 La documentación interactiva está en `/docs` (OpenAPI en `/openapi.json`).
 
 **Estados de una ejecución** — `pending` → `running` → uno de:
