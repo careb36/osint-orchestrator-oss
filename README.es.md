@@ -459,7 +459,9 @@ En el mismo `.env` conviven dos grupos de variables:
 | `SPIDERFOOT_MODULES` | `sfp_dns,sfp_whois,sfp_ssl` | Valor de respaldo cuando un objetivo no lista módulos. |
 | `SPIDERFOOT_URL` | `http://spiderfoot:5001` | URL del servicio SpiderFoot en la red interna. |
 | `SPIDERFOOT_TIMEOUT_SECONDS` | `600` | Tiempo máximo de una recolección de SpiderFoot. |
-| `LLM_PROVIDER` / `LLM_MODEL` / `LLM_BASE_URL` | `ollama` / `llama3.2` / `http://ollama:11434` | Backend de síntesis; `ollama` mantiene los datos on-prem. `none` desactiva la síntesis para todos los objetivos. |
+| `LLM_PROVIDER` / `LLM_MODEL` / `LLM_BASE_URL` | `ollama` / `llama3.2` / `http://ollama:11434` | Backend de síntesis; `ollama` mantiene los datos on-prem. `none` desactiva la síntesis para todos los objetivos. `nebius` usa el endpoint compatible con OpenAI de Token Factory. |
+| `LLM_MODEL_REASONING` | *(vacío)* | Override opcional del modelo para síntesis y llamadas de razonamiento intensivo de relaciones; si está vacío usa `LLM_MODEL`. |
+| `LLM_MODEL_FAST` | *(vacío)* | Override opcional del modelo para llamadas rápidas de clasificación/extracción; si está vacío usa `LLM_MODEL`. |
 | `OLLAMA_MODEL` | `llama3.2` | Modelo servido por Ollama para targets con `llm: local`. |
 | `LLM_TIMEOUT_SECONDS` | `120` | Tiempo máximo de una solicitud de síntesis. |
 | `LLM_MAX_TOKENS` | `2048` | Límite superior de la respuesta del modelo. |
@@ -468,6 +470,8 @@ En el mismo `.env` conviven dos grupos de variables:
 | `SYNTHESIS_OPENCTI_CONTEXT` | `false` | Si es `true`, enriquece la síntesis con contexto de OpenCTI. |
 | `OPENAI_API_KEY` | *(vacío)* | Requerida cuando `LLM_PROVIDER=openai`. |
 | `OPENAI_BASE_URL` | *(vacío)* | URL base opcional para endpoints compatibles con OpenAI. |
+| `NEBIUS_API_KEY` | *(vacío)* | Requerida cuando `LLM_PROVIDER=nebius`. |
+| `NEBIUS_BASE_URL` | `https://api.tokenfactory.nebius.com/v1` | URL base compatible con OpenAI de Nebius Token Factory. |
 | `ANTHROPIC_API_KEY` | *(vacío)* | Requerida cuando `LLM_PROVIDER=anthropic`. |
 | `OPENCTI_INGEST_RETRIES` / `OPENCTI_INGEST_BACKOFF_SECONDS` | `3` / `2.0` | Reintentos tras un error *transitorio* de OpenCTI, y la espera base (se duplica en cada reintento, ±25 % de jitter, tope 30 s). Un token inválido nunca se reintenta. |
 | `OPENCTI_OUTBOX_CRON` | `*/5 * * * *` | Cron UTC para reintentos del outbox de OpenCTI. |
@@ -896,6 +900,8 @@ valor de un observable ni un id de ejecución.
 | `alert_deliveries_pending` | — | Entregas de alertas a la espera de reintento |
 | `alert_deliveries_dead_letter` | — | Entregas de alertas aparcadas en la DLQ (requieren acción del operador) |
 | `synthesis_total` | `target_id`, `status` (`ok`, `skipped`, `failed`) | Intentos de síntesis LLM |
+| `llm_requests_total` | `model`, `status` | Solicitudes al API LLM por modelo y estado (`ok`, `http_429`, `http_5xx`, `timeout`, `error`) |
+| `llm_tokens_total` | `model`, `direction` (`input`, `output`) | Uso de tokens LLM separado por dirección (prompt vs completion) |
 | `alerts_total` | `channel`, `status` | Eventos del ciclo de alertas (`sent`, `failed`, `retried`, `dlq`) |
 | `scheduled_jobs` | — | Jobs cron registrados en el scheduler |
 | `build_info` | `version` | Metadatos de la build |
@@ -1131,3 +1137,21 @@ MIT — véase [LICENSE](LICENSE).
 ## Documentos del proyecto
 
 [CONTRIBUTING](CONTRIBUTING.es.md) · [SECURITY](SECURITY.es.md) · [CHANGELOG](CHANGELOG.md) · [Índice de documentación](docs/README.md)
+
+---
+
+## Ejecución en Nebius Token Factory + NVIDIA Nemotron
+
+1. Defina `LLM_PROVIDER=nebius`.
+2. Cargue su clave en `NEBIUS_API_KEY`.
+3. Mantenga `NEBIUS_BASE_URL=https://api.tokenfactory.nebius.com/v1` salvo que su equipo de cuenta indique otro endpoint.
+4. Elija modelos:
+   - `LLM_MODEL_REASONING` para síntesis y razonamiento intensivo de relaciones (por ejemplo Nemotron Super/Ultra).
+   - `LLM_MODEL_FAST` para clasificación/extracción rápida (por ejemplo Nemotron Nano/Lightning).
+   - Si alguna queda vacía, se usa `LLM_MODEL`.
+5. Ejecute la stack habitual (`docker compose up -d`) y valide el pipeline de siempre (`POST /targets/{id}/run`, luego `/runs/{id}/finding`).
+
+Notas:
+- Nebius usa el mismo camino proveedor compatible con OpenAI que `openai` (sin código de integración duplicado).
+- Las llamadas de síntesis usan la ruta de razonamiento.
+- Se solicita `response_format` con esquema JSON cuando el modelo lo soporta; si no, hay fallback automático al parseo tolerante.

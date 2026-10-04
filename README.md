@@ -442,7 +442,9 @@ Two groups of variables live in the same `.env`:
 | `SPIDERFOOT_MODULES` | `sfp_dns,sfp_whois,sfp_ssl` | Fallback when a target lists no modules. |
 | `SPIDERFOOT_URL` | `http://spiderfoot:5001` | SpiderFoot service URL on the internal network. |
 | `SPIDERFOOT_TIMEOUT_SECONDS` | `600` | Timeout for one SpiderFoot collection run. |
-| `LLM_PROVIDER` / `LLM_MODEL` / `LLM_BASE_URL` | `ollama` / `llama3.2` / `http://ollama:11434` | Synthesis backend; `ollama` keeps data on-prem. `none` switches synthesis off for every target. |
+| `LLM_PROVIDER` / `LLM_MODEL` / `LLM_BASE_URL` | `ollama` / `llama3.2` / `http://ollama:11434` | Synthesis backend; `ollama` keeps data on-prem. `none` switches synthesis off for every target. `nebius` uses the Token Factory OpenAI-compatible endpoint. |
+| `LLM_MODEL_REASONING` | *(empty)* | Optional model override for synthesis and relationship-heavy reasoning calls; falls back to `LLM_MODEL`. |
+| `LLM_MODEL_FAST` | *(empty)* | Optional model override for lightweight classification/extraction calls; falls back to `LLM_MODEL`. |
 | `OLLAMA_MODEL` | `llama3.2` | Model Ollama serves for targets with `llm: local` (separate from `LLM_MODEL`, which names the cloud model). |
 | `LLM_TIMEOUT_SECONDS` | `120` | End-to-end timeout for a synthesis request. |
 | `LLM_MAX_TOKENS` | `2048` | Upper bound on the model reply. |
@@ -451,6 +453,8 @@ Two groups of variables live in the same `.env`:
 | `SYNTHESIS_OPENCTI_CONTEXT` | `false` | If `true`, enrich synthesis with OpenCTI context. |
 | `OPENAI_API_KEY` | *(empty)* | Required when `LLM_PROVIDER=openai`. |
 | `OPENAI_BASE_URL` | *(empty)* | Optional base URL for OpenAI-compatible endpoints. |
+| `NEBIUS_API_KEY` | *(empty)* | Required when `LLM_PROVIDER=nebius`. |
+| `NEBIUS_BASE_URL` | `https://api.tokenfactory.nebius.com/v1` | Nebius Token Factory OpenAI-compatible base URL. |
 | `ANTHROPIC_API_KEY` | *(empty)* | Required when `LLM_PROVIDER=anthropic`. |
 | `OPENCTI_INGEST_RETRIES` / `OPENCTI_INGEST_BACKOFF_SECONDS` | `3` / `2.0` | Retries after a *transient* OpenCTI error, and the base wait (doubled each retry, ±25 % jitter, 30 s cap). An invalid token is never retried. |
 | `OPENCTI_OUTBOX_CRON` | `*/5 * * * *` | UTC cron for OpenCTI outbox drain retries. |
@@ -878,6 +882,8 @@ or a run id.
 | `alert_deliveries_pending` | — | Alert deliveries waiting for a retry |
 | `alert_deliveries_dead_letter` | — | Alert deliveries parked in the dead-letter queue (need operator action) |
 | `synthesis_total` | `target_id`, `status` (`ok`, `skipped`, `failed`) | LLM synthesis attempts |
+| `llm_requests_total` | `model`, `status` | LLM API requests by model and status (`ok`, `http_429`, `http_5xx`, `timeout`, `error`) |
+| `llm_tokens_total` | `model`, `direction` (`input`, `output`) | LLM token usage split by prompt vs completion direction |
 | `alerts_total` | `channel`, `status` | Alert lifecycle events (`sent`, `failed`, `retried`, `dlq`) |
 | `scheduled_jobs` | — | Cron jobs registered in the scheduler |
 | `build_info` | `version` | Build metadata |
@@ -1111,3 +1117,21 @@ MIT — see [LICENSE](LICENSE).
 ## Project documents
 
 [CONTRIBUTING](CONTRIBUTING.md) · [SECURITY](SECURITY.md) · [CHANGELOG](CHANGELOG.md) · [Documentation index](docs/README.md)
+
+---
+
+## Running on Nebius Token Factory + NVIDIA Nemotron
+
+1. Set `LLM_PROVIDER=nebius`.
+2. Add your API key in `NEBIUS_API_KEY`.
+3. Keep `NEBIUS_BASE_URL=https://api.tokenfactory.nebius.com/v1` unless your account team provides a different endpoint.
+4. Choose models:
+   - `LLM_MODEL_REASONING` for synthesis and relationship-heavy reasoning (for example Nemotron Super/Ultra).
+   - `LLM_MODEL_FAST` for lightweight classification/extraction (for example Nemotron Nano/Lightning).
+   - If either is empty, it falls back to `LLM_MODEL`.
+5. Run with your normal stack (`docker compose up -d`) and verify the pipeline as usual (`POST /targets/{id}/run`, then inspect `/runs/{id}/finding`).
+
+Notes:
+- Nebius uses the same OpenAI-compatible provider path as `openai` (no duplicated integration code).
+- Synthesis requests use the reasoning route.
+- JSON-schema response format is requested when supported by the model, with automatic fallback to tolerant JSON parsing.

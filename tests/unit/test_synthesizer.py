@@ -125,7 +125,17 @@ class FakeLLMClient:
         self.calls: list[tuple[str, str]] = []
         self._response = response or json.dumps(_CANONICAL_FINDING)
 
-    async def complete(self, system: str, user: str, *, timeout: float) -> str:
+    async def complete(
+        self,
+        system: str,
+        user: str,
+        *,
+        timeout: float,
+        model_route: str = "reasoning",
+        response_schema: dict | None = None,
+    ) -> str:
+        _ = model_route
+        _ = response_schema
         self.calls.append((system, user))
         return self._response
 
@@ -133,7 +143,17 @@ class FakeLLMClient:
 class FailingLLMClient:
     """Always raises asyncio.TimeoutError to simulate a timeout."""
 
-    async def complete(self, system: str, user: str, *, timeout: float) -> str:
+    async def complete(
+        self,
+        system: str,
+        user: str,
+        *,
+        timeout: float,
+        model_route: str = "reasoning",
+        response_schema: dict | None = None,
+    ) -> str:
+        _ = model_route
+        _ = response_schema
 
         raise TimeoutError("LLM timed out")
 
@@ -145,7 +165,17 @@ class MalformedLLMClient:
         self.calls = 0
         self._always_bad = always_bad
 
-    async def complete(self, system: str, user: str, *, timeout: float) -> str:
+    async def complete(
+        self,
+        system: str,
+        user: str,
+        *,
+        timeout: float,
+        model_route: str = "reasoning",
+        response_schema: dict | None = None,
+    ) -> str:
+        _ = model_route
+        _ = response_schema
         self.calls += 1
         if self.calls == 1 or self._always_bad:
             return "This is not JSON at all."
@@ -284,7 +314,17 @@ async def test_retry_success_raw_response_is_second_call(
     class TwoCallClient:
         calls = 0
 
-        async def complete(self, system: str, user: str, *, timeout: float) -> str:
+        async def complete(
+            self,
+            system: str,
+            user: str,
+            *,
+            timeout: float,
+            model_route: str = "reasoning",
+            response_schema: dict | None = None,
+        ) -> str:
+            _ = model_route
+            _ = response_schema
             self.calls += 1
             return first_bad if self.calls == 1 else second_good
 
@@ -386,7 +426,17 @@ async def test_prompt_language_default_es_and_en_override(
     captured_prompts: list[tuple[str, str]] = []
 
     class CapturingClient:
-        async def complete(self, system: str, user: str, *, timeout: float) -> str:
+        async def complete(
+            self,
+            system: str,
+            user: str,
+            *,
+            timeout: float,
+            model_route: str = "reasoning",
+            response_schema: dict | None = None,
+        ) -> str:
+            _ = model_route
+            _ = response_schema
             captured_prompts.append((system, user))
             return json.dumps(_CANONICAL_FINDING)
 
@@ -404,6 +454,36 @@ async def test_prompt_language_default_es_and_en_override(
 
 
 @pytest.mark.asyncio
+async def test_synthesis_calls_reasoning_model_route_when_supported(
+    mem_db,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_routes: list[str] = []
+
+    class RouteCapturingClient:
+        async def complete(
+            self,
+            system: str,
+            user: str,
+            *,
+            timeout: float,
+            model_route: str = "reasoning",
+            response_schema: dict | None = None,
+        ) -> str:
+            captured_routes.append(model_route)
+            assert response_schema is not None
+            return json.dumps(_CANONICAL_FINDING)
+
+    import orchestrator.synthesizer.providers as prov_module
+
+    monkeypatch.setattr(prov_module, "get_client", lambda t: RouteCapturingClient())
+
+    await synthesize(_target(), 1, _make_report_data())
+
+    assert captured_routes == ["reasoning"]
+
+
+@pytest.mark.asyncio
 async def test_authorization_not_in_prompt(
     mem_db,
     monkeypatch: pytest.MonkeyPatch,
@@ -414,7 +494,17 @@ async def test_authorization_not_in_prompt(
     captured_prompts: list[str] = []
 
     class CapturingClient:
-        async def complete(self, system: str, user: str, *, timeout: float) -> str:
+        async def complete(
+            self,
+            system: str,
+            user: str,
+            *,
+            timeout: float,
+            model_route: str = "reasoning",
+            response_schema: dict | None = None,
+        ) -> str:
+            _ = model_route
+            _ = response_schema
             captured_prompts.append(user)
             return json.dumps(_CANONICAL_FINDING)
 
@@ -484,7 +574,17 @@ async def test_truncation_keeps_new_and_respects_max(
     captured: list[str] = []
 
     class CapturingClient:
-        async def complete(self, system: str, user: str, *, timeout: float) -> str:
+        async def complete(
+            self,
+            system: str,
+            user: str,
+            *,
+            timeout: float,
+            model_route: str = "reasoning",
+            response_schema: dict | None = None,
+        ) -> str:
+            _ = model_route
+            _ = response_schema
             captured.append(user)
             return json.dumps(_CANONICAL_FINDING)
 

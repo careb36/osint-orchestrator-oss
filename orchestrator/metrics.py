@@ -135,6 +135,16 @@ synthesis_total = Counter(
     "LLM synthesis attempts by status (ok | skipped | failed)",
     ["target_id", "status"],
 )
+llm_requests_total = Counter(
+    f"{PREFIX}_llm_requests_total",
+    "LLM API requests by model and status",
+    ["model", "status"],
+)
+llm_tokens_total = Counter(
+    f"{PREFIX}_llm_tokens_total",
+    "LLM token usage by model and direction (input | output)",
+    ["model", "direction"],
+)
 alerts_total = Counter(
     f"{PREFIX}_alerts_total",
     "Alert lifecycle events by channel and status (sent | failed | retried | dlq)",

@@ -62,11 +62,16 @@ class Settings(BaseSettings):
     targets_file: str = "targets.yaml"
 
     # LLM
-    # ollama | anthropic | openai | none. "none" switches synthesis off for
+    # ollama | anthropic | openai | nebius | none. "none" switches synthesis off for
     # every target, including those with `llm: local` — an explicit off is
     # the operator's decision, not something a per-target field re-enables.
     llm_provider: str = "ollama"
-    llm_model: str = "llama3.2"  # model for the cloud providers (anthropic | openai)
+    llm_model: str = "llama3.2"  # model for the cloud providers (anthropic | openai | nebius)
+    # Optional model split by workload type. Empty means "fall back to LLM_MODEL".
+    # - reasoning: synthesis and relationship-heavy reasoning tasks
+    # - fast: lightweight classification/extraction tasks
+    llm_model_reasoning: str = ""
+    llm_model_fast: str = ""
     # Model for Ollama. Separate from llm_model on purpose: a target with
     # `llm: local` always uses Ollama, and under a cloud global config it was
     # sending the cloud model name (e.g. claude-sonnet-4-5) to Ollama → 404.
@@ -76,6 +81,9 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     # base_url for the openai-compat provider (empty = default OpenAI API)
     openai_base_url: str = ""
+    nebius_api_key: str = ""
+    # Nebius Token Factory OpenAI-compatible API base URL.
+    nebius_base_url: str = "https://api.tokenfactory.nebius.com/v1"
 
     # Synthesizer
     llm_timeout_seconds: float = 120.0
