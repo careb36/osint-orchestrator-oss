@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import ipaddress
 import logging
 import re
 import uuid
@@ -53,9 +54,16 @@ _SF_EVENT_TO_STIX: dict[str, str] = {
     "URL_STATIC": "url",
     "URL_DYNAMIC": "url",
     "SSL_CERTIFICATE_ISSUED": "x509-certificate",
-    "NETBLOCK_OWNER": "autonomous-system",
+    # NETBLOCK*_OWNER carry a CIDR block (sfp_ripe and others), which STIX
+    # ipv4-addr / ipv6-addr values allow; BGP_AS_* carry the AS number.
+    "NETBLOCK_OWNER": "ipv4-addr",
+    "NETBLOCKV6_OWNER": "ipv6-addr",
     "BGP_AS_OWNER": "autonomous-system",
+    "BGP_AS_MEMBER": "autonomous-system",
 }
+
+# STIX 2.1 autonomous-system.number is a 32-bit unsigned integer.
+_MAX_ASN = 2**32 - 1
 
 # SpiderFoot event type names: upper-case tokens such as IP_ADDRESS.
 _SF_EVENT_TYPE_RE = re.compile(r"[A-Z][A-Z0-9_]*")
@@ -175,6 +183,42 @@ class SpiderFootCollector(BaseCollector):
         return "UNKNOWN"
 
     @staticmethod
+    def _read_event_data(stix_type: str, raw: object) -> str | None:
+        """The observable value of an event, or None when it is unusable.
+
+        One policy for both row layouts: strings are HTML-unescaped (SpiderFoot
+        escapes the data column); AS numbers must be 1..2**32-1, given as an
+        int or as "13335"/"AS13335"; IP values must parse as an address or a
+        CIDR block of the right family. Anything else (None, bool, float, a
+        container, "0", "n/a") is rejected rather than becoming a bogus
+        observable such as AS0.
+        """
+        if isinstance(raw, bool):
+            return None
+        if stix_type == "autonomous-system":
+            if isinstance(raw, int):
+                number = raw
+            elif isinstance(raw, str):
+                digits = html.unescape(raw).strip().upper().removeprefix("AS")
+                if not digits.isdigit():
+                    return None
+                number = int(digits)
+            else:
+                return None
+            return str(number) if 0 < number <= _MAX_ASN else None
+        if not isinstance(raw, str):
+            return None
+        value = html.unescape(raw).strip()
+        if stix_type in ("ipv4-addr", "ipv6-addr"):
+            try:
+                network = ipaddress.ip_network(value, strict=False)
+            except ValueError:
+                return None
+            if network.version != (4 if stix_type == "ipv4-addr" else 6):
+                return None
+        return value or None
+
+    @staticmethod
     def _row_event_type(row: list) -> str | None:
         """Event type of a /scaneventresults row, or None for an unknown layout.
 
@@ -222,74 +266,62 @@ class SpiderFootCollector(BaseCollector):
         observables.append(Observable(type="domain-name", value=fqdn))
         seen_values.add(fqdn)
 
-        unrecognised = 0
+        unreadable = 0
         for event in events:
             if isinstance(event, list) and len(event) >= 2:
-                row_type = self._row_event_type(event)
-                if row_type is None:
-                    unrecognised += 1
-                    continue
-                event_type = row_type
-                data = html.unescape(str(event[1]))
+                event_type = self._row_event_type(event)
+                raw_data = event[1]
             elif isinstance(event, dict):
-                # A non-string type would be an unhashable map key and fail
-                # the whole parse. Data must be a string, or a positive integer
-                # for an AS number; anything else (missing, None, bool, float,
-                # 0, a container) is counted so a layout change does not pass
-                # for an empty scan, and never becomes a bogus "0" observable.
+                # A non-string type would be an unhashable map key.
                 event_type = event.get("type")
+                if not isinstance(event_type, str) or not event_type:
+                    event_type = None
                 raw_data = event.get("data")
-                is_asn_number = (
-                    isinstance(event_type, str)
-                    and _SF_EVENT_TO_STIX.get(event_type) == "autonomous-system"
-                    and type(raw_data) is int
-                    and raw_data > 0
-                )
-                if (
-                    not isinstance(event_type, str)
-                    or not event_type
-                    or not (isinstance(raw_data, str) or is_asn_number)
-                ):
-                    unrecognised += 1
-                    continue
-                # Same as the row layout: a string, HTML-unescaped.
-                data = html.unescape(str(raw_data))
             else:
-                unrecognised += 1
-                continue
-
-            if not data or data in seen_values:
+                event_type, raw_data = None, None
+            if event_type is None:
+                unreadable += 1
                 continue
 
             stix_type = _SF_EVENT_TO_STIX.get(event_type)
-            if stix_type:
-                seen_values.add(data)
-                obs = Observable(type=stix_type, value=data, extra={"sf_event": event_type})
-                observables.append(obs)
+            if stix_type is None:
+                continue  # an event type we do not map: normal filtering
 
-                if event_type in _RESOLVES_FROM_DOMAIN:
-                    relationships.append(
-                        Relationship(
-                            source_value=fqdn,
-                            source_type="domain-name",
-                            target_value=data,
-                            target_type=stix_type,
-                            relationship_type="resolves-to",
-                        )
+            data = self._read_event_data(stix_type, raw_data)
+            if data is None:
+                unreadable += 1
+                continue
+            if data in seen_values:
+                continue
+
+            seen_values.add(data)
+            observables.append(
+                Observable(type=stix_type, value=data, extra={"sf_event": event_type})
+            )
+            if event_type in _RESOLVES_FROM_DOMAIN:
+                relationships.append(
+                    Relationship(
+                        source_value=fqdn,
+                        source_type="domain-name",
+                        target_value=data,
+                        target_type=stix_type,
+                        relationship_type="resolves-to",
                     )
+                )
 
-        if unrecognised:
+        if unreadable:
             # A layout change would otherwise look like a clean scan that found
             # nothing but the root domain.
             logger.warning(
-                "SpiderFoot: %d of %d result rows had an unrecognised layout for %s",
-                unrecognised,
+                "SpiderFoot: %d of %d result rows were unreadable "
+                "(unknown layout or unusable value) for %s",
+                unreadable,
                 len(events),
                 fqdn,
                 extra={
                     "target_id": self.target.id,
                     "collector": self.name.value,
-                    "skipped_rows": unrecognised,
+                    "skipped_rows": unreadable,
                 },
             )
 
