@@ -429,13 +429,18 @@ habilita `collectors.tavily.enabled: true`.
 - beneficiarios finales y relaciones jurídicas
 - URLs origen y fragmentos resumidos de resultados públicos
 
-Cada consulta busca el objetivo como término entrecomillado en fuentes de
-terceros (prensa, registros, expedientes judiciales); nunca acota la búsqueda al
-dominio del propio objetivo, porque la prensa adversa se publica en otros
-sitios. Usá `include_domains` / `exclude_domains` para restringir las fuentes.
-Una página devuelta por varias consultas produce un único observable `url` y
-una única nota. Una consulta que falla tras sus reintentos queda registrada en
-una nota; la ejecución falla sólo cuando fallaron todas las consultas.
+Cada consulta busca el nombre de dominio del objetivo como término exacto
+entrecomillado en fuentes de terceros (prensa, registros, expedientes
+judiciales); nunca acota la búsqueda al dominio del propio objetivo, porque la
+prensa adversa se publica en otros sitios. Usá `include_domains` /
+`exclude_domains` para restringir las fuentes. La coincidencia exacta es
+deliberada para diligencia debida (sin falsos positivos de una palabra
+genérica), pero implica que las menciones sólo por nombre comercial no se
+alcanzan: un objetivo es un dominio, no una razón social. Una página devuelta
+por varias consultas, en cualquier variante de esquema, mayúsculas o barra
+final, produce un único observable `url` y una única nota. Una consulta que
+falla tras sus reintentos queda registrada en una nota; la ejecución falla sólo
+cuando fallaron todas las consultas.
 
 ### Uso
 
@@ -543,7 +548,7 @@ En el mismo `.env` conviven dos grupos de variables:
 | `TAVILY_SEARCH_DEPTH` | `basic` | Profundidad de la búsqueda Tavily: `basic` o `advanced`. |
 | `TAVILY_MAX_RESULTS` | `5` | Techo global de resultados por consulta, 1–20; el `max_results` por objetivo se recorta a este valor. |
 | `TAVILY_TIMEOUT_SECONDS` | `120` | Presupuesto de tiempo de pared por defecto de toda la ejecución de Tavily por objetivo, reintentos incluidos (`timeout_seconds` en `targets.yaml` lo sobreescribe). |
-| `TAVILY_MAX_CALLS_PER_RUN` | `3` | Techo global de peticiones de búsqueda por ejecución, 0–20; el `max_calls_per_run` por objetivo se recorta a este valor y `0` apaga el recolector para todos los objetivos. |
+| `TAVILY_MAX_CALLS_PER_RUN` | `3` | Techo global de peticiones de búsqueda por ejecución, 0–20; el `max_calls_per_run` por objetivo se recorta a este valor y `0` apaga el recolector para todos los objetivos (se omite, no falla). |
 | `TAVILY_INCLUDE_DOMAINS` | *(vacío)* | Lista opcional de dominios permitidos en los resultados, separados por coma (`example.com,news.example.com`). |
 | `TAVILY_EXCLUDE_DOMAINS` | *(vacío)* | Lista opcional de dominios a excluir de los resultados, separados por coma. |
 | `ALERT_TIMEOUT_SECONDS` | `10` | Tiempo máximo por intento de envío de alerta (webhook/email). |

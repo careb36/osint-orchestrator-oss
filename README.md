@@ -412,13 +412,16 @@ entity. It is intentionally opt-in, and it stays off unless a target enables
 - beneficial ownership and legal-entity relationships
 - source URLs and summarised excerpts from public web results
 
-Each query searches the target as a quoted term across third-party sources
-(news, registries, court records); it never scopes the search to the target's
-own domain, because adverse media is published elsewhere. Use
-`include_domains` / `exclude_domains` to restrict the sources. A page returned
-by several queries yields one `url` observable and one note. A query that
-fails after its retries is recorded in a note; the run fails only when every
-query failed.
+Each query searches the target's domain name as a quoted exact term across
+third-party sources (news, registries, court records); it never scopes the
+search to the target's own domain, because adverse media is published
+elsewhere. Use `include_domains` / `exclude_domains` to restrict the sources.
+The exact match is deliberate for due diligence (no false positives from a
+generic word), but it also means mentions of the entity's trade name alone are
+not reached: a target is a domain, not a company name. A page returned by
+several queries, in any scheme/case/trailing-slash variant, yields one `url`
+observable and one note. A query that fails after its retries is recorded in
+a note; the run fails only when every query failed.
 
 ### Usage
 
@@ -525,7 +528,7 @@ Two groups of variables live in the same `.env`:
 | `TAVILY_SEARCH_DEPTH` | `basic` | Tavily query depth: `basic` or `advanced`. |
 | `TAVILY_MAX_RESULTS` | `5` | Global ceiling for results per query, 1–20; the per-target `max_results` is clamped to it. |
 | `TAVILY_TIMEOUT_SECONDS` | `120` | Default wall-clock budget of a whole Tavily run per target, retries included (`timeout_seconds` in `targets.yaml` overrides it). |
-| `TAVILY_MAX_CALLS_PER_RUN` | `3` | Global ceiling for search requests per run, 0–20; the per-target `max_calls_per_run` is clamped to it and `0` switches the collector off for every target. |
+| `TAVILY_MAX_CALLS_PER_RUN` | `3` | Global ceiling for search requests per run, 0–20; the per-target `max_calls_per_run` is clamped to it and `0` switches the collector off for every target (skipped, not failed). |
 | `TAVILY_INCLUDE_DOMAINS` | *(empty)* | Optional comma-separated allowlist of result domains (`example.com,news.example.com`). |
 | `TAVILY_EXCLUDE_DOMAINS` | *(empty)* | Optional comma-separated denylist of result domains. |
 | `ALERT_TIMEOUT_SECONDS` | `10` | Timeout for webhook/email alert send attempts. |

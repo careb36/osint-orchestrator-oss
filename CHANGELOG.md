@@ -11,6 +11,10 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- Tavily web-research collector (opt-in, `collectors.tavily`): three
+  due-diligence queries per run that search the target's domain as a quoted
+  term, `url` observables and one STIX Note per distinct page, wall-clock
+  budget with bounded retries, `TAVILY_*` settings, bilingual README sections.
 - Public-release guard: `scripts/check_public_release.sh` fails on forbidden
   references (specific public bodies, official portals) and on gitleaks
   findings; CI runs it on every push and PR. New *Public release guard* and
@@ -29,6 +33,14 @@ from [SECURITY.md](SECURITY.md).
 
 ### Changed
 
+- `TAVILY_MAX_RESULTS` (1–20) and `TAVILY_MAX_CALLS_PER_RUN` (0–20) are
+  validated at startup; an out-of-range value that was previously clamped
+  now stops the service with a configuration error. `0` calls skips the
+  collector for every target.
+- A partial `socialosint:`, `amass:` or `tavily:` block in `targets.yaml`
+  (for example `amass: {enabled: true}`) now inherits the collector's global
+  timeout (`SOCIALOSINT_TIMEOUT_SECONDS`, `AMASS_TIMEOUT_SECONDS`,
+  `TAVILY_TIMEOUT_SECONDS`) instead of the generic 600 s.
 - Executive presentation (EN/ES): the regulatory-context section now describes
   the supervisory and financial-intelligence bodies generically instead of
   naming them, and no longer links to government portals.
