@@ -283,6 +283,69 @@ SQLite, operational state only. Alembic migrations in
 changing a model: `alembic upgrade head`, then
 `alembic revision --autogenerate -m "…"`; CI runs `alembic check`.
 
+## UI operations runbook
+
+### Console smoke checks
+
+The browser console is the UI's production entry point. Run the CI-safe smoke
+suite before every release:
+
+```bash
+pytest tests/unit/test_operator_console.py -v
+```
+
+The smoke path covers the core operator journey: load `/console`, verify the key
+prompt and CSP hardening, load `/console/i18n.json`, and confirm that protected
+API calls are still rejected without a key while the shell remains reachable.
+
+### Frontend telemetry and error tracking
+
+The console logs browser-side events to the developer console with structured
+context (`event`, `path`, `language`, `message`, `stack`). This is intentionally
+low-volume and bounded: the last 25 events are retained in memory for the active
+page and every error is stamped with enough detail to distinguish auth issues,
+API failures and unhandled client exceptions without exposing raw API keys.
+
+### Incident triage and rollback
+
+| Signal | Likely cause | Immediate action |
+| --- | --- | --- |
+| `/console` loads but all data calls return `401` | API key missing or stale | Verify the stored key, clear/re-enter it, check the service's `ORCHESTRATOR_API_KEY` value |
+| `/console` fails in-browser with a JS error | Frontend regression or malformed API payload | Open the browser console, inspect the last `ui-telemetry` event, and compare it with the failing route and payload |
+| `/console/i18n.json` or static shell fails to load | Deployment problem or CSP regression | Confirm the app is healthy, the page loads with the expected nonce-based CSP, and the asset is served without redirect |
+| Data loads but a target or run view is empty | API/auth issue or empty database | Check `/targets`, `/runs` and `/analytics/risk-trends` with the same key; if empty, verify scheduler and database state |
+
+Rollback steps:
+
+1. Stop the change by reverting the release commit or image tag.
+2. Restore the previous deployment and confirm that the prior API key and
+   ingress/auth settings still match the running service.
+3. Re-run the console smoke checks and verify the shell and data endpoints work
+   before reopening traffic.
+4. Capture the browser console telemetry and the failing API response in the
+   incident log so the underlying cause is fixed before a new rollout.
+
+## Release checklist and support SOP
+
+Before a UI release, confirm all of the following:
+
+- [ ] The console smoke checks pass in CI (`pytest tests/unit/test_operator_console.py -v`)
+- [ ] CSP and X-Content-Type-Options hardening remain intact for the shell
+- [ ] Error telemetry includes `event`, `path`, `message`, and a stack when available
+- [ ] A stale or missing API key is clearly surfaced to the operator and the key remains in session storage only
+- [ ] The release notes mention any API contract or auth changes that affect console users
+- [ ] A rollback plan and owner are recorded for the release window
+
+Support SOP:
+
+- Check the operator console logs first for `ui-telemetry` and any `console_error`
+  events; these isolate browser regressions from backend run failures.
+- If the backend API is healthy but the UI is not, verify the browser is not
+  holding a stale key and that the CSP still matches the new shell.
+- If the issue is systemic, revert to the last known-good image, restore the
+  previous config, re-run the smoke checks, and document which telemetry event
+  triggered the incident.
+
 ## Troubleshooting
 
 | Symptom | Cause and fix |

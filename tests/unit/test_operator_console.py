@@ -172,3 +172,20 @@ def test_console_keyboard_enter_shortcuts_are_wired() -> None:
     assert 'document.getElementById("save-key-btn").click();' in src
     assert 'document.getElementById("run-id-input").addEventListener("keydown"' in src
     assert 'document.getElementById("load-run-btn").click();' in src
+
+
+def test_console_template_records_actionable_frontend_telemetry() -> None:
+    """Browser-side telemetry must expose event, path and message context for debugging."""
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[2] / "orchestrator/templates/console.html").read_text(
+        encoding="utf-8"
+    )
+    assert "recordUiTelemetry" in src
+    assert 'window.addEventListener("error"' in src
+    assert 'window.addEventListener("unhandledrejection"' in src
+    assert "ui-telemetry" in src
+    assert "path: window.location.pathname" in src
+    assert "truncateTelemetryText" in src
+    assert "rawReason instanceof Error" in src
+    assert "rawReason.message || rawReason.name || reasonText" in src

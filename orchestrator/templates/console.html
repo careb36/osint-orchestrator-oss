@@ -142,6 +142,70 @@
         currentView: "summary",
         statusPollTimer: null,
       };
+      const UI_TELEMETRY_MAX_ENTRIES = 25;
+      const UI_TELEMETRY_MAX_DETAIL_CHARS = 500;
+      const uiTelemetry = [];
+
+      function truncateTelemetryText(value) {
+        const text = String(value ?? "");
+        return text.length > UI_TELEMETRY_MAX_DETAIL_CHARS
+          ? text.slice(0, UI_TELEMETRY_MAX_DETAIL_CHARS) + "…"
+          : text;
+      }
+
+      function recordUiTelemetry(event, detail) {
+        const sanitizedDetail = { ...detail };
+        // API routes and browser errors may carry URL query strings or long stack
+        // traces; keep the in-memory ring buffer and devtools output to a compact,
+        // non-sensitive subset while preserving the page and error context.
+        if (sanitizedDetail.path) sanitizedDetail.path = sanitizedDetail.path.split("?")[0];
+        for (const key of ["message", "stack", "filename"]) {
+          if (typeof sanitizedDetail[key] === "string") {
+            sanitizedDetail[key] = truncateTelemetryText(sanitizedDetail[key]);
+          }
+        }
+        const payload = {
+          timestamp: new Date().toISOString(),
+          event,
+          detail: sanitizedDetail,
+          language: state.language,
+          path: window.location.pathname,
+        };
+        uiTelemetry.push(payload);
+        if (uiTelemetry.length > UI_TELEMETRY_MAX_ENTRIES) uiTelemetry.shift();
+        console.info("ui-telemetry", payload);
+      }
+
+      function captureBrowserError(event) {
+        recordUiTelemetry("browser_error", {
+          message: event.message || "",
+          filename: event.filename || "",
+          lineno: event.lineno || 0,
+          colno: event.colno || 0,
+          stack: event.error && event.error.stack ? event.error.stack : "",
+        });
+      }
+
+      window.addEventListener("error", captureBrowserError);
+      window.addEventListener("unhandledrejection", (event) => {
+        const rawReason = event.reason;
+        let reasonText = "unknown rejection reason";
+        if (rawReason instanceof Error) {
+          reasonText = rawReason.message || rawReason.name || reasonText;
+        } else if (typeof rawReason === "string") {
+          reasonText = rawReason || reasonText;
+        } else if (rawReason != null) {
+          try {
+            reasonText = JSON.stringify(rawReason);
+          } catch {
+            reasonText = String(rawReason);
+          }
+        }
+        recordUiTelemetry("unhandled_rejection", {
+          message: reasonText,
+          stack: rawReason && rawReason.stack ? rawReason.stack : "",
+        });
+      });
 
       const views = {
         summary: document.getElementById("summary-view"),
@@ -206,15 +270,19 @@
       async function apiFetch(path, init = {}) {
         const headers = { ...(init.headers || {}) };
         if (state.apiKey) headers["X-API-Key"] = state.apiKey;
+        recordUiTelemetry("api_request", { path });
         const response = await fetch(path, { ...init, headers });
         if (response.status === 401) {
           const err = new Error("auth_401");
           err.name = "AuthRequiredError";
+          recordUiTelemetry("api_401", { path });
           throw err;
         }
         if (!response.ok) {
           const body = await response.json().catch(() => ({}));
-          throw new Error(`${response.status} ${body.detail || response.statusText}`);
+          const message = `${response.status} ${body.detail || response.statusText}`;
+          recordUiTelemetry("api_error", { path, status: response.status, message });
+          throw new Error(message);
         }
         return response;
       }
@@ -226,9 +294,11 @@
 
       async function loadI18n() {
         I18N = await apiGet("/console/i18n.json");
+        recordUiTelemetry("i18n_loaded", { languages: Object.keys(I18N) });
       }
 
       function renderError(element, error) {
+        recordUiTelemetry("console_error", { message: String(error?.message || error) });
         element.innerHTML = `<p class="error">${t("errorPrefix")}: ${esc(error.message)}</p>`;
       }
 
