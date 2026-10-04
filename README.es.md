@@ -975,6 +975,7 @@ valor de un observable ni un id de ejecución.
 | `synthesis_total` | `target_id`, `status` (`ok`, `skipped`, `failed`) | Intentos de síntesis LLM |
 | `llm_requests_total` | `provider`, `model`, `status` | Solicitudes al API LLM por proveedor (`anthropic`, `openai`, `nebius`, `ollama`), modelo y estado (`ok`, `http_429`, `http_5xx`, `timeout`, `error`, `schema_downgrade`). Una muestra por llamada al SDK: el único reintento interno del SDK de Anthropic no se muestrea. |
 | `llm_tokens_total` | `provider`, `model`, `direction` (`input`, `output`) | Uso de tokens LLM por proveedor y modelo, separado por dirección (prompt vs completion) |
+| `llm_model_available` | `provider`, `model`, `route` (`reasoning`, `fast`) | Gauge del preflight de arranque: `1` cuando el modelo configurado para esa ruta aparece en `GET /models` del proveedor, `0` cuando no lo sirve |
 | `alerts_total` | `channel`, `status` | Eventos del ciclo de alertas (`sent`, `failed`, `retried`, `dlq`) |
 | `scheduled_jobs` | — | Jobs cron registrados en el scheduler |
 | `build_info` | `version` | Metadatos de la build |
@@ -1158,6 +1159,7 @@ El pipeline de CI ejecuta `alembic upgrade head` sobre una base de datos SQLite 
 | La corrida es `partial` con `opencti-sink:` en `error` | El bundle nunca llegó a OpenCTI — revise `osint_orchestrator_opencti_ingest_total{outcome="failure"}`, `OPENCTI_URL` y `OPENCTI_ADMIN_TOKEN`; los observables se reportan como nuevos en la corrida siguiente |
 | Los informes salen en el idioma equivocado | `ORCHESTRATOR_LANGUAGE`, o el `language` del objetivo; un valor no reconocido se registra y se ignora |
 | Una corrida termina sin finding / crece `synthesis_total{status="failed"}` | El endpoint LLM no es alcanzable — compose no incluye un servicio Ollama; revise `LLM_BASE_URL` o cambie `LLM_PROVIDER` (véase [Inicio rápido](#2-arrancar-el-stack)) |
+| La síntesis siempre sale como no disponible | Revise en el arranque `LLM model not served by provider` y si `osint_orchestrator_llm_model_available{...} == 0`; cambie a un id listado por `GET /models` del proveedor |
 | El login en el navegador entra en bucle o da `502` en `:8002` con el overlay de auth | Keycloak aún no está healthy, o `AUTH_PROXY_PORT`/`AUTH_REDIRECT_URL` no coinciden — ambos deben usar el mismo puerto (`.env.example` trae 8002) |
 | Un `cron` modificado no surte efecto | Las expresiones cron se registran al arrancar — reinicie el orquestador |
 | `osint_orchestrator_scheduled_jobs` es menor de lo esperado | Un objetivo está `enabled: false`, o su `cron` no tiene cinco campos — ambos se omiten, el segundo con un log `ERROR` |

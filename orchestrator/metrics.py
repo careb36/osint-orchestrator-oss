@@ -145,6 +145,11 @@ llm_tokens_total = Counter(
     "LLM token usage by provider, model and direction (input | output)",
     ["provider", "model", "direction"],
 )
+llm_model_available = Gauge(
+    f"{PREFIX}_llm_model_available",
+    "Startup preflight: whether the configured LLM model is served by the provider (1=yes, 0=no)",
+    ["provider", "model", "route"],
+)
 alerts_total = Counter(
     f"{PREFIX}_alerts_total",
     "Alert lifecycle events by channel and status (sent | failed | retried | dlq)",
