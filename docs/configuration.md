@@ -210,7 +210,7 @@ scheduled run can expand without limit.
 | `include_domains` / `exclude_domains` | `[]` | Result-domain allowlist / denylist; empty falls back to the global settings |
 | `search_terms` | `[]` | Optional list of quoted query terms (for example trade names), up to 5 entries of at most 80 characters each; empty keeps the default domain term |
 | `include_answer` | `false` | Also request Tavily's synthesised answer, kept as one bounded note per query |
-| `max_calls_per_run` | `3` | Search requests per run, 1–20, clamped by `TAVILY_MAX_CALLS_PER_RUN`. Three query templates ship and each runs once per search term, alternating between terms |
+| `max_calls_per_run` | `3` | Search requests per run, 1–20, clamped by `TAVILY_MAX_CALLS_PER_RUN`. Three query templates ship; queries are built template by template (every term for template 1, then template 2, then template 3) and truncated to the budget, so a multi-term target can exhaust the budget before the last template |
 | `timeout_seconds` | `TAVILY_TIMEOUT_SECONDS` (`120`) | Wall-clock budget for the whole collector run, retries and backoff included |
 
 `alerts`:
