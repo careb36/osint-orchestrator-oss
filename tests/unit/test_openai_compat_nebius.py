@@ -45,11 +45,17 @@ def _install_fake_openai(monkeypatch: pytest.MonkeyPatch, actions: list[object])
 
     class _APIStatusError(Exception):
         def __init__(
-            self, status_code: int, message: str = "error", *, headers: dict | None = None
+            self,
+            status_code: int,
+            message: str = "error",
+            *,
+            headers: dict | None = None,
+            body: dict | None = None,
         ) -> None:
             super().__init__(message)
             self.status_code = status_code
             self.response = SimpleNamespace(headers=headers or {})
+            self.body = body
 
     class _RateLimitError(_APIStatusError):
         pass
@@ -336,12 +342,17 @@ async def test_each_attempt_gets_the_remaining_budget(monkeypatch: pytest.Monkey
     assert 0 < state["payloads"][1]["timeout"] <= state["payloads"][0]["timeout"] <= 5
 
 
-def test_blank_base_url_falls_back_to_the_sdk_default(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_blank_base_url_falls_back_per_preset(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "openai_base_url", "")
     assert OpenAICompatClient(api_key="k", base_url="")._base_url is None
-    assert OpenAICompatClient(provider_name="nebius", api_key="k", base_url=" ")._base_url is None
     monkeypatch.setattr(settings, "openai_base_url", "https://proxy.example/v1")
     assert OpenAICompatClient(api_key="k", base_url="")._base_url == "https://proxy.example/v1"
+    # a named preset never falls away from its own endpoint
+    nebius = OpenAICompatClient(provider_name="nebius", api_key="k", base_url=" ")
+    assert nebius._base_url == NEBIUS_DEFAULT_BASE_URL
+    assert nebius.provider == "nebius"
+    with pytest.raises(ValueError, match="needs an explicit base_url"):
+        OpenAICompatClient(provider_name="custom", api_key="k", base_url="")
 
 
 def test_blank_nebius_base_url_uses_the_nebius_default(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -368,3 +379,116 @@ def test_clients_report_the_model_they_send(monkeypatch: pytest.MonkeyPatch) -> 
 def test_unknown_route_is_rejected() -> None:
     with pytest.raises(ValueError, match="unknown model route"):
         resolve_model_for_route("bogus")  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_error_param_decides_the_downgrade_when_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    actions: list[object] = []
+    fake_sdk, state = _install_fake_openai(monkeypatch, actions)
+    # The message mentions response_format but the structured param blames another field.
+    actions.append(
+        fake_sdk.APIStatusError(
+            400,
+            "invalid request: see response_format docs",
+            body={"error": {"param": "max_tokens", "message": "too large"}},
+        )
+    )
+    with pytest.raises(fake_sdk.APIStatusError):
+        await _client().complete("sys", "user", timeout=5, response_schema={"type": "object"})
+    assert len(state["payloads"]) == 1
+
+    actions.extend(
+        [
+            fake_sdk.APIStatusError(
+                400, "bad request", body={"error": {"param": "response_format.json_schema"}}
+            ),
+            _fake_response(),
+        ]
+    )
+    await _client().complete("sys", "user", timeout=5, response_schema={"type": "object"})
+    assert "response_format" not in state["payloads"][-1]
+
+
+@pytest.mark.asyncio
+async def test_exhausted_budget_raises_the_last_error_instead_of_a_doomed_request(
+    monkeypatch: pytest.MonkeyPatch, _sleeps: list[float]
+) -> None:
+    actions: list[object] = []
+    fake_sdk, state = _install_fake_openai(monkeypatch, actions)
+    clock = {"now": 100.0}
+    monkeypatch.setattr(openai_compat_module.time, "monotonic", lambda: clock["now"])
+
+    async def _slow_503(**payload):
+        state["payloads"].append(payload)
+        clock["now"] += 10.0  # the failure itself took the whole budget
+        raise fake_sdk.APIStatusError(503, "upstream")
+
+    monkeypatch.setattr(
+        fake_sdk.AsyncOpenAI, "_create", lambda self, **payload: _slow_503(**payload)
+    )
+
+    with pytest.raises(fake_sdk.APIStatusError, match="upstream"):
+        await _client().complete("sys", "user", timeout=5)
+
+    assert len(state["payloads"]) == 1  # no 1 ms request was started
+    assert _sleeps == []
+
+
+@pytest.mark.asyncio
+async def test_anthropic_records_requests_and_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
+    import orchestrator.synthesizer.providers.anthropic as anthropic_module
+
+    monkeypatch.setattr(settings, "llm_model", "claude-test")
+    monkeypatch.setattr(settings, "llm_model_reasoning", "")
+    monkeypatch.setattr(settings, "anthropic_api_key", "test-token")
+    calls: list[dict] = []
+
+    class _RateLimitError(Exception):
+        status_code = 429
+
+    class _AsyncAnthropic:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+            self.messages = SimpleNamespace(create=self._create)
+
+        async def _create(self, **kwargs):
+            calls.append(kwargs)
+            if len(calls) == 2:
+                raise _RateLimitError("rate limited")
+            return SimpleNamespace(
+                content=[SimpleNamespace(text="{}")],
+                usage=SimpleNamespace(input_tokens=21, output_tokens=5),
+            )
+
+    monkeypatch.setattr(anthropic_module, "_HAS_ANTHROPIC", True)
+    monkeypatch.setattr(
+        anthropic_module, "_anthropic_sdk", SimpleNamespace(AsyncAnthropic=_AsyncAnthropic)
+    )
+    labels = {"provider": "anthropic", "model": "claude-test"}
+    before_ok = _metric_value(REQ_METRIC, status="ok", **labels)
+    before_429 = _metric_value(REQ_METRIC, status="http_429", **labels)
+    before_in = _metric_value(TOK_METRIC, direction="input", **labels)
+
+    assert await AnthropicClient().complete("sys", "user", timeout=5) == "{}"
+    with pytest.raises(_RateLimitError):
+        await AnthropicClient().complete("sys", "user", timeout=5)
+
+    assert calls[0]["model"] == "claude-test"
+    assert _metric_value(REQ_METRIC, status="ok", **labels) - before_ok == 1
+    assert _metric_value(REQ_METRIC, status="http_429", **labels) - before_429 == 1
+    assert _metric_value(TOK_METRIC, direction="input", **labels) - before_in == 21
+
+
+@pytest.mark.asyncio
+async def test_retry_log_carries_attempt_in_extra(
+    monkeypatch: pytest.MonkeyPatch, caplog, _sleeps: list[float]
+) -> None:
+    actions: list[object] = []
+    fake_sdk, _ = _install_fake_openai(monkeypatch, actions)
+    actions.extend([fake_sdk.APIStatusError(503, "x"), _fake_response()])
+    with caplog.at_level("WARNING", logger="orchestrator.synthesizer.providers.openai_compat"):
+        await _client().complete("sys", "user", timeout=5)
+    failed = next(r for r in caplog.records if "LLM request failed" in r.getMessage())
+    assert failed.attempt == 1 and failed.max_attempts == 3 and failed.provider == "nebius"

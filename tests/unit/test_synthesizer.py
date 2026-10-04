@@ -122,6 +122,7 @@ class _ReportsModel:
     """Mixin giving the fakes the ``model_for_route`` half of the LLMClient protocol."""
 
     served_model = "fake-model"
+    provider = "fake"
 
     def model_for_route(self, route: str) -> str:
         _ = route
@@ -250,6 +251,7 @@ async def test_fake_client_produces_correct_finding_and_persists(
     # The persisted model is the one the client reports it served, not the
     # route resolution: Ollama ignores the route and serves OLLAMA_MODEL.
     assert record.model == FakeLLMClient.served_model
+    assert record.provider == FakeLLMClient.provider
 
     # Check report.md contains the synthesis section
     report_path = await generate_report(report_data, report_dir=str(tmp_path), finding=finding)

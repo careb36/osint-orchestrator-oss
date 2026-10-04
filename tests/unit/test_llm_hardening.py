@@ -314,12 +314,15 @@ async def test_ollama_records_requests_and_tokens(
         json={"message": {"content": "{}"}, "prompt_eval_count": 11, "eval_count": 4}
     )
     httpx_mock.add_response(status_code=503)
+    httpx_mock.add_response(json={"message": {"content": "{}"}, "prompt_eval_count": "n/a"})
 
     await OllamaClient().complete("sys", "user", timeout=5)
     with pytest.raises(httpx.HTTPStatusError):
         await OllamaClient().complete("sys", "user", timeout=5)
+    # a non-numeric count is informational and must not fail a completed request
+    assert await OllamaClient().complete("sys", "user", timeout=5) == "{}"
 
-    assert (metrics.sample(req, {**labels, "status": "ok"}) or 0.0) - before_ok == 1
+    assert (metrics.sample(req, {**labels, "status": "ok"}) or 0.0) - before_ok == 2
     assert (metrics.sample(req, {**labels, "status": "http_5xx"}) or 0.0) - before_5xx == 1
     assert (metrics.sample(tok, {**labels, "direction": "input"}) or 0.0) - before_in == 11
 
