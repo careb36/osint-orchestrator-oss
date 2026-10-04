@@ -1,0 +1,51 @@
+name: PR guard
+
+# Blocks merging a pull request that is not finished. A coding agent opens its
+# PR with a single empty "Initial plan" commit and a "[WIP]" title, and only
+# fills it in later; merging it at that point closes the issue as completed
+# with nothing implemented (it happened to #20, #21, #22, #28 and #32).
+#
+# "PR is complete" is a required check on main. It re-runs when the title is
+# edited, so removing "[WIP]" is enough to re-evaluate it.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  complete:
+    name: PR is complete
+    runs-on: ubuntu-latest
+    steps:
+      - name: Not a work in progress and not empty
+        env:
+          # Untrusted text: passed through the environment, never interpolated
+          # into the script.
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_DRAFT: ${{ github.event.pull_request.draft }}
+          PR_CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
+        run: |
+          set -euo pipefail
+          fail=0
+          case "${PR_TITLE}" in
+            "[WIP]"*|"WIP:"*|"WIP "*)
+              echo "::error::The title still says work in progress: the PR is not finished."
+              fail=1
+              ;;
+          esac
+          if [ "${PR_DRAFT}" = "true" ]; then
+            echo "::error::The PR is a draft."
+            fail=1
+          fi
+          if [ "${PR_CHANGED_FILES}" = "0" ]; then
+            echo "::error::The PR changes no files (an empty 'Initial plan' commit)."
+            fail=1
+          fi
+          if [ "${fail}" -ne 0 ]; then
+            echo "Do not merge: wait until the author marks it finished and it has been reviewed."
+            exit 1
+          fi
+          echo "Title, draft state and file count are consistent with a finished PR (${PR_CHANGED_FILES} files)."
