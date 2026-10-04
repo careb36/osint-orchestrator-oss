@@ -10,6 +10,7 @@ import json
 import logging
 import smtplib
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from time import perf_counter
 
 import httpx
@@ -27,6 +28,7 @@ from orchestrator.collectors.spiderfoot import SpiderFootCollector
 from orchestrator.collectors.tavily import TavilyCollector
 from orchestrator.config import settings
 from orchestrator.database import get_session
+from orchestrator.evidence import build_manifest, sha256_file, write_manifest_file
 from orchestrator.models import (
     AlertDelivery,
     AlertDeliveryStatus,
@@ -55,6 +57,20 @@ from orchestrator.sinks.opencti import OpenCTISink
 from orchestrator.synthesizer import synthesize
 
 logger = logging.getLogger(__name__)
+
+
+def _artefacts_for_manifest(report_path: str | None) -> dict[str, str]:
+    """Return every generated file in the run directory, excluding the manifest itself."""
+    if not report_path:
+        return {}
+    base = Path(report_path).parent
+    artefacts: dict[str, str] = {}
+    for path in sorted(base.iterdir(), key=lambda item: item.name):
+        if not path.is_file() or path.name == "manifest.json":
+            continue
+        artefacts[path.name] = sha256_file(path)
+    return artefacts
+
 
 # Bundle scaffolding that must not be counted as a net-new finding.
 _COLLECTOR_IDENTITY_IDS = frozenset(i.id for i in _IDENTITIES.values())
@@ -799,8 +815,58 @@ async def _run_target_pipeline(target: Target, run_id: int, log_ctx: dict) -> Ru
                 run.report_path = report_path
             if report_error:
                 run.error = f"{run.error}; {report_error}" if run.error else report_error
+            if report_path is not None:
+                # ADR-007: the manifest is the run's last file and its hash is
+                # stored in the same commit as the final status. A failure here
+                # leaves the run unsealed (counted, never read as tampering)
+                # instead of losing the final status.
+                try:
+                    previous = await session.exec(
+                        select(Run.manifest_sha256)
+                        .where(Run.target_id == target.id)
+                        .where(Run.manifest_sha256.is_not(None))
+                        .where(Run.id != run_id)
+                        .order_by(Run.started_at.desc(), Run.id.desc())
+                        .limit(1)
+                    )
+                    manifest = build_manifest(
+                        run_id=run_id,
+                        target_id=target.id,
+                        started_at=run_started_at,
+                        finished_at=run_finished_at,
+                        status=final_status.value,
+                        collectors_run=collectors_run,
+                        artefacts=_artefacts_for_manifest(report_path),
+                        previous_manifest_sha256=previous.first(),
+                        secret_key=settings.orchestrator_secret_key,
+                    )
+                    run.manifest_sha256 = write_manifest_file(
+                        report_path=report_path, manifest=manifest
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception(
+                        "Evidence manifest not written; run left unsealed run_id=%d",
+                        run_id,
+                        extra=log_ctx,
+                    )
+            # Read before the commit: a session that expires attributes on
+            # commit would otherwise lazy-load here, which is sync IO.
+            manifest_sha256 = run.manifest_sha256
             session.add(run)
             await session.commit()
+            if manifest_sha256:
+                logger.info(
+                    "Run sealed run_id=%d target=%s report=%s manifest_sha256=%s",
+                    run_id,
+                    target.id,
+                    report_path,
+                    manifest_sha256,
+                    extra={
+                        **log_ctx,
+                        "report_path": report_path,
+                        "manifest_sha256": manifest_sha256,
+                    },
+                )
 
     # Alert: final pipeline step — never changes run status.
     try:

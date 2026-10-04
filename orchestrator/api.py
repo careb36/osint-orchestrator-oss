@@ -36,9 +36,10 @@ from sqlalchemy import func
 from sqlmodel import select
 
 from orchestrator import metrics
-from orchestrator.auth import log_auth_status, require_api_key
+from orchestrator.auth import log_auth_status, log_secret_key_status, require_api_key
 from orchestrator.config import settings
 from orchestrator.database import create_db_and_tables, get_session
+from orchestrator.evidence import load_manifest_file, manifest_path_for_report, verify_target_chain
 from orchestrator.i18n import console_i18n_catalogue, resolve_language, t
 from orchestrator.logging_config import configure_logging, request_id_var
 from orchestrator.models import AlertRecord, FindingRecord, Run, Target
@@ -94,6 +95,7 @@ async def lifespan(app: FastAPI):
     """
     configure_logging()
     log_auth_status()
+    log_secret_key_status()
     metrics.set_build_info(VERSION)
     await create_db_and_tables()
     interrupted = await mark_interrupted_runs()
@@ -548,6 +550,52 @@ async def get_run_finding(run_id: int) -> dict[str, Any]:
     if record is None:
         raise HTTPException(status_code=404, detail=t("finding_not_found", run_id=run_id))
     return record.to_api_dict()
+
+
+@router.get("/runs/{run_id}/manifest", response_model=dict[str, Any], tags=["runs"])
+async def get_run_manifest(run_id: int) -> dict[str, Any]:
+    """Return the signed manifest for one sealed run, or 404 if none exists."""
+    async with get_session() as session:
+        run = await session.get(Run, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=t("run_not_found", run_id=run_id))
+    if run.manifest_sha256 is None:
+        raise HTTPException(status_code=404, detail=t("manifest.not_found", run_id=run_id))
+    manifest_path = manifest_path_for_report(run.report_path)
+    if manifest_path is None or not manifest_path.exists():
+        raise HTTPException(status_code=404, detail=t("manifest.not_found", run_id=run_id))
+    try:
+        payload = load_manifest_file(manifest_path)
+    except (OSError, TypeError, ValueError):
+        raise HTTPException(
+            status_code=404, detail=t("manifest.not_found", run_id=run_id)
+        ) from None
+    return payload
+
+
+@router.get("/targets/{target_id}/chain/verify", response_model=dict[str, Any], tags=["runs"])
+async def verify_target_chain_endpoint(target_id: str) -> dict[str, Any]:
+    """Check the manifest chain for every sealed run of a target."""
+    try:
+        async with get_session() as session:
+            result = await verify_target_chain(
+                target_id=target_id,
+                secret_key=settings.orchestrator_secret_key,
+                session=session,
+            )
+        outcome = "ok" if result["ok"] else "broken"
+        metrics.evidence_chain_verify_total.labels(target_id, outcome).inc()
+        if result["reason"]:
+            # Operator-facing text (ADR-004); `reason` stays the stable English id.
+            result["message"] = t(
+                f"chain.reason.{result['reason']}",
+                name=result["detail"],
+                run_id=result["first_broken_run_id"],
+            )
+        return result
+    except Exception:
+        metrics.evidence_chain_verify_total.labels(target_id, "error").inc()
+        raise
 
 
 app.include_router(router)

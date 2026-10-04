@@ -150,6 +150,11 @@ alerts_total = Counter(
     "Alert lifecycle events by channel and status (sent | failed | retried | dlq)",
     ["channel", "status"],
 )
+evidence_chain_verify_total = Counter(
+    f"{PREFIX}_evidence_chain_verify_total",
+    "Evidence chain verification outcomes per target (ok | broken | error)",
+    ["target_id", "outcome"],
+)
 
 # ─── Scheduler ────────────────────────────────────────────────────────────────
 

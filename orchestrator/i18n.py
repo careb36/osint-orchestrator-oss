@@ -124,6 +124,38 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "es": "La ingesta a OpenCTI está deshabilitada (OPENCTI_ENABLED=false)",
         "en": "OpenCTI ingest is disabled (OPENCTI_ENABLED=false)",
     },
+    "manifest.not_found": {
+        "es": "No existe el manifiesto de la ejecución {run_id}",
+        "en": "Manifest for run {run_id} not found",
+    },
+    "chain.reason.artefact_hash": {
+        "es": "El hash del artefacto '{name}' no coincide",
+        "en": "Artifact hash mismatch for '{name}'",
+    },
+    "chain.reason.artefact_missing": {
+        "es": "Falta el artefacto '{name}'",
+        "en": "Artifact '{name}' is missing",
+    },
+    "chain.reason.manifest_missing": {
+        "es": "No se encontró el manifiesto del run {run_id}",
+        "en": "Manifest missing for run {run_id}",
+    },
+    "chain.reason.signature": {
+        "es": "El manifiesto se modificó después de la ejecución (su hash no coincide con el registrado)",
+        "en": "The manifest was modified after the run (its hash does not match the recorded one)",
+    },
+    "chain.reason.signature_key": {
+        "es": "La firma del manifiesto no coincide con la clave configurada",
+        "en": "Manifest signature does not match the configured key",
+    },
+    "chain.reason.chain_link": {
+        "es": "La cadena de manifiestos está rota",
+        "en": "Manifest chain link is broken",
+    },
+    "chain.reason.unsupported_version": {
+        "es": "La versión del manifiesto no es compatible",
+        "en": "Manifest version is unsupported",
+    },
     "landing_title": {
         "es": "Orquestador OSINT",
         "en": "OSINT Orchestrator",
