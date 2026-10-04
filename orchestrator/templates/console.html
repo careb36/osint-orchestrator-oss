@@ -789,7 +789,7 @@
           const statusText = run.status === "pending" || run.status === "running" ? t("runStatusProgress", { status: run.status }) : t("runStatusTerminal", { status: run.status });
           state.activeRunId = run.id;
           if (["pending", "running"].includes(run.status)) {
-            startPolling(run.id);
+            startPolling(run.id, run.target_id);
           }
           setAuthHelp("");
           container.innerHTML = `
