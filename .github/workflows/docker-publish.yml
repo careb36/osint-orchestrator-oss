@@ -70,7 +70,59 @@ jobs:
         with:
           context: .
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
+          load: ${{ github.event_name == 'pull_request' }}
+          tags: ${{ github.event_name == 'pull_request' && 'osint-orchestrator:smoke' || steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Generate smoke API key
+        if: github.event_name == 'pull_request'
+        run: echo "ORCHESTRATOR_API_KEY=$(openssl rand -hex 32)" >> "${GITHUB_ENV}"
+
+      - name: Smoke-test the image
+        if: github.event_name == 'pull_request'
+        run: |
+          docker run --rm -e ORCHESTRATOR_API_KEY osint-orchestrator:smoke \
+            python -c "import orchestrator.api, pycti, magic, openai, anthropic; print('ok')"
+          docker run --rm -e ORCHESTRATOR_API_KEY osint-orchestrator:smoke \
+            python -c "from orchestrator.config import settings; print(settings.llm_provider)"
+
+      - name: Smoke-test /health
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          cid="$(docker run -d \
+            -e ORCHESTRATOR_API_KEY \
+            -p 18080:8000 \
+            osint-orchestrator:smoke)"
+          cleanup() {
+            docker rm -f "${cid}" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          health_ok=0
+          attempt=1
+          # Retry for up to 60s (30 attempts, 2s apart).
+          while [ "${attempt}" -le 30 ]; do
+            if [ "$(docker inspect -f '{{.State.Running}}' "${cid}" 2>/dev/null || echo false)" != "true" ]; then
+              echo "Smoke container exited before /health reported status=ok"
+              docker logs "${cid}" || true
+              exit 1
+            fi
+            if response="$(curl -fsS http://127.0.0.1:18080/health 2>/dev/null)"; then
+              if printf '%s' "${response}" | python3 -c "import json, sys; payload=json.load(sys.stdin); sys.exit(0 if payload.get('status') == 'ok' else 1)"; then
+                echo "${response}"
+                health_ok=1
+                break
+              fi
+            fi
+            sleep 2
+            attempt=$((attempt + 1))
+          done
+
+          if [ "${health_ok}" -ne 1 ]; then
+            echo "Timed out waiting for /health to report status=ok"
+            docker logs "${cid}" || true
+            exit 1
+          fi
