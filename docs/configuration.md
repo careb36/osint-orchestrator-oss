@@ -38,8 +38,8 @@ Defaults shown are the ones shipped in `.env.example` for Docker.
 | `OPENCTI_ADMIN_TOKEN` | *(empty)* | Must match the token OpenCTI was bootstrapped with, or ingest fails. |
 | `OPENCTI_ENABLED` | `true` | `false` runs without OpenCTI ingest and outbox; reports, findings, delta and alerts keep working. For installs without OpenCTI only: runs made while disabled are never backfilled ([ADR-008](adr/ADR-008-optional-opencti-sink.md)). |
 | `OPENCTI_SSL_VERIFY` | `true` | Set `false` only for local/self-signed TLS in dev. |
-| `OPENCTI_INGEST_RETRIES` | `3` | Retries after a *transient* OpenCTI error, and the base wait (doubled each retry, ±25 % jitter, 30 s cap). An invalid token is never retried. |
-| `OPENCTI_INGEST_BACKOFF_SECONDS` | `2.0` | Retries after a *transient* OpenCTI error, and the base wait (doubled each retry, ±25 % jitter, 30 s cap). An invalid token is never retried. |
+| `OPENCTI_INGEST_RETRIES` | `3` | Number of retries after a *transient* OpenCTI error. An invalid token is never retried. |
+| `OPENCTI_INGEST_BACKOFF_SECONDS` | `2.0` | Base wait before an ingest retry (doubled each retry, ±25 % jitter, 30 s cap). |
 | `OPENCTI_OUTBOX_CRON` | `*/5 * * * *` | UTC cron for OpenCTI outbox drain retries. |
 | `OPENCTI_OUTBOX_MAX_ATTEMPTS` | `6` | Total OpenCTI outbox attempts including first ingest. |
 | `OPENCTI_OUTBOX_BASE_DELAY_SECONDS` | `60.0` | Base delay for outbox exponential backoff. |
