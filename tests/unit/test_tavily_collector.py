@@ -92,6 +92,36 @@ def test_tavily_caps_are_bounded(field: str, value: int) -> None:
 
 
 @pytest.mark.parametrize(
+    ("env", "value"),
+    [
+        ("TAVILY_MAX_RESULTS", "0"),
+        ("TAVILY_MAX_RESULTS", "21"),
+        ("TAVILY_MAX_CALLS_PER_RUN", "-1"),
+        ("TAVILY_MAX_CALLS_PER_RUN", "21"),
+    ],
+)
+def test_global_tavily_caps_are_bounded(monkeypatch, env: str, value: str) -> None:
+    monkeypatch.setenv(env, value)
+    with pytest.raises(ValidationError):
+        Settings()
+
+
+def test_global_call_cap_zero_is_allowed(monkeypatch) -> None:
+    monkeypatch.setenv("TAVILY_MAX_CALLS_PER_RUN", "0")
+    assert Settings().tavily_max_calls_per_run == 0
+
+
+def test_partial_tavily_block_gets_the_tavily_timeout_default() -> None:
+    # ``tavily: {enabled: true}`` bypasses the default factory; the validator
+    # must still apply the Tavily global instead of the generic 600 s.
+    cfg = CollectorSet.model_validate({"tavily": {"enabled": True}}).tavily
+    assert cfg.enabled is True
+    assert cfg.timeout_seconds == settings.tavily_timeout_seconds
+    explicit = CollectorSet.model_validate({"tavily": {"timeout_seconds": 7}}).tavily
+    assert explicit.timeout_seconds == 7
+
+
+@pytest.mark.parametrize(
     "raw",
     ["", "example.com,news.example.com", " example.com , news.example.com ,"],
 )
@@ -119,6 +149,8 @@ def test_split_csv() -> None:
         ("", False),
         ("exa mple.com", False),
         ("-bad.example.com", False),
+        ("evil.com\n", False),
+        ("evil.com\nexample.com", False),
     ],
 )
 def test_is_hostname(name: str, ok: bool) -> None:
@@ -146,6 +178,24 @@ async def test_missing_api_key_fails_without_requests(httpx_mock, monkeypatch) -
     assert httpx_mock.get_requests() == []
 
 
+@pytest.mark.parametrize("field", ["authorization", "purpose"])
+async def test_missing_authorization_or_purpose_is_rejected(httpx_mock, field: str) -> None:
+    target = _target()
+    setattr(target, field, "")
+    result = await TavilyCollector(target).collect()
+    assert result.success is False
+    assert result.error == "Tavily: target authorization and purpose are required"
+    assert httpx_mock.get_requests() == []
+
+
+async def test_zero_global_call_cap_disables_the_collector(httpx_mock, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "tavily_max_calls_per_run", 0)
+    result = await _collector().collect()
+    assert result.success is False
+    assert result.error == "Tavily: call budget is 0 (TAVILY_MAX_CALLS_PER_RUN)"
+    assert httpx_mock.get_requests() == []
+
+
 async def test_non_hostname_target_is_rejected(httpx_mock) -> None:
     target = _target()
     target.fqdn = "John Doe"
@@ -160,17 +210,23 @@ async def test_non_hostname_target_is_rejected(httpx_mock) -> None:
 
 def test_queries_follow_target_language_then_global(monkeypatch) -> None:
     monkeypatch.setattr(settings, "orchestrator_language", "es")
-    assert all(
-        "noticias adversas" in q or "site:" in q for q in _collector().build_queries("example.com")
-    )
-    assert _collector().build_queries("example.com")[0].startswith("site:example.com noticias")
-    assert (
-        _collector(language="en")
-        .build_queries("example.com")[0]
-        .startswith("site:example.com adverse")
-    )
+    es_queries = _collector().build_queries("example.com")
+    assert len(es_queries) == 3
+    assert es_queries[0].startswith('"example.com" noticias adversas')
+    assert all("noticias" in q or "societaria" in q or "judiciales" in q for q in es_queries)
+    en_queries = _collector(language="en").build_queries("example.com")
+    assert en_queries[0].startswith('"example.com" adverse news')
     monkeypatch.setattr(settings, "orchestrator_language", "en")
-    assert _collector().build_queries("example.com")[0].startswith("site:example.com adverse")
+    assert _collector().build_queries("example.com") == en_queries
+
+
+def test_queries_search_the_target_as_a_term_not_a_site_scope() -> None:
+    # Adverse media lives on third-party sites: a ``site:`` scope would only
+    # ever return the entity's own pages.
+    for language in ("en", "es"):
+        for query in _collector(language=language).build_queries("example.com"):
+            assert "site:" not in query
+            assert '"example.com"' in query
 
 
 def test_default_call_budget_covers_every_template() -> None:
@@ -211,7 +267,7 @@ async def test_collect_builds_url_observables_and_stable_notes(httpx_mock) -> No
         "http://other.example.org/b",
     ]
     assert all(o.type == "url" and o.extra == {"source": "tavily"} for o in result.observables)
-    assert len(result.notes) == 3  # two accepted results, "A duplicate" shares the URL
+    assert len(result.notes) == 2  # one note per distinct URL: "A duplicate" shares A's URL
     note_a = result.notes[0]
     assert note_a.startswith("tavily | A | url=https://news.example.com/a | published=2026-01-01")
     assert "score=" not in note_a and "sha256=" not in note_a
@@ -243,6 +299,43 @@ async def test_include_answer_is_surfaced_as_bounded_note(httpx_mock) -> None:
     assert "\n" not in answer_notes[0] and "`" not in answer_notes[0]
     assert len(answer_notes[0].rsplit(" | ", 1)[1]) == 500
     assert json.loads(httpx_mock.get_requests()[0].read())["include_answer"] is True
+
+
+async def test_same_url_from_two_queries_yields_one_observable_and_one_note(httpx_mock) -> None:
+    for title in ("First", "Second"):
+        httpx_mock.add_response(
+            method="POST",
+            url=TAVILY_SEARCH_URL,
+            json={"results": [_result("https://news.example.com/same", title=title)]},
+        )
+    result = await _collector(max_calls_per_run=2).collect()
+    assert [o.value for o in result.observables] == ["https://news.example.com/same"]
+    assert len(result.notes) == 1
+    assert result.notes[0].startswith("tavily | First |")
+
+
+# ─── Partial and total query failure ──────────────────────────────────────────
+
+
+async def test_one_failed_query_is_reported_in_a_note(httpx_mock) -> None:
+    httpx_mock.add_response(method="POST", url=TAVILY_SEARCH_URL, status_code=401)
+    httpx_mock.add_response(
+        method="POST", url=TAVILY_SEARCH_URL, json={"results": [_result("https://e.com/1")]}
+    )
+    result = await _collector(max_calls_per_run=2).collect()
+    assert result.success is True
+    assert [o.value for o in result.observables] == ["https://e.com/1"]
+    assert result.notes[-1] == "tavily: 1 of 2 queries failed"
+
+
+async def test_all_queries_failing_is_a_collector_failure(httpx_mock) -> None:
+    for _ in range(2):
+        httpx_mock.add_response(method="POST", url=TAVILY_SEARCH_URL, status_code=401)
+    result = await _collector(max_calls_per_run=2).collect()
+    assert result.success is False
+    assert result.error == "Tavily: all 2 queries failed; see the collector log"
+    assert result.observables == []
+    assert len(httpx_mock.get_requests()) == 2
 
 
 # ─── Budgets ──────────────────────────────────────────────────────────────────
@@ -310,7 +403,8 @@ async def test_5xx_is_retried_and_eventually_gives_up(httpx_mock) -> None:
     for _ in range(4):
         httpx_mock.add_response(method="POST", url=TAVILY_SEARCH_URL, status_code=503)
     result = await _collector(max_calls_per_run=1).collect()
-    assert result.success is True  # the query failed, the run is recorded with no results
+    assert result.success is False  # the only query failed: the run must not look clean
+    assert result.error == "Tavily: all 1 queries failed; see the collector log"
     assert result.observables == []
     assert len(httpx_mock.get_requests()) == 4
 
@@ -318,8 +412,20 @@ async def test_5xx_is_retried_and_eventually_gives_up(httpx_mock) -> None:
 async def test_non_transient_4xx_is_not_retried(httpx_mock) -> None:
     httpx_mock.add_response(method="POST", url=TAVILY_SEARCH_URL, status_code=401)
     result = await _collector(max_calls_per_run=1).collect()
+    assert result.success is False
     assert result.observables == []
     assert len(httpx_mock.get_requests()) == 1
+
+
+async def test_retry_log_carries_status_code_and_query(httpx_mock, caplog) -> None:
+    httpx_mock.add_response(method="POST", url=TAVILY_SEARCH_URL, status_code=503)
+    httpx_mock.add_response(method="POST", url=TAVILY_SEARCH_URL, json={"results": []})
+    with caplog.at_level("WARNING", logger="orchestrator.collectors.tavily"):
+        await _collector(language="en", max_calls_per_run=1).collect()
+    retry = next(r for r in caplog.records if "retrying" in r.getMessage())
+    assert retry.status_code == 503
+    assert retry.query.startswith('"example.com" adverse news')
+    assert "status=503" in retry.getMessage()
 
 
 async def test_transport_error_is_retried(httpx_mock) -> None:
