@@ -12,7 +12,7 @@ import re
 from collections.abc import Callable
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 from sqlalchemy import Index
@@ -114,7 +114,7 @@ class CollectorConfig(BaseModel):
     ``platforms`` + ``timeout_seconds``, amass: ``active``, ``brute``,
     ``include``, ``exclude``, ``progress_timeout_minutes`` +
     ``timeout_seconds``, tavily: ``search_depth``, ``max_results``,
-    ``include_domains``, ``exclude_domains``, ``include_answer``,
+    ``include_domains``, ``exclude_domains``, ``search_terms``, ``include_answer``,
     ``max_calls_per_run`` + ``timeout_seconds``). A field must be declared
     once: a repeated name silently replaces the earlier default for every
     collector. The full field contract is documented in the README "Target
@@ -165,6 +165,9 @@ class CollectorConfig(BaseModel):
     search_depth: str = "basic"
     include_domains: list[str] = Field(default_factory=list)
     exclude_domains: list[str] = Field(default_factory=list)
+    search_terms: list[Annotated[str, Field(min_length=1, max_length=80)]] = Field(
+        default_factory=list, max_length=5
+    )
     include_answer: bool = False
     max_calls_per_run: int = Field(default=3, ge=1, le=20)
 

@@ -50,14 +50,14 @@ TAVILY_SEARCH_URL = "https://api.tavily.com/search"
 # restrict the sources.
 _QUERY_TEMPLATES: dict[str, list[str]] = {
     "en": [
-        '"{target}" adverse news OR sanctions OR litigation OR regulatory action',
-        '"{target}" ownership structure shareholders ultimate beneficial owner',
-        '"{target}" legal proceedings court case settlement investigation',
+        "{target} adverse news OR sanctions OR litigation OR regulatory action",
+        "{target} ownership structure shareholders ultimate beneficial owner",
+        "{target} legal proceedings court case settlement investigation",
     ],
     "es": [
-        '"{target}" noticias adversas OR sanciones OR litigios OR acciones regulatorias',
-        '"{target}" estructura societaria accionistas beneficiario final',
-        '"{target}" procesos judiciales demanda acuerdo investigación',
+        "{target} noticias adversas OR sanciones OR litigios OR acciones regulatorias",
+        "{target} estructura societaria accionistas beneficiario final",
+        "{target} procesos judiciales demanda acuerdo investigación",
     ],
 }
 
@@ -199,7 +199,15 @@ class TavilyCollector(BaseCollector):
         """Query set in the target's language (per-target override, then global)."""
         language = resolve_language(self.target.language)
         templates = _QUERY_TEMPLATES.get(language, _QUERY_TEMPLATES["en"])
-        return [template.format(target=fqdn) for template in templates]
+        terms = self.target.collectors.tavily.search_terms or [fqdn]
+        queries: list[str] = []
+        for term in terms:
+            flat = flatten_untrusted(term)
+            if not flat:
+                continue
+            quoted = f'"{flat}"'
+            queries.extend(template.format(target=quoted) for template in templates)
+        return queries or [template.format(target=f'"{fqdn}"') for template in templates]
 
     # ─── HTTP ─────────────────────────────────────────────────────────────────
 
