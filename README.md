@@ -749,7 +749,7 @@ types — stay English in every language.
 
 ## Reports (Phase 2)
 
-Each run writes artifacts to `daily_reports/YYYY-MM-DD/<target_id>/` (UTC date):
+Each run writes artifacts to its own directory, `daily_reports/YYYY-MM-DD/<target_id>/run-<run_id>/` (UTC date), so several runs of a target on the same day never overwrite each other:
 
 - `report.md` — operator report with traceability fields, collector status, delta-first section, full inventory, relationships, errors, and a Phase 3 synthesis placeholder.
 - `bundle.stix.json` — deterministic merged STIX bundle for the run.
@@ -829,7 +829,7 @@ alerts:
     {"stix_type": "domain-name", "value": "sub.example.com", "stix_id": "domain-name--<uuid>"}
   ],
   "new_observable_count": 1,
-  "report_path":          "/app/daily_reports/2026-09-08/example-domain/report.md",
+  "report_path":          "/app/daily_reports/2026-09-08/example-domain/run-42/report.md",
   "finding_summary":      "Newly exposed subdomain detected.",
   "generated_at":         "2026-09-08T08:03:21.456789Z"
 }

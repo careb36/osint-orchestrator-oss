@@ -764,7 +764,7 @@ Un valor no reconocido se registra y se ignora en lugar de lanzar una excepción
 
 ## Reportes (Fase 2)
 
-Cada corrida escribe artefactos en `daily_reports/YYYY-MM-DD/<target_id>/` (fecha UTC):
+Cada corrida escribe artefactos en su propio directorio, `daily_reports/YYYY-MM-DD/<target_id>/run-<run_id>/` (fecha UTC), así que varias corridas de un objetivo en el mismo día nunca se sobrescriben:
 
 - `report.md` — reporte para operador con trazabilidad, estado por collector, sección delta primero, inventario completo, relaciones, errores y marcador de síntesis de Fase 3.
 - `bundle.stix.json` — bundle STIX combinado y determinista de la corrida.
@@ -845,7 +845,7 @@ alerts:
     {"stix_type": "domain-name", "value": "sub.example.com", "stix_id": "domain-name--<uuid>"}
   ],
   "new_observable_count": 1,
-  "report_path":          "/app/daily_reports/2026-09-08/example-domain/report.md",
+  "report_path":          "/app/daily_reports/2026-09-08/example-domain/run-42/report.md",
   "finding_summary":      "Newly exposed subdomain detected.",
   "generated_at":         "2026-09-08T08:03:21.456789Z"
 }

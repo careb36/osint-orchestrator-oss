@@ -149,6 +149,38 @@ async def test_bundle_output_is_byte_identical_for_same_data(tmp_path: Path) -> 
 
 
 @pytest.mark.asyncio
+async def test_two_runs_of_a_target_on_the_same_day_keep_their_own_artefacts(
+    tmp_path: Path,
+) -> None:
+    first_data = _sample_report_data()
+    second_data = first_data.model_copy(update={"run_id": first_data.run_id + 1})
+
+    first = await generate_report(first_data, report_dir=str(tmp_path))
+    first_text = first.read_text(encoding="utf-8")
+    second = await generate_report(second_data, report_dir=str(tmp_path))
+
+    assert first.parent.name == f"run-{first_data.run_id}"
+    assert second.parent.name == f"run-{second_data.run_id}"
+    assert first.parent.parent == second.parent.parent  # same <date>/<target>
+    # The first run's report is still the one it wrote.
+    assert first.read_text(encoding="utf-8") == first_text
+    assert (first.parent / "bundle.stix.json").exists()
+    assert (second.parent / "bundle.stix.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_daily_index_links_the_latest_run_directory(tmp_path: Path) -> None:
+    data = _sample_report_data(target_id="alpha")
+    await generate_report(data, report_dir=str(tmp_path))
+    later = data.model_copy(update={"run_id": data.run_id + 5})
+    await generate_report(later, report_dir=str(tmp_path))
+
+    text = (tmp_path / "2026-09-08" / "index.md").read_text(encoding="utf-8")
+    assert f"(./alpha/run-{later.run_id}/report.md)" in text
+    assert f"run-{data.run_id}/" not in text
+
+
+@pytest.mark.asyncio
 async def test_daily_index_accumulates_targets(tmp_path: Path) -> None:
     await generate_report(_sample_report_data(target_id="alpha"), report_dir=str(tmp_path))
     await generate_report(_sample_report_data(target_id="beta"), report_dir=str(tmp_path))
@@ -193,8 +225,9 @@ async def test_naive_and_aware_utc_dates_match_under_non_utc_host_tz(
         naive_report = await generate_report(naive_data, report_dir=str(tmp_path))
         aware_report = await generate_report(aware_data, report_dir=str(tmp_path))
 
-        assert naive_report.parent.parent.name == "2026-09-08"
-        assert aware_report.parent.parent.name == "2026-09-08"
+        # daily_reports/<date>/<target>/run-<id>/report.md
+        assert naive_report.parent.parent.parent.name == "2026-09-08"
+        assert aware_report.parent.parent.parent.name == "2026-09-08"
     finally:
         if previous_tz is None:
             monkeypatch.delenv("TZ", raising=False)
