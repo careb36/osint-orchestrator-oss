@@ -89,8 +89,7 @@ jobs:
         run: |
           set -euo pipefail
           cid="$(docker run -d \
-            --name osint-orchestrator-smoke \
-            -e ORCHESTRATOR_API_KEY=ci-smoke \
+            -e ORCHESTRATOR_API_KEY=test-token \
             -p 18080:8000 \
             osint-orchestrator:smoke)"
           cleanup() {
@@ -106,6 +105,11 @@ jobs:
                 health_ok=1
                 break
               fi
+            fi
+            if [ "$(docker inspect -f '{{.State.Running}}' "${cid}" 2>/dev/null || echo false)" != "true" ]; then
+              echo "Smoke container exited before /health reported status=ok"
+              docker logs "${cid}" || true
+              exit 1
             fi
             sleep 2
           done
