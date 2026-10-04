@@ -357,6 +357,7 @@ class Run(SQLModel, table=True):
     new_observables: int = 0  # count of net-new observables vs prior run
     error: str | None = None
     report_path: str | None = None
+    manifest_sha256: str | None = SQLField(default=None, index=True, nullable=True)
 
 
 class SeenObservable(SQLModel, table=True):

@@ -38,8 +38,13 @@ def sha256_file(path: str | Path) -> str:
 
 
 def sign_payload(payload: dict[str, Any], *, secret_key: str) -> str:
-    """Return the HMAC-SHA256 signature for a canonicalised payload."""
-    digest = hmac.new(secret_key.encode("utf-8"), canonical_json(payload).encode("utf-8"), hashlib.sha256)
+    """Return the HMAC-SHA256 signature for the canonical payload without a signature."""
+    unsigned = {key: value for key, value in payload.items() if key != "signature"}
+    digest = hmac.new(
+        secret_key.encode("utf-8"),
+        canonical_json(unsigned).encode("utf-8"),
+        hashlib.sha256,
+    )
     return f"{_HMAC_PREFIX}{digest.hexdigest()}"
 
 
@@ -68,6 +73,7 @@ def build_manifest(
         started_at = started_at.astimezone().isoformat()
     if isinstance(finished_at, datetime):
         finished_at = finished_at.astimezone().isoformat()
+
     payload: dict[str, Any] = {
         "manifest_version": MANIFEST_VERSION,
         "run_id": run_id,
@@ -78,7 +84,6 @@ def build_manifest(
         "collectors_run": list(collectors_run),
         "artefacts": dict(sorted(artefacts.items())),
         "previous_manifest_sha256": previous_manifest_sha256,
-        "signature": "",
     }
     payload["signature"] = sign_payload(payload, secret_key=secret_key)
     return payload
@@ -100,6 +105,7 @@ def write_manifest_file(
     manifest_path = manifest_path_for_report(str(report_path) if report_path else None)
     if manifest_path is None:
         raise ValueError("report_path is required to write a manifest")
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(canonical_json(manifest), encoding="utf-8")
     return sha256_file(manifest_path)
 
