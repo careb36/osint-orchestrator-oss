@@ -1,0 +1,34 @@
+# amass/datasources.example.yaml — copy to amass/datasources.yaml and add the
+# API keys of the data sources you want the engine to use.
+#
+#   cp amass/datasources.example.yaml amass/datasources.yaml
+#
+# amass/datasources.yaml is git-ignored: it holds secrets and is mounted only
+# into the `amass` engine container, never into the orchestrator.
+#
+# Every source listed upstream works without credentials when its entry is
+# absent; keyed sources return more (and rate-limit less). Full list of names:
+# https://github.com/owasp-amass/amass/blob/main/resources/datasources.yaml
+global_options:
+  # Default TTL (minutes) when a data source does not specify a larger value.
+  minimum_ttl: 1440
+
+datasources:
+#  - name: AlienVault
+#    creds:
+#      account:
+#        apikey: null
+#  - name: Censys
+#    ttl: 10080
+#    creds:
+#      account:
+#        apikey: null
+#        secret: null
+#  - name: Shodan
+#    creds:
+#      account:
+#        apikey: null
+#  - name: VirusTotal
+#    creds:
+#      account:
+#        apikey: null

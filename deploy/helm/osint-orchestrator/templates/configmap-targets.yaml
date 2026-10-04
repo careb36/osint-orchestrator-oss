@@ -1,0 +1,11 @@
+{{- if not .Values.targets.existingConfigMap }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "osint-orchestrator.targetsConfigMapName" . }}
+  labels:
+    {{- include "osint-orchestrator.labels" . | nindent 4 }}
+data:
+  targets.yaml: |
+    {{- dict "targets" .Values.targets.targets | toYaml | nindent 4 }}
+{{- end }}

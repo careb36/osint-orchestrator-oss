@@ -1,0 +1,60 @@
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0.7
+    profiles: ["auth"]
+    restart: unless-stopped
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: "${KEYCLOAK_ADMIN:-admin}"
+      KC_BOOTSTRAP_ADMIN_PASSWORD: "${KEYCLOAK_ADMIN_PASSWORD:?set KEYCLOAK_ADMIN_PASSWORD in .env}"
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME: "http://localhost:${KEYCLOAK_PORT:-8085}"
+      KC_HOSTNAME_STRICT: "false"
+      KC_PROXY: "edge"
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - keycloak-data:/opt/keycloak/data
+      - ./auth/keycloak/realm.json:/opt/keycloak/data/import/realm.json:ro
+    ports:
+      - "${KEYCLOAK_PORT:-8085}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://127.0.0.1:8080/health/ready >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 45s
+
+  auth-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.7.1
+    profiles: ["auth"]
+    restart: unless-stopped
+    depends_on:
+      keycloak:
+        condition: service_healthy
+      orchestrator:
+        condition: service_healthy
+    environment:
+      OAUTH2_PROXY_PROVIDER: oidc
+      OAUTH2_PROXY_OIDC_ISSUER_URL: "${OIDC_ISSUER_URL:?set OIDC_ISSUER_URL in .env}"
+      OAUTH2_PROXY_CLIENT_ID: "${AUTH_CLIENT_ID:-oauth2-proxy}"
+      OAUTH2_PROXY_CLIENT_SECRET: "${AUTH_CLIENT_SECRET:?set AUTH_CLIENT_SECRET in .env}"
+      OAUTH2_PROXY_COOKIE_SECRET: "${AUTH_PROXY_COOKIE_SECRET:?set AUTH_PROXY_COOKIE_SECRET in .env}"
+      OAUTH2_PROXY_EMAIL_DOMAINS: "*"
+      # 8002 by default: 8001 would collide with the socialosint service host port.
+      OAUTH2_PROXY_HTTP_ADDRESS: "0.0.0.0:${AUTH_PROXY_PORT:-8002}"
+      # Route through the compose network; no host networking is needed.
+      OAUTH2_PROXY_UPSTREAMS: http://orchestrator:8000
+      OAUTH2_PROXY_REDIRECT_URL: "${AUTH_REDIRECT_URL:?set AUTH_REDIRECT_URL in .env}"
+      OAUTH2_PROXY_REVERSE_PROXY: "true"
+      OAUTH2_PROXY_SET_XAUTHREQUEST: "true"
+      OAUTH2_PROXY_SET_AUTHORIZATION_HEADER: "true"
+      OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER: "true"
+      OAUTH2_PROXY_PASS_ACCESS_TOKEN: "true"
+      OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
+      OAUTH2_PROXY_COOKIE_SECURE: "false"
+      OAUTH2_PROXY_COOKIE_SAMESITE: lax
+    ports:
+      - "${AUTH_PROXY_PORT:-8002}:${AUTH_PROXY_PORT:-8002}"
+
+volumes:
+  keycloak-data:

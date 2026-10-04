@@ -1,0 +1,76 @@
+name: Publish image
+
+# Builds the orchestrator image and pushes it to GHCR so the Helm chart's
+# default `image.repository` (ghcr.io/careb36/osint-orchestrator-oss) resolves.
+#   - CI passes on main  → :main and :sha-<short>
+#   - tag v*             → :<version>, :latest
+#   - manual dispatch    → :sha-<short> only
+# Pull requests only build (no push) to catch a broken Dockerfile early.
+#
+# Push to main is gated: the image is only built after the CI workflow
+# (lint-and-test + helm-chart) succeeds on that commit.
+
+on:
+  # Gate main-branch pushes on a green CI run.
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - Dockerfile
+      - pyproject.toml
+      - orchestrator/**
+      - .github/workflows/docker-publish.yml
+  workflow_dispatch:
+
+jobs:
+  image:
+    name: Build & push
+    # For workflow_run events only proceed if CI succeeded.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # For workflow_run events check out the commit that CI ran on.
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || '' }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

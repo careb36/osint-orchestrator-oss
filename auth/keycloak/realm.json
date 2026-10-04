@@ -1,0 +1,25 @@
+{
+  "realm": "orchestrator",
+  "enabled": true,
+  "displayName": "OSINT Orchestrator",
+  "clients": [
+    {
+      "clientId": "oauth2-proxy",
+      "name": "oauth2-proxy",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "change-me-client-secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:8002/oauth2/callback"
+      ],
+      "webOrigins": [
+        "http://localhost:8002"
+      ],
+      "protocolMappers": []
+    }
+  ]
+}

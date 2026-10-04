@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint-and-test:
+    name: Lint & Unit Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          # Install all runtime + dev deps from pyproject.toml (single source of truth — closes #6).
+          # The openosint git dependency requires allow-direct-references = true (set in pyproject.toml).
+          pip install -e ".[dev]"
+
+      - name: Lint with ruff
+        run: |
+          ruff check orchestrator/ tests/unit/
+          ruff format --check orchestrator/ tests/unit/
+
+      - name: Verify migrations match models
+        run: |
+          # Apply all migrations to a temporary SQLite database.
+          export ORCHESTRATOR_DATABASE_URL="sqlite+aiosqlite:////tmp/ci_migration_check.db"
+          alembic upgrade head
+          # Fail if any model change was made without a corresponding migration.
+          alembic check
+        env:
+          OPENCTI_ADMIN_TOKEN: "test-token"
+          ORCHESTRATOR_SECRET_KEY: "test-key"
+
+      - name: Run unit tests (no integration)
+        run: |
+          pytest tests/unit/ -v -m "not integration"
+        env:
+          OPENCTI_ADMIN_TOKEN: "test-token"
+          ORCHESTRATOR_SECRET_KEY: "test-key"
+
+  public-release-guard:
+    name: Public-release guard
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned release with checksum: the guard must not change under us.
+      - name: Install gitleaks
+        run: |
+          curl -sSL -o gitleaks.tgz \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz
+          echo "5bc41815076e6ed6ef8fbecc9d9b75bcae31f39029ceb55da08086315316e3ba  gitleaks.tgz" | sha256sum -c -
+          tar -xzf gitleaks.tgz gitleaks
+          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: Forbidden references and secrets
+        run: bash scripts/check_public_release.sh
+
+  helm-chart:
+    name: Helm chart
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # helm ships on ubuntu-latest runners; pin anyway so a runner image
+      # update cannot change the lint result.
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+
+      - name: Lint chart
+        run: helm lint deploy/helm/osint-orchestrator --strict
+
+      - name: Render chart (defaults)
+        run: helm template osint deploy/helm/osint-orchestrator --kube-version 1.30.0 > /tmp/rendered-defaults.yaml
+
+      - name: Render chart (every optional resource on)
+        run: |
+          helm template osint deploy/helm/osint-orchestrator --kube-version 1.30.0 \
+            --set ingress.enabled=true \
+            --set metrics.serviceMonitor.enabled=true \
+            --set secrets.values.ORCHESTRATOR_API_KEY=ci-only-placeholder \
+            --set 'targets.targets[0].id=ci' \
+            --set 'targets.targets[0].fqdn=example.com' \
+            --set 'targets.targets[0].authorization=ci' \
+            --set 'targets.targets[0].purpose=ci' \
+            > /tmp/rendered-full.yaml
+          grep -q "kind: Ingress" /tmp/rendered-full.yaml
+          grep -q "kind: ServiceMonitor" /tmp/rendered-full.yaml
+          grep -q "fqdn: example.com" /tmp/rendered-full.yaml

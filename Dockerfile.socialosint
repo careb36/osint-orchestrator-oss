@@ -1,0 +1,49 @@
+# Dockerfile.socialosint
+#
+# Builds the OWASP SocialOSINT Agent web server from source.
+# Source: https://github.com/bm-github/owasp-social-osint-agent (MIT)
+#
+# There is no pre-built Docker image published to any registry; images must
+# be built locally. This Dockerfile clones the upstream repo at build time
+# and installs both the core agent and web-server dependencies.
+#
+# Usage (via docker-compose --profile socialosint):
+#   docker compose --profile socialosint up -d socialosint
+#
+# Environment variables (all passed through docker-compose.yml):
+#   LLM_API_KEY, LLM_API_BASE_URL, ANALYSIS_MODEL, IMAGE_ANALYSIS_MODEL
+#   TWITTER_BEARER_TOKEN, REDDIT_CLIENT_ID/SECRET/USER_AGENT, GITHUB_TOKEN
+#   BLUESKY_IDENTIFIER, BLUESKY_APP_SECRET
+#   MASTODON_INSTANCE_1_URL, MASTODON_INSTANCE_1_TOKEN
+#   MASTODON_INSTANCE_1_DEFAULT=true
+#
+# See docs/socialosint.md for full documentation.
+
+FROM python:3.11-slim
+
+# libmagic1 is required by the agent for file-type detection
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git libmagic1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Pin upstream to a reproducible commit. To upgrade:
+#   1. git ls-remote https://github.com/bm-github/owasp-social-osint-agent HEAD
+#   2. Update SOCIALOSINT_REF below and in docs/socialosint.md.
+#   3. Rebuild: docker compose build --no-cache socialosint
+ARG SOCIALOSINT_REF=afde7af56b212e33672f149a88caf55f718dfd5c
+
+# Clone the upstream repo and checkout the pinned ref
+RUN git clone https://github.com/bm-github/owasp-social-osint-agent /app \
+    && git -C /app checkout "$SOCIALOSINT_REF"
+
+WORKDIR /app
+
+# Install core + web-server dependencies
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-web.txt
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=10s --retries=5 --start-period=60s \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/platforms', timeout=5)"
+
+CMD ["uvicorn", "socialosintagent.web_server:app", "--host", "0.0.0.0", "--port", "8000"]

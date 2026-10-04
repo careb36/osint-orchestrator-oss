@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "osint-orchestrator.fullname" . }}-env
+  labels:
+    {{- include "osint-orchestrator.labels" . | nindent 4 }}
+data:
+  # Paths inside the container. The database and the reports live on the
+  # persistent volume, targets.yaml comes from its ConfigMap.
+  ORCHESTRATOR_DATABASE_URL: "sqlite+aiosqlite:////app/data/orchestrator.db"
+  TARGETS_FILE: "/app/targets.yaml"
+  OPENCTI_URL: {{ .Values.config.openctiUrl | quote }}
+  OPENCTI_SSL_VERIFY: {{ .Values.config.openctiSslVerify | toString | quote }}
+  SPIDERFOOT_URL: {{ .Values.config.spiderfootUrl | quote }}
+  SPIDERFOOT_MODULES: {{ .Values.config.spiderfootModules | quote }}
+  ORCHESTRATOR_LANGUAGE: {{ .Values.config.language | quote }}
+  ORCHESTRATOR_LOG_FORMAT: {{ .Values.config.logFormat | quote }}
+  ORCHESTRATOR_LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  ORCHESTRATOR_METRICS_ENABLED: {{ .Values.config.metricsEnabled | toString | quote }}
+  LLM_PROVIDER: {{ .Values.config.llm.provider | quote }}
+  LLM_MODEL: {{ .Values.config.llm.model | quote }}
+  LLM_BASE_URL: {{ .Values.config.llm.baseUrl | quote }}
+  ALERT_WEBHOOK_URL: {{ .Values.config.alerts.webhookUrl | quote }}
+  ALERT_SMTP_HOST: {{ .Values.config.alerts.smtpHost | quote }}
+  ALERT_SMTP_PORT: {{ .Values.config.alerts.smtpPort | toString | quote }}
+  ALERT_SMTP_FROM: {{ .Values.config.alerts.smtpFrom | quote }}
+  ALERT_EMAIL_TO: {{ .Values.config.alerts.emailTo | quote }}
+  ALERT_SMTP_STARTTLS: {{ .Values.config.alerts.smtpStarttls | toString | quote }}
+  {{- range $key, $value := .Values.config.extraEnv }}
+  {{ $key }}: {{ $value | toString | quote }}
+  {{- end }}

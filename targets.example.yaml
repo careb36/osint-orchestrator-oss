@@ -1,0 +1,165 @@
+# targets.example.yaml
+#
+# Copia este fichero a targets.yaml y ajústalo. NO está cifrado: no pongas
+# credenciales aquí. Los secretos van en .env.
+#
+# ⚠ ÉTICA Y LEGALIDAD: añade únicamente objetivos para los que tengas
+#   autorización explícita. Los campos `authorization` y `purpose` son
+#   OBLIGATORIOS y quedan registrados en cada ejecución como rastro de
+#   auditoría.
+#
+# Las claves están en inglés porque son identificadores de configuración;
+# los comentarios, en español. Ver docs/adr/ADR-004-language-policy.md.
+#
+# La planificación usa sintaxis cron (APScheduler):
+# https://apscheduler.readthedocs.io
+
+targets:
+  # id: identificador estable del objetivo (letras, dígitos, `.`, `_`, `-`;
+  # máx. 64). Nombra el directorio de informes, así que no admite rutas ni espacios.
+  - id: example-domain
+    enabled: true
+    fqdn: example.com
+    # Autorización: quién aprobó este objetivo y cuándo.
+    authorization: "Dominio propio. Autorizado por: Juan Pérez <juan@example.com> el 2026-09-01"
+    # Propósito: por qué monitorizamos este objetivo.
+    purpose: "Monitorización continua de exposición de infraestructura propia"
+
+    # Recolectores a ejecutar (al menos uno).
+    collectors:
+      openosint:
+        enabled: true
+        # Tipo de investigación. Debe ser uno de los valores de EntityKind de
+        # openosint: auto | domain | email | username | ip | phone | url | hash | person
+        # (`auto` deja que openosint deduzca el tipo a partir del objetivo).
+        investigation_type: domain
+        # Presupuesto de la investigación: cotas duras de la búsqueda por
+        # pivoteo. Sin ellas, una ejecución programada puede expandirse sin
+        # límite.
+        max_depth: 2              # saltos de BFS desde la entidad semilla
+        max_entities: 40          # entidades distintas desde las que pivotar
+        max_tool_calls: 60        # invocaciones de herramienta en toda la ejecución
+        tool_timeout_seconds: 30  # tiempo máximo por llamada a herramienta
+      spiderfoot:
+        enabled: true
+        # Módulos de SpiderFoot. Vacío = usa SPIDERFOOT_MODULES del .env.
+        modules: []
+        # Segundos máximos de espera a que termine el escaneo (SpiderFoot
+        # puede ser lento).
+        timeout_seconds: 600
+      socialosint:
+        enabled: false   # Fase 4
+      amass:
+        # Enumeración de subdominios con OWASP Amass v5. Requiere el servicio
+        # `amass` (docker compose --profile amass). Opt-in por objetivo.
+        enabled: false
+        # Modo activo: transferencias de zona y lectura de certificados TLS
+        # contra la infraestructura del objetivo. Sólo si la autorización
+        # cubre sondeos activos.
+        active: false
+        # Fuerza bruta con diccionario tras las búsquedas pasivas.
+        brute: false
+        # Fuentes de datos a usar / excluir (nombres tal y como los lista el
+        # engine). Vacío = todas las disponibles.
+        include: []
+        exclude: []
+        # Minutos sin hallazgos nuevos antes de detener la enumeración.
+        progress_timeout_minutes: 10
+        # Límite total (tiempo de pared) para todo el collector.
+        timeout_seconds: 1800
+
+    # Planificación: todos los días a las 08:00 UTC.
+    schedule:
+      cron: "0 8 * * *"
+      # Si se pierde una ejecución (p. ej. el sistema estaba apagado),
+      # ignorarla en vez de ejecutarla con retraso.
+      misfire_grace_time_seconds: 3600
+
+    # LLM: usar modelo local para este objetivo (los datos no salen de casa).
+    llm: local    # local | anthropic | openai — anula el LLM_PROVIDER global
+
+    # Idioma de los informes y de la síntesis de este objetivo.
+    # es | en. Omítelo para usar ORCHESTRATOR_LANGUAGE del .env.
+    language: es
+
+    # Informes: dónde escribir los informes diarios.
+    report_dir: "daily_reports"
+
+    # Alertas: cuándo y cómo notificar hallazgos nuevos.
+    # Ver sección "Alerts" del README para el esquema JSON del webhook.
+    alerts:
+      enabled: true
+      # Disparar cuando haya observables nuevos en este run.
+      on_new_observables: true
+      # Disparar también cuando el nivel de riesgo sea >= este umbral, aunque
+      # no haya observables nuevos. Valores: low | medium | high | critical.
+      min_risk_level: high
+      # Si es false, el payload sólo contiene conteos y tipos, nunca valores
+      # de observables (p. ej. nombres de dominio, IPs). Ver privacidad en README.
+      include_values: true
+
+  # ─── Ejemplo con SocialOSINT habilitado ─────────────────────────────────────
+  # ⚠ ÉTICA Y LEGALIDAD: SocialOSINT consulta APIs oficiales de redes sociales.
+  #   Revisar los términos de desarrollador de cada plataforma antes de usarlo.
+  #   X (Twitter) en particular restringe almacenar y redistribuir datos de usuario.
+  #   Este collector es opt-in y sólo debe activarse con consentimiento informado.
+  - id: socialosint-example
+    enabled: false                        # ejemplo desactivado por defecto
+    fqdn: example-brand.com
+    authorization: "Objetivo propio. Autorizado por: Equipo de Seguridad el 2026-09-01"
+    purpose: "Monitorización de presencia en redes sociales de la marca"
+    collectors:
+      openosint:
+        enabled: false
+      spiderfoot:
+        enabled: false
+      socialosint:
+        enabled: true
+        # Handles a investigar. SIN handles → error de configuración (el run falla/parcial).
+        usernames:
+          - brandhandle           # handle real en todas las plataformas configuradas
+          - brandhandle_official  # handle alternativo si existe
+        # Plataformas a consultar. Subconjunto de:
+        #   twitter, reddit, github, bluesky, mastodon, hackernews
+        # Si ninguna plataforma solicitada tiene credenciales en el servicio,
+        # SocialOSINT devuelve error (el run falla/parcial).
+        # hackernews no requiere credenciales.
+        platforms:
+          - twitter
+          - github
+          - hackernews
+        # timeout_seconds: límite total (tiempo de pared) para todo el collector.
+        # Si se supera, devuelve timeout; cualquier sesión creada en el servicio
+        # SocialOSINT se elimina de forma best-effort al terminar o fallar.
+        timeout_seconds: 300
+    schedule:
+      cron: "0 10 * * 1"          # lunes a las 10:00 UTC
+      misfire_grace_time_seconds: 3600
+    llm: local
+    language: es
+    report_dir: "daily_reports"
+    alerts:
+      enabled: false              # ejemplo: sin alertas para targets de redes sociales
+
+  # ─── Ejemplo mínimo: sólo OpenOSINT, sin SpiderFoot ─────────────────────────
+  - id: minimal-example
+    enabled: false
+    fqdn: test.example.org
+    authorization: "Objetivo de prueba. Autorizado por: Equipo de Pruebas el 2026-09-01"
+    purpose: "Prueba del flujo completo del orquestador"
+    collectors:
+      openosint:
+        enabled: true
+        investigation_type: domain
+      spiderfoot:
+        enabled: false
+      socialosint:
+        enabled: false
+      amass:
+        enabled: false
+    schedule:
+      cron: "0 9 * * 1"    # lunes a las 09:00 UTC
+      misfire_grace_time_seconds: 3600
+    llm: local
+    # Sin `language`: hereda ORCHESTRATOR_LANGUAGE.
+    report_dir: "daily_reports"

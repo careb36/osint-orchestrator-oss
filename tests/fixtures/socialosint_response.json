@@ -1,0 +1,62 @@
+{
+  "_comment": "Anonymized response shape captured from the OWASP SocialOSINT web service (docker profile socialosint) pinned at commit afde7af56b212e33672f149a88caf55f718dfd5c. Used by tests/unit/test_socialosint_collector.py to detect API drift.",
+
+  "platforms_response": {
+    "platforms": ["twitter", "github", "hackernews"]
+  },
+
+  "session_create_response": {
+    "id": "sess-aabbccdd-1234-5678-abcd-000000000001",
+    "name": "osint-orchestrator:example.com",
+    "platforms": {
+      "twitter": ["testhandle"],
+      "github": ["testhandle"]
+    },
+    "created_at": "2026-09-08T10:00:00Z",
+    "queries": []
+  },
+
+  "analyse_response": {
+    "job_id": "job-00000000-cafe-babe-dead-000000000001",
+    "session_id": "sess-aabbccdd-1234-5678-abcd-000000000001",
+    "status": "running"
+  },
+
+  "job_running_response": {
+    "job_id": "job-00000000-cafe-babe-dead-000000000001",
+    "status": "running"
+  },
+
+  "job_complete_response": {
+    "job_id": "job-00000000-cafe-babe-dead-000000000001",
+    "status": "complete",
+    "query_id": "qry-99999999-0000-0000-0000-000000000001"
+  },
+
+  "session_export_response": {
+    "session": {
+      "id": "sess-aabbccdd-1234-5678-abcd-000000000001",
+      "name": "osint-orchestrator:example.com",
+      "platforms": {
+        "twitter": ["testhandle"],
+        "github": ["testhandle"]
+      },
+      "created_at": "2026-09-08T10:00:00Z",
+      "queries": [
+        {
+          "id": "qry-99999999-0000-0000-0000-000000000001",
+          "query": "Summarise the public activity and interests of these accounts.",
+          "report": "# OSINT Analysis Report\n\n**Query:** `Summarise the public activity...`\n\n## Twitter: @testhandle\n\nThis account posts primarily about open-source software and security tooling. Activity is consistent with a technical professional in the cybersecurity domain.\n\n## GitHub: testhandle\n\nThe account has multiple public repositories focused on network scanning and vulnerability research. No indicators of malicious intent found in public activity.\n\n## Summary\n\nAccounts appear to belong to a security researcher. No high-risk indicators observed.",
+          "created_at": "2026-09-08T10:01:14Z",
+          "fetch_stats": {
+            "successful": 2,
+            "failed": 0,
+            "rate_limited": 0
+          },
+          "generation_time_seconds": 14.7
+        }
+      ],
+      "contacts": []
+    }
+  }
+}

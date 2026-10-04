@@ -1,0 +1,22 @@
+apiVersion: v2
+name: osint-orchestrator
+description: >-
+  OSINT Orchestrator — schedules OpenOSINT / SpiderFoot collections, normalises
+  findings to STIX 2.1, ingests them into OpenCTI and ships daily reports and
+  alerts. This chart deploys the orchestrator only; OpenCTI and SpiderFoot are
+  deployed with their own charts and referenced by URL.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.25.0-0"
+home: https://github.com/careb36/osint-orchestrator-oss
+sources:
+  - https://github.com/careb36/osint-orchestrator-oss
+keywords:
+  - osint
+  - opencti
+  - stix
+  - spiderfoot
+maintainers:
+  - name: careb36
+    url: https://github.com/careb36

@@ -1,0 +1,6 @@
+FROM ghcr.io/misp/misp-docker/misp-core:v2.4.198
+
+COPY deploy/misp/entrypoint.sh /entrypoint.sh
+COPY deploy/misp/entrypoint_fpm.sh /entrypoint_fpm.sh
+
+RUN chmod 0755 /entrypoint.sh /entrypoint_fpm.sh

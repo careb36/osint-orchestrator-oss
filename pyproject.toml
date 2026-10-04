@@ -1,0 +1,94 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["orchestrator"]
+artifacts = ["orchestrator/migrations/**"]
+
+[project]
+name = "osint-orchestrator"
+version = "0.1.0"
+description = "OSINT orchestration platform: collectors → STIX 2.1 → OpenCTI"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+dependencies = [
+    # API & scheduling
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.30.0",
+    "apscheduler>=3.10.4",
+    # Config & models
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.3.0",
+    # STIX 2.1
+    "stix2>=3.0.1",
+    # OpenCTI client
+    "pycti>=6.2.0",
+    # HTTP collector calls
+    "httpx>=0.27.0",
+    # OSINT collectors.
+    # Pinned to the fork, not the PyPI release: the collector calls
+    # openosint.investigate.investigate(), the documented public Python API,
+    # which upstream 2.27.0 on PyPI does not ship. Pinned by commit so a push
+    # to the fork cannot silently change what a build resolves to.
+    # (A PEP 508 direct reference — fine here because this project is not
+    # itself published to PyPI, which rejects direct references.)
+    "openosint @ git+https://github.com/careb36/OpenOSINT@f8855bfbd9c78a6d8c24639b1c30900a963e8f57",
+    # Database (operational state only)
+    "sqlmodel>=0.0.19",
+    "aiosqlite>=0.20.0",
+    "alembic>=1.13",
+    # YAML
+    "pyyaml>=6.0.1",
+    # Reporting
+    "jinja2>=3.1.4",
+    "fpdf2>=2.8.1",
+    # Observability (Phase 5): GET /metrics
+    "prometheus-client>=0.20.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2.0",
+    "pytest-asyncio>=0.23.7",
+    "pytest-httpx>=0.30.0",
+    "ruff>=0.4.7",
+    "mypy>=1.10.0",
+    "types-PyYAML>=6.0.12",
+]
+# socialosint: the OWASP SocialOSINT Agent is NOT pip-installable (no pyproject.toml
+# in the upstream repo). The integration uses the Docker service (see Dockerfile.socialosint
+# and docs/socialosint.md). No extra Python dependencies are needed in the orchestrator
+# because the collector communicates with the service via httpx (already a core dep).
+socialosint = []
+
+[project.scripts]
+orchestrator = "orchestrator.api:main"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "N"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["orchestrator"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+filterwarnings = [
+    # Emitted by starlette's own TestClient module at import (a deprecated
+    # anyio alias in its type annotations); not something this code base can
+    # fix. Filtered by exact message so anything else still surfaces.
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
+]
+markers = [
+    "integration: requires docker-compose stack (deselect with -m 'not integration')",
+]

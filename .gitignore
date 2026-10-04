@@ -1,0 +1,85 @@
+# Configuration and context files
+
+# Environment files
+.env
+.env.local
+*.env.*
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+.conda/
+
+# Build directories
+dist/
+build/
+*.egg-info/
+.coverage
+htmlcov/
+.coverage.*
+.nyc_output/
+coverage-final.json
+
+# IDE specific
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Compression archives
+*.zip
+*.gz
+*.tar
+*.tgz
+*.bz2
+*.xz
+*.7z
+*.rar
+*.zst
+*.lz4
+*.lzh
+*.cab
+*.arj
+*.rpm
+*.deb
+*.Z
+*.lz
+*.lzo
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.zst
+# Runtime state — must never reach the remote (restored; lost in 6d00fc8)
+targets.yaml
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+orchestrator.db
+daily_reports/
+data/
+# Amass data-source API keys (mounted only into the engine container)
+amass/datasources.yaml
+
+# Generated formal PDFs (render via scripts/render_business_pdf.py)
+docs/business/*.pdf

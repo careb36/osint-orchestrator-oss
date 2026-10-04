@@ -1,0 +1,34 @@
+OSINT Orchestrator {{ .Chart.AppVersion }} deployed as release "{{ .Release.Name }}".
+
+{{- if not .Values.secrets.existingSecret }}
+{{- if not .Values.secrets.values.ORCHESTRATOR_API_KEY }}
+
+WARNING: ORCHESTRATOR_API_KEY is empty — the API is OPEN. Set
+  secrets.values.ORCHESTRATOR_API_KEY (or point secrets.existingSecret at a
+  Secret that carries it) before exposing the service beyond the cluster.
+{{- end }}
+{{- if not .Values.secrets.values.OPENCTI_ADMIN_TOKEN }}
+
+WARNING: OPENCTI_ADMIN_TOKEN is empty — ingestion into OpenCTI will fail.
+{{- end }}
+{{- end }}
+
+{{- if and (not .Values.targets.existingConfigMap) (not .Values.targets.targets) }}
+
+NOTE: no targets configured. Add them under targets.targets (or set
+  targets.existingConfigMap) — nothing is collected until you do.
+{{- end }}
+
+Reach the API from inside the cluster:
+
+  http://{{ include "osint-orchestrator.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}
+
+Or from your workstation:
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "osint-orchestrator.fullname" . }} 8000:{{ .Values.service.port }}
+  curl -H "X-API-Key: $ORCHESTRATOR_API_KEY" http://localhost:8000/targets
+  curl http://localhost:8000/metrics
+
+Logs (JSON lines by default):
+
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "osint-orchestrator.fullname" . }} -f

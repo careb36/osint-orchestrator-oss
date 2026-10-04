@@ -1,0 +1,29 @@
+# amass/config.yaml — configuration of the Amass engine sidecar
+# (mounted read-only at /.config/amass/config.yaml in the `amass` service).
+#
+# Scope is intentionally empty: the orchestrator passes the domain of each
+# target on the command line (oam_enum -d <fqdn>), so one engine serves every
+# target. Data-source credentials live in datasources.yaml (git-ignored).
+# Full reference: https://github.com/owasp-amass/amass/blob/main/resources/config.yaml
+scope:
+  ports: # ports probed when a target enables active mode
+    - 80
+    - 443
+    - 8000
+    - 8080
+    - 8443
+    - 8888
+options:
+  datasources: "./datasources.yaml"
+  bruteforce:
+    enabled: false # per-target via collectors.amass.brute
+    wordlists:
+      - "./wordlists/short-wordlist.txt"
+  alterations:
+    enabled: false
+    wordlists:
+      - "./wordlists/alterations.txt"
+  default_transform_values:
+    ttl: 1440 # minutes a finding is trusted before being re-checked (1 day)
+    confidence: 50
+    priority: 5

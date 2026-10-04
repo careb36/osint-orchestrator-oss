@@ -1,0 +1,49 @@
+name: opencode
+
+# Delegated coding agent (OpenCode, https://opencode.ai). A repository owner
+# comments `/oc <instructions>` on an issue or pull request and the agent
+# works inside this runner, pushes a branch and opens (or updates) a PR.
+# Rules the agent follows: AGENTS.md. Model and permissions: opencode.json.
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+
+# One run per issue/PR at a time. A second `/oc` on the same thread queues
+# behind the first instead of racing it on the same branch.
+concurrency:
+  group: opencode-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  opencode:
+    # Only the repository owner may trigger the agent. This repository is
+    # public: without this guard anyone able to comment could spend the
+    # provider key and run code with the app's write token.
+    if: |
+      github.event.comment.author_association == 'OWNER' &&
+      (contains(github.event.comment.body, '/oc') ||
+       contains(github.event.comment.body, '/opencode'))
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      # Pinned to the commit behind the `latest` tag on 2026-09-23. The
+      # composite action itself installs the newest opencode release at run
+      # time (opencode.ai/install), so the pin fixes the wrapper, not the CLI.
+      - name: Run OpenCode
+        uses: anomalyco/opencode/github@77fc88c8ade8e5a620ebbe1197f3a572d29ae91a # tag: latest
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        with:
+          model: deepseek/deepseek-chat
+          # Session logs would contain target names; never publish them.
+          share: false

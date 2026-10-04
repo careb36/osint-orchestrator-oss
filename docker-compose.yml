@@ -1,0 +1,463 @@
+# docker-compose.yml
+#
+# OSINT Orchestrator stack — Phase 0
+#
+# Services:
+#   Core (always on): opencti, worker, connector-import-file-stix,
+#                     connector-opencti, elasticsearch, redis, rabbitmq, minio,
+#                     spiderfoot, orchestrator
+#   Optional profiles:
+#     --profile misp      → MISP + MariaDB + Redis for MISP + connector-misp
+#     --profile socialosint → OWASP SocialOSINT agent (CLI/JSON mode)
+#     --profile amass     → OWASP Amass v5 engine (subdomain enumeration)
+#     -f docker-compose.auth.yml --profile auth
+#                         → Keycloak + oauth2-proxy authenticated front door
+#                           (see README → "Optional: authenticated front door")
+#
+# Prerequisites:
+#   cp .env.example .env && vi .env     # fill in tokens & passwords
+#   cp targets.example.yaml targets.yaml && vi targets.yaml
+#
+# Hardware requirements (documented from OpenCTI-Platform/docker):
+#   • Elasticsearch heap: ELASTIC_MEMORY_SIZE (default 4 GB)
+#   • OpenCTI platform Node.js heap: 8 GB (NODE_OPTIONS=--max-old-space-size=8096)
+#   • Recommended host RAM: ≥ 16 GB (OpenCTI stack alone needs ~12-14 GB)
+#   • With SpiderFoot + orchestrator: ≥ 16 GB minimum, 32 GB comfortable
+#   • CPU: ≥ 4 cores recommended for Elasticsearch
+#   • Disk: ≥ 50 GB for Elasticsearch data + MinIO objects
+#
+# vm.max_map_count must be ≥ 262144 on the host:
+#   sudo sysctl -w vm.max_map_count=262144
+#   echo "vm.max_map_count=262144" | sudo tee -a /etc/sysctl.conf
+
+x-connector-env: &connector-base-env
+  OPENCTI_URL: "${OPENCTI_URL:-http://opencti:8080}"
+  OPENCTI_TOKEN: "${OPENCTI_ADMIN_TOKEN}"
+
+services:
+  # ── Infrastructure ──────────────────────────────────────────────────────────
+
+  redis:
+    image: redis:8.0
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.14.3
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms${ELASTIC_MEMORY_SIZE:-4g} -Xmx${ELASTIC_MEMORY_SIZE:-4g}"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health | grep -qv '\"status\":\"red\"'"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  minio:
+    image: quay.io/minio/minio:RELEASE.2024-05-28T17-19-04Z
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:-opencti}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}"
+    command: server /data
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: "${RABBITMQ_DEFAULT_USER:-orchestrator}"
+      RABBITMQ_DEFAULT_PASS: "${RABBITMQ_DEFAULT_PASS:?set RABBITMQ_DEFAULT_PASS in .env}"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ── OpenCTI Platform ─────────────────────────────────────────────────────────
+
+  opencti:
+    image: opencti/platform:6.8.11
+    restart: unless-stopped
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_OPTIONS: "--max-old-space-size=8096"
+      APP__PORT: 8080
+      APP__BASE_URL: "${OPENCTI_BASE_URL:-http://localhost:8080}"
+      APP__ADMIN__EMAIL: "${OPENCTI_ADMIN_EMAIL:-admin@example.com}"
+      APP__ADMIN__PASSWORD: "${OPENCTI_ADMIN_PASSWORD}"
+      APP__ADMIN__TOKEN: "${OPENCTI_ADMIN_TOKEN}"
+      APP__APP_LOGS__LOGS_LEVEL: "error"
+      REDIS__HOSTNAME: redis
+      REDIS__PORT: 6379
+      ELASTICSEARCH__URL: "http://elasticsearch:9200"
+      MINIO__ENDPOINT: minio
+      MINIO__PORT: 9000
+      MINIO__USE_SSL: "false"
+      MINIO__ACCESS_KEY: "${MINIO_ROOT_USER:-opencti}"
+      MINIO__SECRET_KEY: "${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}"
+      RABBITMQ__HOSTNAME: rabbitmq
+      RABBITMQ__USERNAME: "${RABBITMQ_DEFAULT_USER:-orchestrator}"
+      RABBITMQ__PASSWORD: "${RABBITMQ_DEFAULT_PASS:?set RABBITMQ_DEFAULT_PASS in .env}"
+      SMTP__HOSTNAME: ""
+      PROVIDERS__LOCAL__STRATEGY: LocalStrategy
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", 'wget -qO- --header="Content-Type: application/json" --post-data="{\"query\":\"query { __typename }\"}" http://127.0.0.1:8080/graphql | grep -q "\"__typename\":\"Query\""']
+      interval: 30s
+      timeout: 15s
+      retries: 10
+      start_period: 120s
+
+  worker:
+    image: opencti/worker:6.8.11
+    restart: unless-stopped
+    depends_on:
+      opencti:
+        condition: service_healthy
+    environment:
+      <<: *connector-base-env
+      WORKER_LOG_LEVEL: "error"
+    deploy:
+      replicas: 2
+
+  # ── Built-in OpenCTI connectors ───────────────────────────────────────────
+
+  connector-import-file-stix:
+    image: opencti/connector-import-file-stix:6.8.11
+    restart: unless-stopped
+    depends_on:
+      opencti:
+        condition: service_healthy
+    environment:
+      <<: *connector-base-env
+      CONNECTOR_ID: "${CONNECTOR_IMPORT_STIX_ID:-00000000-0000-0000-0000-000000000001}"
+      CONNECTOR_NAME: "ImportFileStix"
+      CONNECTOR_SCOPE: "application/json,text/xml"
+      CONNECTOR_AUTO: "true"
+      CONNECTOR_LOG_LEVEL: "error"
+
+  connector-opencti:
+    image: opencti/connector-opencti:6.8.11
+    restart: unless-stopped
+    depends_on:
+      opencti:
+        condition: service_healthy
+    environment:
+      <<: *connector-base-env
+      CONNECTOR_ID: "${CONNECTOR_OPENCTI_ID:-00000000-0000-0000-0000-000000000002}"
+      CONNECTOR_NAME: "OpenCTI Datasets"
+      CONNECTOR_SCOPE: "marking-definition,identity,location"
+      CONFIG_SECTORS_FILE_URL: "https://raw.githubusercontent.com/OpenCTI-Platform/datasets/master/data/sectors.json"
+      CONFIG_GEOGRAPHY_FILE_URL: "https://raw.githubusercontent.com/OpenCTI-Platform/datasets/master/data/geography.json"
+      CONFIG_INTERVAL: 7
+      CONNECTOR_LOG_LEVEL: "error"
+
+  # ── SpiderFoot ────────────────────────────────────────────────────────────
+
+  spiderfoot:
+    build:
+      context: https://github.com/smicallef/spiderfoot.git
+      dockerfile: Dockerfile
+    image: spiderfoot:local
+    restart: unless-stopped
+    # SpiderFoot web UI + API server. Default port 5001.
+    # Endpoints are at root path (no /api/v1/ prefix):
+    #   /ping, /startscan, /scanlist, /scanstatus?id=, /scaneventresults?id=&eventType=
+    ports:
+      - "5001:5001"
+    volumes:
+      - spiderfoot-data:/home/spiderfoot/.spiderfoot
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5001/ping | grep -q 'SUCCESS'"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  # ── Orchestrator ──────────────────────────────────────────────────────────
+
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      opencti:
+        condition: service_healthy
+      spiderfoot:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      OPENCTI_URL: "${OPENCTI_URL:-http://opencti:8080}"
+      SPIDERFOOT_URL: "${SPIDERFOOT_URL:-http://spiderfoot:5001}"
+      # Keep the SQLite file on the named volume, not in the container layer:
+      # the default (./orchestrator.db) would be lost on every image rebuild.
+      ORCHESTRATOR_DATABASE_URL: "${ORCHESTRATOR_DATABASE_URL:-sqlite+aiosqlite:////app/data/orchestrator.db}"
+      AMASS_ENGINE_URL: "${AMASS_ENGINE_URL:-http://amass:4000}"
+    volumes:
+      - ./targets.yaml:/app/targets.yaml:ro
+      - ./daily_reports:/app/daily_reports
+      - orchestrator-db:/app/data
+      # Shared with the Amass engine (profile "amass"): the engine writes its
+      # asset database here and the collector reads it back with oam_subs.
+      - amass-data:/app/amass/data
+    ports:
+      # Publish on loopback only: direct API access without the auth overlay.
+      # The auth overlay (docker-compose.auth.yml) routes through the compose
+      # network instead (http://orchestrator:8000), so this port is not needed
+      # by auth-proxy, but it makes `curl http://localhost:8000/health` work in
+      # the base-stack quick-start.
+      - "127.0.0.1:${ORCHESTRATOR_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import json, sys, urllib.request; payload = json.loads(urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).read().decode()); sys.exit(0 if payload.get('status') == 'ok' else 1)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ── Optional: MISP (profile: misp) ───────────────────────────────────────
+  # Full MISP stack with its own MariaDB and Redis (not shared with OpenCTI).
+  # Images: https://github.com/MISP/misp-docker
+  #
+  # First-time startup can take 5-10 minutes while MISP initialises its DB.
+  # See README → MISP for startup order and how to obtain the API key.
+
+  misp-db:
+    image: mariadb:10.11
+    profiles: ["misp"]
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: misp
+      MYSQL_USER: misp
+      MYSQL_PASSWORD: "${MISP_MYSQL_PASSWORD:?set MISP_MYSQL_PASSWORD in .env}"
+      MYSQL_ROOT_PASSWORD: "${MISP_MYSQL_ROOT_PASSWORD:?set MISP_MYSQL_ROOT_PASSWORD in .env}"
+    volumes:
+      - misp-db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  misp-redis:
+    image: redis:8.0
+    profiles: ["misp"]
+    restart: unless-stopped
+    volumes:
+      - misp-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  misp-modules:
+    # Pin to the same tag as misp-core; check https://github.com/MISP/misp-docker/releases
+    image: ghcr.io/misp/misp-docker/misp-modules:v2.4.198
+    profiles: ["misp"]
+    restart: unless-stopped
+    depends_on:
+      - misp-redis
+
+  misp:
+    # Keep the runtime aligned with the persisted v2.4 app tree while backporting
+    # upstream's passwordless Redis handling.
+    build:
+      context: .
+      dockerfile: Dockerfile.misp
+    image: osint-orchestrator-misp:v2.4.198-passwordless
+    profiles: ["misp"]
+    restart: unless-stopped
+    depends_on:
+      misp-db:
+        condition: service_healthy
+      misp-redis:
+        condition: service_healthy
+    environment:
+      # misp-docker uses BASE_URL / ADMIN_EMAIL / ADMIN_PASSWORD as primary vars;
+      # MISP_BASE_URL / MISP_ADMIN_EMAIL / MISP_ADMIN_PASSPHRASE are accepted too
+      # (older image versions). Set both forms for compatibility.
+      BASE_URL: "${MISP_BASE_URL:-https://localhost:${MISP_PORT:-8443}}"
+      MISP_BASE_URL: "${MISP_BASE_URL:-https://localhost:${MISP_PORT:-8443}}"
+      ADMIN_EMAIL: "${MISP_ADMIN_EMAIL:-admin@example.com}"
+      MISP_ADMIN_EMAIL: "${MISP_ADMIN_EMAIL:-admin@example.com}"
+      ADMIN_PASSWORD: "${MISP_ADMIN_PASSWORD:?set MISP_ADMIN_PASSWORD in .env}"
+      MISP_ADMIN_PASSPHRASE: "${MISP_ADMIN_PASSWORD:?set MISP_ADMIN_PASSWORD in .env}"
+      # Database (MariaDB, not MySQL)
+      MYSQL_HOST: misp-db
+      MYSQL_DATABASE: misp
+      MYSQL_USER: misp
+      MYSQL_PASSWORD: "${MISP_MYSQL_PASSWORD:?set MISP_MYSQL_PASSWORD in .env}"
+      # Redis (dedicated — not shared with OpenCTI). Explicitly set the host so
+      # the container entrypoint does not fall back to the shared OpenCTI Redis.
+      # The derived image prevents an empty password from falling back to
+      # "redispassword" in the v2.4.198 entrypoint.
+      REDIS_HOST: misp-redis
+      REDIS_PORT: 6379
+      ENABLE_REDIS_EMPTY_PASSWORD: "true"
+      # misp-modules sidecar
+      MISP_MODULES_FQDN: misp-modules
+    ports:
+      - "${MISP_PORT:-8443}:443"
+    volumes:
+      - misp-data:/var/www/MISP
+
+  # OpenCTI ↔ MISP synchronisation via the official connector.
+  # https://github.com/OpenCTI-Platform/connectors/tree/master/external-import/misp
+  # Version MUST match the opencti/platform version above (6.8.11).
+  connector-misp:
+    image: opencti/connector-misp:6.8.11
+    profiles: ["misp"]
+    restart: unless-stopped
+    depends_on:
+      opencti:
+        condition: service_healthy
+    environment:
+      <<: *connector-base-env
+      CONNECTOR_ID: "${CONNECTOR_MISP_ID:?set CONNECTOR_MISP_ID in .env}"  # fixed UUID per install
+      CONNECTOR_NAME: "MISP"
+      CONNECTOR_SCOPE: "misp"
+      CONNECTOR_LOG_LEVEL: "error"
+      CONNECTOR_DURATION_PERIOD: "PT5M"                # import every 5 minutes
+      # misp-core exposes HTTPS on port 443. Use https:// and disable cert
+      # verification (MISP_SSL=false) because misp-docker ships a self-signed
+      # certificate by default. In production, supply a real cert and set
+      # MISP_SSL=true.
+      MISP_URL: "${MISP_URL:-https://misp}"
+      MISP_REFERENCE_URL: "${MISP_URL:-https://misp}"
+      MISP_KEY: "${MISP_KEY:?set MISP_KEY in .env}"   # API key from MISP admin UI
+      MISP_SSL_VERIFY: "false"
+      MISP_IMPORT_ONLY_PUBLISHED: "false"
+      MISP_IMPORT_TO_IDS_NO_SCORE: 40
+      MISP_SSL: "false"                                 # dev: skip TLS verify
+      MISP_DATETIME_ATTRIBUTE: "timestamp"
+      MISP_CREATE_REPORTS: "true"
+      MISP_CREATE_INDICATORS: "true"
+      MISP_CREATE_OBSERVABLES: "true"
+      MISP_REPORT_TYPE: "misp-event"
+
+  # ── Optional: OWASP SocialOSINT (profile: socialosint) ───────────────────
+  # Source: https://github.com/bm-github/owasp-social-osint-agent (MIT)
+  # Image built from source (no pre-built image published to a registry).
+  # See docs/socialosint.md for integration notes.
+  #
+  # Set SOCIALOSINT_LLM_* and the required platform credential vars in .env
+  # before starting this service. Enable per-target in targets.yaml.
+
+  socialosint:
+    build:
+      context: .
+      dockerfile: Dockerfile.socialosint
+    profiles: ["socialosint"]
+    restart: unless-stopped
+    environment:
+      # LLM — required for all analysis (OpenAI-compatible endpoint with vision)
+      LLM_API_KEY: "${SOCIALOSINT_LLM_API_KEY}"
+      LLM_API_BASE_URL: "${SOCIALOSINT_LLM_BASE_URL}"
+      ANALYSIS_MODEL: "${SOCIALOSINT_LLM_MODEL:-gpt-4o}"
+      IMAGE_ANALYSIS_MODEL: "${SOCIALOSINT_LLM_VISION_MODEL:-gpt-4o}"
+      # Platform credentials (omit → platform silently skipped by the service)
+      TWITTER_BEARER_TOKEN: "${SOCIALOSINT_TWITTER_BEARER_TOKEN:-}"
+      REDDIT_CLIENT_ID: "${SOCIALOSINT_REDDIT_CLIENT_ID:-}"
+      REDDIT_CLIENT_SECRET: "${SOCIALOSINT_REDDIT_CLIENT_SECRET:-}"
+      REDDIT_USER_AGENT: "${SOCIALOSINT_REDDIT_USER_AGENT:-osint-orchestrator/1.0}"
+      GITHUB_TOKEN: "${SOCIALOSINT_GITHUB_TOKEN:-}"
+      BLUESKY_IDENTIFIER: "${SOCIALOSINT_BLUESKY_IDENTIFIER:-}"
+      BLUESKY_APP_SECRET: "${SOCIALOSINT_BLUESKY_APP_SECRET:-}"
+      MASTODON_INSTANCE_1_URL: "${SOCIALOSINT_MASTODON_INSTANCE_1_URL:-}"
+      MASTODON_INSTANCE_1_TOKEN: "${SOCIALOSINT_MASTODON_INSTANCE_1_TOKEN:-}"
+      MASTODON_INSTANCE_1_DEFAULT: "true"
+    ports:
+      - "8001:8000"
+    volumes:
+      - socialosint-data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/platforms', timeout=5)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ── Optional: OWASP Amass v5 engine (profile: amass) ─────────────────────
+  # Source: https://github.com/owasp-amass/amass (Apache-2.0)
+  # Official image; only the long-running engine runs here. The orchestrator
+  # image carries the oam_enum / oam_subs clients and talks to this service
+  # over http://amass:4000 (AMASS_ENGINE_URL).
+  #
+  # Data-source API keys go in ./amass/datasources.yaml (git-ignored; start
+  # from amass/datasources.example.yaml). Enable per-target in targets.yaml
+  # (collectors.amass.enabled: true).
+
+  amass:
+    image: owaspamass/amass:v5.1.1
+    profiles: ["amass"]
+    restart: unless-stopped
+    entrypoint: ["/bin/engine"]
+    environment:
+      HOME: /
+    volumes:
+      # /.config/amass is the engine's output directory (HOME=/): asset.db and
+      # session logs land here, on the volume the orchestrator mounts at
+      # /app/amass/data.
+      - amass-data:/.config/amass
+      - ./amass/config.yaml:/.config/amass/config.yaml:ro
+      - ./amass/datasources.yaml:/.config/amass/datasources.yaml:ro
+    healthcheck:
+      test: ["CMD", "/bin/ae_isready", "--host", "127.0.0.1"]
+      interval: 10s
+      timeout: 5s
+      retries: 25
+      start_period: 20s
+
+volumes:
+  redis-data:
+  elasticsearch-data:
+  minio-data:
+  rabbitmq-data:
+  spiderfoot-data:
+  orchestrator-db:
+  misp-db-data:
+  misp-redis-data:
+  misp-data:
+  socialosint-data:
+  amass-data:

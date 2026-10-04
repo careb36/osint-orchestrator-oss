@@ -1,0 +1,7 @@
+www.example.com 93.184.216.34,2606:2800:220:1:248:1893:25c8:1946
+mail.example.com 93.184.216.35
+example.com 93.184.216.34
+bare.example.com
+Api.Example.com. 93.184.216.36
+_dmarc.example.com
+www.example.com 93.184.216.34

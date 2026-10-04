@@ -1,0 +1,186 @@
+# Default values for osint-orchestrator.
+#
+# The orchestrator keeps its operational state in SQLite and runs the cron
+# scheduler in-process, so it is a SINGLE-INSTANCE service: keep
+# replicaCount at 1 and the Deployment strategy at Recreate. Two replicas
+# would double-run every scheduled collection and corrupt the database.
+# (ADR-005 records this decision.)
+
+replicaCount: 1
+
+image:
+  # Published to GHCR by .github/workflows/docker-publish.yml: `:<version>`
+  # and `:latest` on v* tags, `:main` and `:sha-<short>` on every push to
+  # main. To run your own build instead, push it to your registry and set
+  # repository/tag here:
+  #   docker build -t <registry>/osint-orchestrator:0.1.0 . && docker push ...
+  repository: ghcr.io/careb36/osint-orchestrator-oss
+  pullPolicy: IfNotPresent
+  # Defaults to the chart appVersion.
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+# The image runs as root by default; the pod security context drops to an
+# unprivileged uid and fsGroup makes the PVC writable by it.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+  # The app writes reports and the SQLite file under /app (mounted volumes),
+  # and Python writes __pycache__ into the package dir on first import.
+  readOnlyRootFilesystem: false
+
+service:
+  type: ClusterIP
+  port: 8000
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: osint-orchestrator.example.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    memory: 1Gi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# One PVC holds both the SQLite database (/app/data) and the daily reports
+# (/app/daily_reports). ReadWriteOnce is enough for a single replica.
+persistence:
+  enabled: true
+  existingClaim: ""
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 5Gi
+  annotations: {}
+
+# ─── Non-secret configuration (rendered into a ConfigMap as env vars) ────────
+config:
+  # In-cluster URLs of the platforms this orchestrator feeds and drives.
+  openctiUrl: http://opencti:8080
+  openctiSslVerify: true
+  spiderfootUrl: http://spiderfoot:5001
+  spiderfootModules: sfp_dns,sfp_whois,sfp_ssl
+  # es | en — operator-facing text (ADR-004).
+  language: es
+  # json is the sensible default on Kubernetes: one object per line for the
+  # log shipper. text for a human tailing kubectl logs.
+  logFormat: json
+  logLevel: INFO
+  metricsEnabled: true
+  llm:
+    provider: ollama
+    model: llama3.2
+    baseUrl: http://ollama:11434
+  alerts:
+    webhookUrl: ""
+    smtpHost: ""
+    smtpPort: 587
+    smtpFrom: ""
+    emailTo: ""
+    smtpStarttls: true
+  # Any further ORCHESTRATOR / collector variable, verbatim.
+  extraEnv: {}
+  #  SYNTHESIS_HISTORY_RUNS: "5"
+
+# ─── Secrets ─────────────────────────────────────────────────────────────────
+# Either point existingSecret at a Secret you manage (External Secrets,
+# Sealed Secrets, kubectl create secret ...) carrying the keys listed under
+# `keys`, or fill the values below and the chart renders the Secret itself.
+# Never commit real values in a values file.
+secrets:
+  existingSecret: ""
+  values:
+    OPENCTI_ADMIN_TOKEN: ""
+    # Comma-separated list; empty = API open (a startup warning is logged).
+    ORCHESTRATOR_API_KEY: ""
+    ORCHESTRATOR_SECRET_KEY: ""
+    ALERT_WEBHOOK_SECRET: ""
+    ALERT_SMTP_USER: ""
+    ALERT_SMTP_PASSWORD: ""
+    ANTHROPIC_API_KEY: ""
+    OPENAI_API_KEY: ""
+    SHODAN_API_KEY: ""
+    VIRUSTOTAL_API_KEY: ""
+    CENSYS_API_ID: ""
+    CENSYS_API_SECRET: ""
+
+# ─── Targets (targets.yaml) ──────────────────────────────────────────────────
+# Either an existing ConfigMap with a `targets.yaml` key, or the target list
+# inline. `authorization` and `purpose` are mandatory per target and are
+# logged with every run — the audit trail lives here.
+targets:
+  existingConfigMap: ""
+  targets: []
+  #  - id: example-domain
+  #    enabled: true
+  #    fqdn: example.com
+  #    authorization: "Self-owned. Authorised by: Jane Doe on 2026-09-01"
+  #    purpose: "Continuous exposure monitoring"
+  #    schedule:
+  #      cron: "0 8 * * *"
+
+# ─── Metrics ─────────────────────────────────────────────────────────────────
+metrics:
+  # prometheus.io/* pod annotations for annotation-based discovery.
+  podAnnotations:
+    enabled: true
+  # ServiceMonitor for the Prometheus Operator (requires its CRDs).
+  serviceMonitor:
+    enabled: false
+    interval: 60s
+    scrapeTimeout: 10s
+    labels: {}
+    namespace: ""
+
+# ─── Probes ──────────────────────────────────────────────────────────────────
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  periodSeconds: 20
+  timeoutSeconds: 5
+  failureThreshold: 3
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  periodSeconds: 10
+  timeoutSeconds: 5
+startupProbe:
+  httpGet:
+    path: /health
+    port: http
+  periodSeconds: 5
+  failureThreshold: 24

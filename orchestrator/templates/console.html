@@ -1,0 +1,537 @@
+<!doctype html>
+<html lang="{{ default_language }}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OSINT Operator Console</title>
+    <style nonce="{{ csp_nonce }}">
+      body { font-family: Arial, sans-serif; margin: 0; background: #f7f7f9; color: #222; }
+      header { background: #111827; color: #fff; padding: 12px 16px; }
+      main { padding: 16px; max-width: 1080px; margin: 0 auto; }
+      .skip-link {
+        position: absolute;
+        top: -40px;
+        left: 8px;
+        background: #1d4ed8;
+        color: #fff;
+        padding: 8px 10px;
+        border-radius: 6px;
+        z-index: 10;
+      }
+      .skip-link:focus { top: 8px; }
+      .controls, .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+      button { border: 1px solid #cbd5e1; background: #fff; padding: 8px 12px; cursor: pointer; border-radius: 6px; }
+      button.active { background: #1d4ed8; color: #fff; border-color: #1d4ed8; }
+      button.destructive { border-color: #b91c1c; color: #b91c1c; }
+      input, select { padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; }
+      .checkbox { display: inline-flex; align-items: center; gap: 6px; }
+      button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible {
+        outline: 3px solid #1d4ed8;
+        outline-offset: 2px;
+      }
+      .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+      table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #e2e8f0; }
+      th, td { text-align: left; border-bottom: 1px solid #e2e8f0; padding: 8px; font-size: 14px; }
+      caption { text-align: left; font-weight: 600; margin-bottom: 8px; }
+      .status { font-weight: 600; text-transform: uppercase; font-size: 12px; }
+      .muted { color: #64748b; }
+      .error { color: #b91c1c; font-weight: 600; }
+      .auth-help { margin-top: 10px; padding: 10px; border: 1px solid #fecaca; border-radius: 6px; background: #fef2f2; }
+      .hidden { display: none; }
+      a { color: #1d4ed8; text-decoration: none; }
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        border: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <a href="#main-content" class="skip-link" id="skip-link"></a>
+    <header>
+      <strong id="title" aria-live="polite"></strong>
+    </header>
+    <main id="main-content">
+      <section class="card">
+        <div class="controls">
+          <label for="lang-select" id="lang-label"></label>
+          <select id="lang-select">
+            <option value="es">ES</option>
+            <option value="en">EN</option>
+          </select>
+          <label for="api-key-input" id="api-key-label"></label>
+          <input id="api-key-input" type="password" autocomplete="off" />
+          <button id="save-key-btn" type="button"></button>
+          <button id="clear-key-btn" class="destructive" type="button"></button>
+          <label class="checkbox" for="remember-key-toggle">
+            <input id="remember-key-toggle" type="checkbox" />
+            <span id="remember-key-label"></span>
+          </label>
+          <span class="muted" id="api-key-note"></span>
+        </div>
+        <div id="auth-help" class="auth-help hidden" role="status" aria-live="polite"></div>
+        <div class="controls">
+          <button id="nav-summary" class="active" type="button" aria-controls="summary-view"></button>
+          <button id="nav-risk" type="button" aria-controls="risk-view"></button>
+          <button id="nav-runs" type="button" aria-controls="runs-view"></button>
+          <button id="nav-detail" type="button" aria-controls="detail-view"></button>
+        </div>
+      </section>
+
+      <section id="summary-view" class="card" tabindex="-1"></section>
+
+      <section id="risk-view" class="card hidden" tabindex="-1">
+        <div id="risk-table-wrap"></div>
+      </section>
+
+      <section id="runs-view" class="card hidden" tabindex="-1">
+        <div class="filters">
+          <label for="run-target-filter" id="run-target-label" class="sr-only"></label>
+          <select id="run-target-filter"></select>
+          <label for="run-status-filter" id="run-status-label" class="sr-only"></label>
+          <select id="run-status-filter"></select>
+        </div>
+        <div id="runs-table-wrap"></div>
+      </section>
+
+      <section id="detail-view" class="card hidden" tabindex="-1">
+        <div class="filters">
+          <label for="run-id-input" id="run-id-label"></label>
+          <input id="run-id-input" type="number" min="1" />
+          <button id="load-run-btn" type="button"></button>
+        </div>
+        <div id="detail-content"></div>
+      </section>
+    </main>
+
+    <script nonce="{{ csp_nonce }}">
+      const STORAGE_KEY = "osint_operator_api_key";
+      let I18N = { es: {}, en: {} };
+
+      const state = {
+        language: "{{ default_language }}",
+        apiKey: "",
+        targets: [],
+        runs: [],
+        riskTrends: [],
+      };
+
+      const views = {
+        summary: document.getElementById("summary-view"),
+        risk: document.getElementById("risk-view"),
+        runs: document.getElementById("runs-view"),
+        detail: document.getElementById("detail-view"),
+      };
+
+      function t(key) {
+        return (I18N[state.language] && I18N[state.language][key]) || key;
+      }
+
+      // Everything rendered into innerHTML that did not come from the I18N
+      // catalogue goes through here. Run errors quote collector and OpenCTI
+      // exception text, which can carry strings scraped from the internet;
+      // target ids and run fields come from the API. None of it may reach the
+      // DOM as markup in the same origin that holds the API key.
+      function esc(value) {
+        return String(value ?? "").replace(/[&<>"']/g, (c) => (
+          { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+        ));
+      }
+
+      function setText() {
+        document.documentElement.lang = state.language;
+        document.title = t("pageTitle");
+        document.getElementById("title").textContent = t("title");
+        document.getElementById("skip-link").textContent = t("skipToMain");
+        document.getElementById("lang-label").textContent = `${t("language")}:`;
+        document.getElementById("api-key-label").textContent = `${t("apiKey")}:`;
+        document.getElementById("save-key-btn").textContent = t("save");
+        document.getElementById("clear-key-btn").textContent = t("clear");
+        document.getElementById("remember-key-label").textContent = t("rememberKey");
+        document.getElementById("api-key-note").textContent = t("keyNote");
+        document.getElementById("nav-summary").textContent = t("summary");
+        document.getElementById("nav-risk").textContent = t("risk");
+        document.getElementById("nav-runs").textContent = t("runs");
+        document.getElementById("nav-detail").textContent = t("detail");
+        document.getElementById("run-target-label").textContent = t("targetFilter");
+        document.getElementById("run-status-label").textContent = t("statusFilter");
+        document.getElementById("run-id-label").textContent = `${t("runId")}:`;
+        document.getElementById("load-run-btn").textContent = t("loadRun");
+      }
+
+      function setActive(viewName) {
+        Object.keys(views).forEach((key) => {
+          views[key].classList.toggle("hidden", key !== viewName);
+          document.getElementById(`nav-${key}`).classList.toggle("active", key === viewName);
+          document.getElementById(`nav-${key}`).setAttribute("aria-current", key === viewName ? "page" : "false");
+        });
+        views[viewName].focus();
+      }
+
+      async function apiFetch(path) {
+        const headers = {};
+        if (state.apiKey) headers["X-API-Key"] = state.apiKey;
+        const response = await fetch(path, { headers });
+        if (response.status === 401) {
+          const err = new Error("auth_401");
+          err.name = "AuthRequiredError";
+          throw err;
+        }
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          throw new Error(`${response.status} ${body.detail || response.statusText}`);
+        }
+        return response;
+      }
+
+      async function apiGet(path) {
+        const response = await apiFetch(path);
+        return response.json();
+      }
+
+      async function loadI18n() {
+        I18N = await apiGet("/console/i18n.json");
+      }
+
+      function renderError(element, error) {
+        element.innerHTML = `<p class="error">${t("errorPrefix")}: ${esc(error.message)}</p>`;
+      }
+
+      function setAuthHelp(message = "") {
+        const panel = document.getElementById("auth-help");
+        if (!message) {
+          panel.classList.add("hidden");
+          panel.textContent = "";
+          return;
+        }
+        panel.classList.remove("hidden");
+        panel.innerHTML = `<strong>${t("auth401Title")}</strong> ${esc(message)}`;
+      }
+
+      function handleAuthError() {
+        setAuthHelp(t("auth401Body"));
+        document.getElementById("api-key-input").focus();
+      }
+
+      async function downloadRunArtifact(runId, artifactType) {
+        const response = await apiFetch(`/runs/${encodeURIComponent(runId)}/${artifactType}`);
+        let blob;
+        let filename;
+        if (artifactType === "report") {
+          blob = new Blob([await response.text()], { type: "text/plain;charset=utf-8" });
+          filename = "run-" + String(runId) + "-report.txt";
+        } else {
+          blob = new Blob([JSON.stringify(await response.json(), null, 2)], {
+            type: "application/json;charset=utf-8",
+          });
+          filename = "run-" + String(runId) + "-finding.json";
+        }
+        const blobUrl = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = blobUrl;
+        link.download = filename;
+        link.target = "_blank";
+        link.rel = "noopener";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 3000);
+      }
+
+      function buildTargetFilter() {
+        const select = document.getElementById("run-target-filter");
+        const options = [`<option value="">${t("targetAll")}</option>`];
+        for (const target of state.targets) {
+          options.push(`<option value="${esc(target.id)}">${esc(target.id)}</option>`);
+        }
+        select.innerHTML = options.join("");
+      }
+
+      function buildStatusFilter() {
+        const select = document.getElementById("run-status-filter");
+        select.innerHTML = `
+          <option value="">${t("allStatuses")}</option>
+          <option value="pending">${t("statusPending")}</option>
+          <option value="running">${t("statusRunning")}</option>
+          <option value="success">${t("statusSuccess")}</option>
+          <option value="partial">${t("statusPartial")}</option>
+          <option value="failed">${t("statusFailed")}</option>
+        `;
+      }
+
+      function renderSummary() {
+        const byTarget = new Map();
+        for (const run of state.runs) {
+          if (!byTarget.has(run.target_id)) byTarget.set(run.target_id, run);
+        }
+        if (!state.targets.length) {
+          views.summary.innerHTML = `<p class="muted">${t("empty")}</p>`;
+          return;
+        }
+        const rows = state.targets.map((target) => {
+          const latest = byTarget.get(target.id);
+          const status = latest ? latest.status : "-";
+          const runId = latest ? latest.id : "-";
+          const newObs = latest ? latest.new_observables : "-";
+          return `
+            <tr>
+              <td>${esc(target.id)}</td>
+              <td>${esc(runId)}</td>
+              <td class="status">${esc(status)}</td>
+              <td>${esc(newObs)}</td>
+            </tr>
+          `;
+        });
+        views.summary.innerHTML = `
+          <table>
+            <caption>${t("summaryTableCaption")}</caption>
+            <thead>
+              <tr>
+                <th>${t("target")}</th>
+                <th>${t("lastRun")}</th>
+                <th>${t("status")}</th>
+                <th>${t("newObservables")}</th>
+              </tr>
+            </thead>
+            <tbody>${rows.join("")}</tbody>
+          </table>
+        `;
+      }
+
+      function localizeRisk(riskLevel) {
+        if (riskLevel === "critical") return t("riskCritical");
+        if (riskLevel === "high") return t("riskHigh");
+        if (riskLevel === "medium") return t("riskMedium");
+        if (riskLevel === "low") return t("riskLow");
+        return t("riskUnknown");
+      }
+
+      function renderRiskTrends() {
+        const wrap = document.getElementById("risk-table-wrap");
+        if (!state.riskTrends.length) {
+          wrap.innerHTML = `<p class="muted">${t("empty")}</p>`;
+          return;
+        }
+        const rows = state.riskTrends.map((item) => `
+          <tr>
+            <td>${esc(item.target_id)}</td>
+            <td class="status">${esc(localizeRisk(item.latest_risk_level))}</td>
+            <td class="status">${esc(localizeRisk(item.peak_risk_level))}</td>
+            <td>${esc(item.runs_considered)}</td>
+            <td>${esc(item.risk_history.map(localizeRisk).join(" -> "))}</td>
+            <td>${esc(item.new_observables_history.join(" | "))}</td>
+          </tr>
+        `);
+        wrap.innerHTML = `
+          <table>
+            <caption>${t("riskTableCaption")}</caption>
+            <thead>
+              <tr>
+                <th>${t("target")}</th>
+                <th>${t("latestRisk")}</th>
+                <th>${t("peakRisk")}</th>
+                <th>${t("trendWindow")}</th>
+                <th>${t("riskTrend")}</th>
+                <th>${t("observablesTrend")}</th>
+              </tr>
+            </thead>
+            <tbody>${rows.join("")}</tbody>
+          </table>
+        `;
+      }
+
+      function filteredRuns() {
+        const target = document.getElementById("run-target-filter").value;
+        const status = document.getElementById("run-status-filter").value;
+        return state.runs.filter((run) => (!target || run.target_id === target) && (!status || run.status === status));
+      }
+
+      function renderRuns() {
+        const runs = filteredRuns();
+        const wrap = document.getElementById("runs-table-wrap");
+        if (!runs.length) {
+          wrap.innerHTML = `<p class="muted">${t("empty")}</p>`;
+          return;
+        }
+        const rows = runs.map((run) => `
+          <tr>
+            <td>${esc(run.id)}</td>
+            <td>${esc(run.target_id)}</td>
+            <td class="status">${esc(run.status)}</td>
+            <td>${esc(run.started_at || "-")}</td>
+            <td>${esc(run.finished_at || "-")}</td>
+            <td><button type="button" data-run-id="${esc(run.id)}" class="open-run-btn">${t("openDetail")}</button></td>
+          </tr>
+        `);
+        wrap.innerHTML = `
+          <table>
+            <caption>${t("runTableCaption")}</caption>
+            <thead>
+              <tr>
+                <th>${t("runId")}</th>
+                <th>${t("target")}</th>
+                <th>${t("status")}</th>
+                <th>${t("startedAt")}</th>
+                <th>${t("finishedAt")}</th>
+                <th>${t("actions")}</th>
+              </tr>
+            </thead>
+            <tbody>${rows.join("")}</tbody>
+          </table>
+        `;
+
+        for (const button of document.querySelectorAll(".open-run-btn")) {
+          button.addEventListener("click", async (event) => {
+            const runId = event.target.getAttribute("data-run-id");
+            document.getElementById("run-id-input").value = runId;
+            await loadRunDetail(runId);
+          });
+        }
+      }
+
+      async function loadRunDetail(runId) {
+        const container = document.getElementById("detail-content");
+        container.innerHTML = `<p class="muted">${t("loading")}</p>`;
+        setActive("detail");
+        try {
+          const run = await apiGet(`/runs/${runId}`);
+          const delta = await apiGet(`/runs/${runId}/delta`);
+          setAuthHelp("");
+          container.innerHTML = `
+            <p><strong>${t("target")}:</strong> ${esc(run.target_id)}</p>
+            <p><strong>${t("status")}:</strong> ${esc(run.status)}</p>
+            <p><strong>${t("newObservables")}:</strong> ${esc(run.new_observables)}</p>
+            <p><strong>${t("deltaCount")}:</strong> ${esc(delta.length)}</p>
+            <p><strong>${t("errors")}:</strong> ${esc(run.error || "-")}</p>
+            <p>
+              <button type="button" class="run-artifact-btn" data-run-id="${esc(runId)}" data-artifact="report">${t("report")}</button>
+              ·
+              <button type="button" class="run-artifact-btn" data-run-id="${esc(runId)}" data-artifact="finding">${t("finding")}</button>
+            </p>
+          `;
+          for (const button of container.querySelectorAll(".run-artifact-btn")) {
+            button.addEventListener("click", async (event) => {
+              const source = event.currentTarget;
+              const artifactRunId = source.getAttribute("data-run-id");
+              const artifactType = source.getAttribute("data-artifact");
+              try {
+                await downloadRunArtifact(artifactRunId, artifactType);
+                setAuthHelp("");
+              } catch (error) {
+                if (error.name === "AuthRequiredError") {
+                  handleAuthError();
+                  return;
+                }
+                renderError(container, error);
+              }
+            });
+          }
+        } catch (error) {
+          if (error.name === "AuthRequiredError") {
+            handleAuthError();
+            return;
+          }
+          renderError(container, error);
+        }
+      }
+
+      async function loadData() {
+        views.summary.innerHTML = `<p class="muted">${t("loading")}</p>`;
+        document.getElementById("risk-table-wrap").innerHTML = `<p class="muted">${t("loading")}</p>`;
+        document.getElementById("runs-table-wrap").innerHTML = `<p class="muted">${t("loading")}</p>`;
+        try {
+          const [targets, runs, riskTrends] = await Promise.all([
+            apiGet("/targets"),
+            apiGet("/runs"),
+            apiGet("/analytics/risk-trends"),
+          ]);
+          state.targets = targets;
+          state.runs = runs;
+          state.riskTrends = riskTrends;
+          setAuthHelp("");
+          buildTargetFilter();
+          buildStatusFilter();
+          renderSummary();
+          renderRiskTrends();
+          renderRuns();
+        } catch (error) {
+          if (error.name === "AuthRequiredError") {
+            handleAuthError();
+            return;
+          }
+          renderError(views.summary, error);
+          renderError(document.getElementById("runs-table-wrap"), error);
+        }
+      }
+
+      document.getElementById("lang-select").value = state.language;
+      document.getElementById("lang-select").addEventListener("change", (event) => {
+        state.language = event.target.value;
+        setText();
+        buildTargetFilter();
+        buildStatusFilter();
+        renderSummary();
+        renderRiskTrends();
+        renderRuns();
+      });
+      document.getElementById("save-key-btn").addEventListener("click", () => {
+        state.apiKey = document.getElementById("api-key-input").value.trim();
+        const remember = document.getElementById("remember-key-toggle").checked;
+        if (remember && state.apiKey) {
+          sessionStorage.setItem(STORAGE_KEY, state.apiKey);
+          document.getElementById("api-key-note").textContent = t("rememberWarning");
+        } else {
+          sessionStorage.removeItem(STORAGE_KEY);
+          document.getElementById("api-key-note").textContent = t("keyNote");
+        }
+        document.getElementById("api-key-input").value = "";
+        setAuthHelp("");
+        loadData();
+      });
+      document.getElementById("clear-key-btn").addEventListener("click", () => {
+        state.apiKey = "";
+        document.getElementById("api-key-input").value = "";
+        document.getElementById("remember-key-toggle").checked = false;
+        sessionStorage.removeItem(STORAGE_KEY);
+        setAuthHelp(t("keyCleared"));
+      });
+      document.getElementById("nav-summary").addEventListener("click", () => setActive("summary"));
+      document.getElementById("nav-risk").addEventListener("click", () => setActive("risk"));
+      document.getElementById("nav-runs").addEventListener("click", () => setActive("runs"));
+      document.getElementById("nav-detail").addEventListener("click", () => setActive("detail"));
+      document.getElementById("run-target-filter").addEventListener("change", renderRuns);
+      document.getElementById("run-status-filter").addEventListener("change", renderRuns);
+      document.getElementById("load-run-btn").addEventListener("click", () => {
+        const runId = document.getElementById("run-id-input").value.trim();
+        if (runId) loadRunDetail(runId);
+      });
+
+      const storedApiKey = sessionStorage.getItem(STORAGE_KEY);
+      if (storedApiKey) {
+        state.apiKey = storedApiKey;
+        document.getElementById("remember-key-toggle").checked = true;
+      }
+      loadI18n()
+        .then(() => {
+          setText();
+          buildStatusFilter();
+          if (storedApiKey) {
+            document.getElementById("api-key-note").textContent = t("keyLoaded");
+          }
+          loadData();
+        })
+        .catch((error) => {
+          if (error.name === "AuthRequiredError") {
+            handleAuthError();
+            return;
+          }
+          renderError(views.summary, error);
+        });
+    </script>
+  </body>
+</html>
