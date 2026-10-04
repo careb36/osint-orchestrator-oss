@@ -91,7 +91,7 @@ config:
   openctiUrl: http://opencti:8080
   openctiSslVerify: true
   spiderfootUrl: http://spiderfoot:5001
-  spiderfootModules: sfp_dns,sfp_whois,sfp_ssl
+  spiderfootModules: sfp_dnsresolve,sfp_whois,sfp_sslcert
   # es | en — operator-facing text (ADR-004).
   language: es
   # json is the sensible default on Kubernetes: one object per line for the

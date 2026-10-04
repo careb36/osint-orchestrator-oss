@@ -13,6 +13,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # git: the openosint dependency is a pinned git reference, and pip
     # needs a git client to resolve it. python:3.11-slim ships without one.
     git \
+    # libmagic1: pycti 6.x imports python-magic, which loads libmagic at import
+    # time; without it the OpenCTI sink cannot be imported.
+    libmagic1 \
     && rm -rf /var/lib/apt/lists/*
 
 # README.md and LICENSE are referenced from pyproject.toml (readme / license.file);
@@ -20,7 +23,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml README.md LICENSE ./
 # Dummy package source so pip can resolve the project metadata
 RUN mkdir -p orchestrator && touch orchestrator/__init__.py
-RUN pip install --no-cache-dir .
+# The llm extra brings the cloud provider SDKs (openai for openai/nebius,
+# anthropic for anthropic); without it every cloud synthesis fails at runtime.
+RUN pip install --no-cache-dir ".[llm]"
 
 COPY orchestrator/ ./orchestrator/
 

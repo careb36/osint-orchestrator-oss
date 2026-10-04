@@ -47,7 +47,7 @@ class Settings(BaseSettings):
 
     # SpiderFoot
     spiderfoot_url: str = "http://localhost:5001"
-    spiderfoot_modules: str = "sfp_dns,sfp_whois,sfp_ssl"
+    spiderfoot_modules: str = "sfp_dnsresolve,sfp_whois,sfp_sslcert"
     spiderfoot_timeout_seconds: int = 600
 
     # Orchestrator

@@ -63,6 +63,19 @@ def test_settings_field_in_env_example(field_name: str) -> None:
     )
 
 
+def test_env_example_has_no_inline_comment_on_blank_value() -> None:
+    """``KEY=   # comment`` (or ``KEY=# comment``) must not appear in .env.example.
+
+    Docker Compose's env_file parser treats the comment as the value when the
+    value is blank, so a copied template would set e.g. TAVILY_INCLUDE_DOMAINS
+    to "# Optional comma-separated allowlist ...". Put the comment on its own
+    line above the key instead. Commented-out placeholders (``# KEY=   # ...``)
+    are checked too: uncommenting one would bring the bug back.
+    """
+    offenders = re.findall(r"(?m)^#?[ \t]*[A-Z][A-Z0-9_]*=[ \t]*#.*$", _env_example_text())
+    assert not offenders, "Blank values with an inline comment:\n" + "\n".join(offenders)
+
+
 @pytest.mark.parametrize("field_name", _settings_fields())
 def test_settings_field_in_readme_environment_tables(field_name: str) -> None:
     """Each Settings field must be listed in a README environment table row."""

@@ -4,10 +4,14 @@ SpiderFoot collector.
 SpiderFoot exposes a CherryPy web UI + unofficial REST endpoints at port 5001.
 There is NO versioned /api/v1/ prefix — all endpoints are at root path.
 
-Key endpoints used:
-  POST /startscan   → start a scan, returns scan ID
-  GET  /scanstatus?id=<id>  → poll for FINISHED/ERROR/ABORT/RUNNING
-  GET  /scaneventresults?id=<id>&eventType=  → get all results as JSON
+Key endpoints used (shapes checked against SpiderFoot 4.0 sfwebui.py):
+  POST /startscan   → with ``Accept: application/json``: ["SUCCESS", "<scan id>"]
+                      or ["ERROR", "<message>"]; without that header it
+                      answers 303 to the HTML scan page
+  GET  /scanstatus?id=<id>  → [name, target, created, started, ended, status, risk]
+  GET  /scaneventresults?id=<id>&eventType=  → rows of
+                      [last_seen, data, source_data, module, ..., event_type]
+                      with data/source HTML-escaped and the type last
   GET  /ping        → health check
 
 Reference: smicallef/spiderfoot:sfwebui.py (port 5001, @cherrypy.expose methods)
@@ -16,7 +20,9 @@ Reference: smicallef/spiderfoot:sfwebui.py (port 5001, @cherrypy.expose methods)
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
+import re
 import uuid
 from datetime import UTC, datetime
 
@@ -50,6 +56,9 @@ _SF_EVENT_TO_STIX: dict[str, str] = {
     "NETBLOCK_OWNER": "autonomous-system",
     "BGP_AS_OWNER": "autonomous-system",
 }
+
+# SpiderFoot event type names: upper-case tokens such as IP_ADDRESS.
+_SF_EVENT_TYPE_RE = re.compile(r"[A-Z][A-Z0-9_]*")
 
 # Which SF event types create a "resolves-to" relationship with the target domain
 _RESOLVES_FROM_DOMAIN = {"IP_ADDRESS", "IPV6_ADDRESS", "INTERNET_NAME"}
@@ -107,6 +116,8 @@ class SpiderFootCollector(BaseCollector):
 
         resp = await client.post(
             "/startscan",
+            # Without this header SpiderFoot answers 303 to the HTML scan page.
+            headers={"Accept": "application/json"},
             data={
                 "scanname": scan_name,
                 "scantarget": fqdn,
@@ -117,11 +128,17 @@ class SpiderFootCollector(BaseCollector):
         )
         resp.raise_for_status()
         data = resp.json()
-        # SpiderFoot returns {"id": "...", ...} or a list; normalise
+        # SpiderFoot 4 returns ["SUCCESS", "<id>"] or ["ERROR", "<message>"];
+        # a dict with an id is accepted for other builds.
         if isinstance(data, dict):
-            return data.get("id") or data.get("scanId") or data.get("scan_id", "")
-        if isinstance(data, list) and data:
-            return str(data[0])
+            scan_id = data.get("id") or data.get("scanId") or data.get("scan_id")
+            if scan_id:
+                return str(scan_id)
+        if isinstance(data, list) and len(data) >= 2:
+            if data[0] == "SUCCESS" and data[1]:
+                return str(data[1])
+            if data[0] == "ERROR":
+                raise RuntimeError(f"SpiderFoot refused the scan: {data[1]}")
         raise ValueError(f"Unexpected /startscan response: {data}")
 
     async def _wait_for_scan(self, client: httpx.AsyncClient, scan_id: str) -> None:
@@ -134,8 +151,8 @@ class SpiderFootCollector(BaseCollector):
             resp = await client.get("/scanstatus", params={"id": scan_id})
             resp.raise_for_status()
             data = resp.json()
-            # /scanstatus returns a list of [name, target, starttime, endtime, status, id]
-            # or a dict depending on SpiderFoot version
+            # /scanstatus returns [name, target, created, started, ended, status, risk]
+            # (or a dict on other builds)
             status = self._extract_status(data)
             logger.debug("SpiderFoot scan %s status: %s", scan_id, status)
             if status in ("FINISHED", "ABORT-REQUESTED", "ABORTED"):
@@ -150,14 +167,29 @@ class SpiderFootCollector(BaseCollector):
         """Normalise the scan status out of SpiderFoot's dict-or-rows response."""
         if isinstance(data, dict):
             return data.get("status", "UNKNOWN")
-        if isinstance(data, list):
-            # SpiderFoot returns rows; status is typically index 4
-            for row in data:
-                if isinstance(row, list) and len(row) >= 5:
-                    return str(row[4])
-                if isinstance(row, dict):
-                    return row.get("status", "UNKNOWN")
+        # Some builds wrap the row in a list of rows; read the first one.
+        if isinstance(data, list) and data and isinstance(data[0], list):
+            data = data[0]
+        if isinstance(data, list) and len(data) >= 6 and isinstance(data[5], str):
+            return data[5]
         return "UNKNOWN"
+
+    @staticmethod
+    def _row_event_type(row: list) -> str | None:
+        """Event type of a /scaneventresults row, or None for an unknown layout.
+
+        A column (other than the data one) holding a mapped event type wins,
+        wherever it sits, so an extra trailing column cannot hide the type.
+        Otherwise SpiderFoot 4's last column is taken when it looks like an
+        event type (an unmapped one, which the caller skips as usual).
+        """
+        for index, value in enumerate(row):
+            if index != 1 and isinstance(value, str) and value in _SF_EVENT_TO_STIX:
+                return value
+        last = row[-1]
+        if isinstance(last, str) and _SF_EVENT_TYPE_RE.fullmatch(last):
+            return last
+        return None
 
     async def _fetch_results(self, client: httpx.AsyncClient, scan_id: str) -> list[dict]:
         """GET /scaneventresults and return list of event rows."""
@@ -176,9 +208,11 @@ class SpiderFootCollector(BaseCollector):
         """
         Convert SpiderFoot event rows to CollectorResult.
 
-        SpiderFoot /scaneventresults returns rows like:
-          [generated, type, module, source_data, data, last_seen, fp, confidence, visibility, risk]
-        or dicts with "type", "data", etc.
+        SpiderFoot 4 /scaneventresults returns rows like:
+          [last_seen, data, source_data, module, confidence, visibility, risk,
+           hash, false_positive, ..., event_type]
+        with ``data`` HTML-escaped and the event type in the last column, or
+        dicts with "type", "data", etc. on other builds.
         """
         observables: list[Observable] = []
         relationships: list[Relationship] = []
@@ -188,14 +222,40 @@ class SpiderFootCollector(BaseCollector):
         observables.append(Observable(type="domain-name", value=fqdn))
         seen_values.add(fqdn)
 
+        unrecognised = 0
         for event in events:
-            if isinstance(event, list) and len(event) >= 4:
-                event_type = str(event[1])
-                data = str(event[3])
+            if isinstance(event, list) and len(event) >= 2:
+                row_type = self._row_event_type(event)
+                if row_type is None:
+                    unrecognised += 1
+                    continue
+                event_type = row_type
+                data = html.unescape(str(event[1]))
             elif isinstance(event, dict):
-                event_type = event.get("type", "")
-                data = event.get("data", "")
+                # A non-string type would be an unhashable map key and fail
+                # the whole parse. Data must be a string, or a positive integer
+                # for an AS number; anything else (missing, None, bool, float,
+                # 0, a container) is counted so a layout change does not pass
+                # for an empty scan, and never becomes a bogus "0" observable.
+                event_type = event.get("type")
+                raw_data = event.get("data")
+                is_asn_number = (
+                    isinstance(event_type, str)
+                    and _SF_EVENT_TO_STIX.get(event_type) == "autonomous-system"
+                    and type(raw_data) is int
+                    and raw_data > 0
+                )
+                if (
+                    not isinstance(event_type, str)
+                    or not event_type
+                    or not (isinstance(raw_data, str) or is_asn_number)
+                ):
+                    unrecognised += 1
+                    continue
+                # Same as the row layout: a string, HTML-unescaped.
+                data = html.unescape(str(raw_data))
             else:
+                unrecognised += 1
                 continue
 
             if not data or data in seen_values:
@@ -217,6 +277,21 @@ class SpiderFootCollector(BaseCollector):
                             relationship_type="resolves-to",
                         )
                     )
+
+        if unrecognised:
+            # A layout change would otherwise look like a clean scan that found
+            # nothing but the root domain.
+            logger.warning(
+                "SpiderFoot: %d of %d result rows had an unrecognised layout for %s",
+                unrecognised,
+                len(events),
+                fqdn,
+                extra={
+                    "target_id": self.target.id,
+                    "collector": self.name.value,
+                    "skipped_rows": unrecognised,
+                },
+            )
 
         return CollectorResult(
             collector=self.name,

@@ -2,8 +2,12 @@ from pathlib import Path
 
 import yaml
 
-COMPOSE_FILE = Path(__file__).resolve().parents[2] / "docker-compose.yml"
-MISP_ENTRYPOINT = Path(__file__).resolve().parents[2] / "deploy/misp/entrypoint.sh"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+# MISP lives in its own overlay so its required variables do not block installs
+# without MISP (Compose interpolates every service of the files it loads).
+COMPOSE_FILE = REPO_ROOT / "docker-compose.misp.yml"
+BASE_COMPOSE_FILE = REPO_ROOT / "docker-compose.yml"
+MISP_ENTRYPOINT = REPO_ROOT / "deploy/misp/entrypoint.sh"
 
 
 def test_misp_uses_its_dedicated_passwordless_redis() -> None:
@@ -30,3 +34,9 @@ def test_misp_backport_updates_persisted_redis_settings() -> None:
 
     assert "('redis_host' => )" in entrypoint
     assert "('redis_password' => )" in entrypoint
+
+
+def test_base_compose_has_no_misp_service() -> None:
+    services = yaml.safe_load(BASE_COMPOSE_FILE.read_text(encoding="utf-8"))["services"]
+
+    assert not [name for name in services if "misp" in name]

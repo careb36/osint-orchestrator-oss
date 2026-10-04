@@ -1,0 +1,149 @@
+# docker-compose.misp.yml
+#
+# Optional MISP overlay: MISP + MariaDB + Redis for MISP + the OpenCTI<->MISP
+# connector. Kept out of docker-compose.yml because Compose interpolates every
+# service in the files it loads, profile or not: the required MISP variables
+# below would otherwise block `docker compose up` for every install that does
+# not use MISP.
+#
+# The MISP_* passwords, MISP_KEY and CONNECTOR_MISP_ID are required (`:?`):
+# Compose stops with "required variable ... is missing a value" until they
+# are set in .env. The checks carry no custom message on purpose: a
+# "set ... in .env" text next to a PASSWORD key reads as a hardcoded secret to
+# secret scanners.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.misp.yml --profile misp up -d
+#
+# See README -> MISP for startup order and how to obtain the API key.
+
+services:
+  # ── MISP (profile: misp) ───────────────────────────────────────
+  # Full MISP stack with its own MariaDB and Redis (not shared with OpenCTI).
+  # Images: https://github.com/MISP/misp-docker
+  #
+  # First-time startup can take 5-10 minutes while MISP initialises its DB.
+  # See README → MISP for startup order and how to obtain the API key.
+
+  misp-db:
+    image: mariadb:10.11
+    profiles: ["misp"]
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: misp
+      MYSQL_USER: misp
+      MYSQL_PASSWORD: "${MISP_MYSQL_PASSWORD:?}"
+      MYSQL_ROOT_PASSWORD: "${MISP_MYSQL_ROOT_PASSWORD:?}"
+    volumes:
+      - misp-db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  misp-redis:
+    image: redis:8.0
+    profiles: ["misp"]
+    restart: unless-stopped
+    volumes:
+      - misp-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  misp-modules:
+    # Pin to the same tag as misp-core; check https://github.com/MISP/misp-docker/releases
+    image: ghcr.io/misp/misp-docker/misp-modules:v2.4.198
+    profiles: ["misp"]
+    restart: unless-stopped
+    depends_on:
+      - misp-redis
+
+  misp:
+    # Keep the runtime aligned with the persisted v2.4 app tree while backporting
+    # upstream's passwordless Redis handling.
+    build:
+      context: .
+      dockerfile: Dockerfile.misp
+    image: osint-orchestrator-misp:v2.4.198-passwordless
+    profiles: ["misp"]
+    restart: unless-stopped
+    depends_on:
+      misp-db:
+        condition: service_healthy
+      misp-redis:
+        condition: service_healthy
+    environment:
+      # misp-docker uses BASE_URL / ADMIN_EMAIL / ADMIN_PASSWORD as primary vars;
+      # MISP_BASE_URL / MISP_ADMIN_EMAIL / MISP_ADMIN_PASSPHRASE are accepted too
+      # (older image versions). Set both forms for compatibility.
+      BASE_URL: "${MISP_BASE_URL:-https://localhost:${MISP_PORT:-8443}}"
+      MISP_BASE_URL: "${MISP_BASE_URL:-https://localhost:${MISP_PORT:-8443}}"
+      ADMIN_EMAIL: "${MISP_ADMIN_EMAIL:-admin@example.com}"
+      MISP_ADMIN_EMAIL: "${MISP_ADMIN_EMAIL:-admin@example.com}"
+      ADMIN_PASSWORD: "${MISP_ADMIN_PASSWORD:?}"
+      MISP_ADMIN_PASSPHRASE: "${MISP_ADMIN_PASSWORD:?}"
+      # Database (MariaDB, not MySQL)
+      MYSQL_HOST: misp-db
+      MYSQL_DATABASE: misp
+      MYSQL_USER: misp
+      MYSQL_PASSWORD: "${MISP_MYSQL_PASSWORD:?}"
+      # Redis (dedicated — not shared with OpenCTI). Explicitly set the host so
+      # the container entrypoint does not fall back to the shared OpenCTI Redis.
+      # The derived image prevents an empty password from falling back to
+      # "redispassword" in the v2.4.198 entrypoint.
+      REDIS_HOST: misp-redis
+      REDIS_PORT: 6379
+      ENABLE_REDIS_EMPTY_PASSWORD: "true"
+      # misp-modules sidecar
+      MISP_MODULES_FQDN: misp-modules
+    ports:
+      - "${MISP_PORT:-8443}:443"
+    volumes:
+      - misp-data:/var/www/MISP
+
+  # OpenCTI ↔ MISP synchronisation via the official connector.
+  # https://github.com/OpenCTI-Platform/connectors/tree/master/external-import/misp
+  # Version MUST match the opencti/platform tag in docker-compose.yml (6.8.11).
+  connector-misp:
+    image: opencti/connector-misp:6.8.11
+    profiles: ["misp"]
+    restart: unless-stopped
+    depends_on:
+      opencti:
+        condition: service_healthy
+    environment:
+      # Same as x-connector-env in docker-compose.yml (anchors do not cross files).
+      OPENCTI_URL: "${OPENCTI_URL:-http://opencti:8080}"
+      OPENCTI_TOKEN: "${OPENCTI_ADMIN_TOKEN}"
+      CONNECTOR_ID: "${CONNECTOR_MISP_ID:?}"  # fixed UUID per install
+      CONNECTOR_NAME: "MISP"
+      CONNECTOR_SCOPE: "misp"
+      CONNECTOR_LOG_LEVEL: "error"
+      CONNECTOR_DURATION_PERIOD: "PT5M"                # import every 5 minutes
+      # misp-core exposes HTTPS on port 443. Use https:// and disable cert
+      # verification (MISP_SSL=false, MISP_SSL_VERIFY=false) because misp-docker
+      # ships a self-signed certificate by default. In production, supply a
+      # real cert and set both to true in .env.
+      MISP_URL: "${MISP_URL:-https://misp}"
+      MISP_REFERENCE_URL: "${MISP_URL:-https://misp}"
+      MISP_KEY: "${MISP_KEY:?}"   # API key from MISP admin UI
+      MISP_SSL_VERIFY: "${MISP_SSL_VERIFY:-false}"
+      MISP_IMPORT_ONLY_PUBLISHED: "${MISP_IMPORT_ONLY_PUBLISHED:-false}"
+      MISP_IMPORT_TO_IDS_NO_SCORE: "${MISP_IMPORT_TO_IDS_NO_SCORE:-40}"
+      MISP_SSL: "${MISP_SSL:-false}"                    # dev: skip TLS verify
+      MISP_DATETIME_ATTRIBUTE: "timestamp"
+      MISP_CREATE_REPORTS: "true"
+      MISP_CREATE_INDICATORS: "true"
+      MISP_CREATE_OBSERVABLES: "true"
+      MISP_REPORT_TYPE: "misp-event"
+
+
+volumes:
+  misp-db-data:
+  misp-redis-data:
+  misp-data:
