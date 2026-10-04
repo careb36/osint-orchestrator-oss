@@ -263,6 +263,8 @@ async def test_schema_downgrade_does_not_consume_an_attempt(
         (400, "response_format.type must be one of: text, json_object"),
         (400, "Extra inputs are not permitted: response_format"),
         (422, "response_format is deprecated for this model"),
+        (400, "This model can't support response_format"),
+        (400, "json_schema can\u2019t be used here"),
     ],
 )
 async def test_schema_rejections_are_detected_across_wordings(
@@ -286,6 +288,10 @@ async def test_schema_rejections_are_detected_across_wordings(
         # echoes the request body (mentions response_format) but complains about something else
         'max_tokens is too large for this model. request: {"response_format": {"type": "json_schema"}}',
         "model not found. supported parameters: messages, response_format, temperature",
+        # the state word is in another sentence; the field is only echoed
+        'Model x is temporarily unavailable. request echoed: {"response_format": {"type": "x"}}',
+        # `extra` must not match inside extra_body
+        "Prompt is empty. Note: extra_body/response_format are ignored here",
     ],
 )
 async def test_unrelated_400_is_not_a_downgrade_and_not_retried(
@@ -514,7 +520,7 @@ async def test_retry_log_carries_attempt_in_extra(
 
 @pytest.mark.asyncio
 async def test_slow_schema_probe_exhausting_the_budget_is_a_timeout(
-    monkeypatch: pytest.MonkeyPatch, _sleeps: list[float]
+    monkeypatch: pytest.MonkeyPatch, _sleeps: list[float], caplog
 ) -> None:
     actions: list[object] = []
     fake_sdk, state = _install_fake_openai(monkeypatch, actions)
@@ -533,10 +539,15 @@ async def test_slow_schema_probe_exhausting_the_budget_is_a_timeout(
     before_timeout = _metric_value(REQ_METRIC, status="timeout", **labels)
     before_probe = _metric_value(REQ_METRIC, status="schema_downgrade", **labels)
 
-    with pytest.raises(TimeoutError, match="budget"):
+    with (
+        caplog.at_level("WARNING", logger="orchestrator.synthesizer.providers.openai_compat"),
+        pytest.raises(TimeoutError, match="budget"),
+    ):
         await _client().complete("sys", "user", timeout=5, response_schema={"type": "object"})
 
     assert len(state["payloads"]) == 1  # the probe; no downgraded retry without budget
+    exhausted = next(r for r in caplog.records if "budget exhausted" in r.getMessage())
+    assert exhausted.status == "timeout" and exhausted.latency_ms == 10_000
     # one sample per SDK call: the probe was sampled once, the budget exit adds none
     assert _metric_value(REQ_METRIC, status="schema_downgrade", **labels) - before_probe == 1
     assert _metric_value(REQ_METRIC, status="timeout", **labels) - before_timeout == 0

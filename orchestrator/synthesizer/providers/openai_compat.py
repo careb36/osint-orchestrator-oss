@@ -57,19 +57,22 @@ _MAX_ATTEMPTS = 3
 _PRESET_BASE_URLS: dict[str, str] = {"nebius": NEBIUS_DEFAULT_BASE_URL}
 # Message heuristic for servers that return no ``error.param``: the schema
 # field must be named within 80 characters of a rejection verb, in either
-# order, on the same line. "Unrecognized request argument supplied: json_schema",
+# order, inside one sentence (a dot followed by a word character, as in
+# ``response_format.type``, is part of an identifier, not a sentence end). "Unrecognized request argument supplied: json_schema",
 # "response_format is not supported by this model" and "Invalid value for
 # 'response_format'" match; an unrelated error that merely echoes the request
 # body does not.
 _SCHEMA_FIELD = r"(?:response_format|json_schema|json schema)"
 _REJECTION = (
     r"(?:unrecognized|not recognized|unsupported|not supported|does ?n[o'\u2019]t support|"
-    r"do ?n[o'\u2019]t support|unknown|invalid|not (?:a )?valid|cannot|can ?n[o'\u2019]t|not allowed|"
+    r"do ?n[o'\u2019]t support|unknown|invalid|not (?:a )?valid|cannot|can ?n[o'\u2019]t|can['\u2019]t|"
+    r"not allowed|"
     r"not permitted|forbidden|unexpected|extra|no longer|disabled|removed|deprecated|"
     r"must be|not available|unavailable)"
 )
+_SPAN = r"(?:[^.\n]|\.(?=\w)){0,80}"
 _SCHEMA_REJECTION_RE = re.compile(
-    rf"{_REJECTION}[^\n]{{0,80}}{_SCHEMA_FIELD}|{_SCHEMA_FIELD}[^\n]{{0,80}}{_REJECTION}",
+    rf"\b{_REJECTION}\b{_SPAN}\b{_SCHEMA_FIELD}\b|\b{_SCHEMA_FIELD}\b{_SPAN}\b{_REJECTION}\b",
     re.IGNORECASE,
 )
 _BACKOFF_BASE_SECONDS = 1.0
@@ -226,7 +229,8 @@ class OpenAICompatClient:
                 },
             }
 
-        deadline = time.monotonic() + timeout
+        call_started = time.monotonic()
+        deadline = call_started + timeout
         attempt = 0
         last_exc: Exception | None = None
         while True:
@@ -250,7 +254,8 @@ class OpenAICompatClient:
                     extra={
                         **log_extra,
                         "status": "timeout",
-                        "latency_ms": int((time.monotonic() - started) * 1000),
+                        # elapsed since the first attempt: the whole budget
+                        "latency_ms": int((time.monotonic() - call_started) * 1000),
                         "input_tokens": 0,
                         "output_tokens": 0,
                     },
