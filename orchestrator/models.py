@@ -217,6 +217,16 @@ class CollectorSet(BaseModel):
         )
     )
 
+    @field_validator("tavily")
+    @classmethod
+    def _tavily_timeout_default(cls, cfg: CollectorConfig) -> CollectorConfig:
+        # A block such as ``tavily: {enabled: true}`` bypasses the default
+        # factory above and would inherit the generic ``timeout_seconds``
+        # default; apply the Tavily-specific global unless the operator set one.
+        if "timeout_seconds" not in cfg.model_fields_set:
+            return cfg.model_copy(update={"timeout_seconds": _tavily_default_timeout()})
+        return cfg
+
     @field_validator("socialosint")
     @classmethod
     def _validate_socialosint_platforms(cls, cfg: CollectorConfig) -> CollectorConfig:

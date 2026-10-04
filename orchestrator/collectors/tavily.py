@@ -44,22 +44,26 @@ TAVILY_SEARCH_URL = "https://api.tavily.com/search"
 
 # Three templates per language so the default ``max_calls_per_run`` (3) covers
 # the whole set; raising the cap does not change coverage.
+# The target is a plain quoted search term, not a ``site:`` scope: adverse
+# news, sanctions and litigation are reported by third parties, not on the
+# entity's own domain. ``include_domains`` exists for operators who want to
+# restrict the sources.
 _QUERY_TEMPLATES: dict[str, list[str]] = {
     "en": [
-        "site:{target} adverse news OR sanctions OR litigation OR regulatory action",
-        "site:{target} ownership structure shareholders ultimate beneficial owner",
-        "site:{target} legal proceedings court case settlement investigation",
+        '"{target}" adverse news OR sanctions OR litigation OR regulatory action',
+        '"{target}" ownership structure shareholders ultimate beneficial owner',
+        '"{target}" legal proceedings court case settlement investigation',
     ],
     "es": [
-        "site:{target} noticias adversas OR sanciones OR litigios OR acciones regulatorias",
-        "site:{target} estructura societaria accionistas beneficiario final",
-        "site:{target} procesos judiciales demanda acuerdo investigación",
+        '"{target}" noticias adversas OR sanciones OR litigios OR acciones regulatorias',
+        '"{target}" estructura societaria accionistas beneficiario final',
+        '"{target}" procesos judiciales demanda acuerdo investigación',
     ],
 }
 
 _RETRIES = 3
 _ALLOWED_SCHEMES = frozenset({"http", "https"})
-_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+_LABEL_RE = re.compile(r"\A[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
 
 
 def split_csv(value: str | Iterable[str]) -> list[str]:
@@ -101,30 +105,50 @@ class TavilyCollector(BaseCollector):
         if not is_hostname(fqdn):
             return self._failure(fqdn, "Tavily: target must be a domain name", log_extra)
 
-        queries = self.build_queries(fqdn)
-        max_calls = max(1, min(cfg.max_calls_per_run, settings.tavily_max_calls_per_run))
+        max_calls = min(cfg.max_calls_per_run, settings.tavily_max_calls_per_run)
+        if max_calls <= 0:
+            return self._failure(
+                fqdn, "Tavily: call budget is 0 (TAVILY_MAX_CALLS_PER_RUN)", log_extra
+            )
         max_results = max(1, min(cfg.max_results, settings.tavily_max_results))
+        queries = self.build_queries(fqdn)[:max_calls]
         budget = float(cfg.timeout_seconds)
         deadline = asyncio.get_running_loop().time() + budget
 
         results: list[dict[str, Any]] = []
         notes: list[str] = []
+        failures: list[str] = []
+        seen_urls: set[str] = set()
+        timed_out = False
         try:
             async with asyncio.timeout(budget):
-                for query in queries[:max_calls]:
+                for query in queries:
                     data = await self._search(query, cfg, max_results, deadline)
-                    items = data.get("results") if isinstance(data, dict) else None
-                    items = [item for item in items or [] if isinstance(item, dict)]
-                    results.extend(items[:max_results])
-                    notes.extend(
-                        note for note in map(self._note_from_result, items[:max_results]) if note
-                    )
-                    if cfg.include_answer and isinstance(data, dict) and data.get("answer"):
+                    if data is None:
+                        failures.append(query)
+                        continue
+                    items = [item for item in data.get("results") or [] if isinstance(item, dict)]
+                    for item in items[:max_results]:
+                        # One observable and one note per distinct URL: the
+                        # same page answering two queries must not produce two
+                        # STIX Notes with different ids.
+                        url = self._safe_url(item.get("url"))
+                        if url is None or url in seen_urls:
+                            continue
+                        seen_urls.add(url)
+                        results.append(item)
+                        note = self._note_from_result(item)
+                        if note:
+                            notes.append(note)
+                    if cfg.include_answer and data.get("answer"):
                         answer = flatten_untrusted(str(data["answer"]))[:500]
                         notes.append(
                             f"tavily | answer | query={flatten_untrusted(query)} | {answer}"
                         )
         except TimeoutError:
+            timed_out = True
+
+        if timed_out:
             logger.warning(
                 "Tavily timed out after %ss for %s", cfg.timeout_seconds, fqdn, extra=log_extra
             )
@@ -136,6 +160,24 @@ class TavilyCollector(BaseCollector):
                 observables=self._to_observables(results),
                 notes=notes,
             )
+
+        if failures and len(failures) == len(queries):
+            logger.warning(
+                "Tavily: all %d queries failed for %s",
+                len(queries),
+                fqdn,
+                extra={**log_extra, "failed_queries": len(failures)},
+            )
+            return CollectorResult(
+                collector=self.name,
+                target_fqdn=fqdn,
+                success=False,
+                error=f"Tavily: all {len(queries)} queries failed; see the collector log",
+                observables=[],
+                notes=notes,
+            )
+        if failures:
+            notes.append(f"tavily: {len(failures)} of {len(queries)} queries failed")
 
         if not results:
             notes.append("tavily: no public results matched the query set")
@@ -183,34 +225,53 @@ class TavilyCollector(BaseCollector):
                 return data if isinstance(data, dict) else {}
 
         try:
-            return await self._with_retry(_request)
+            return await self._with_retry(_request, query)
         except (httpx.HTTPError, ValueError) as exc:
+            status_code = (
+                exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+            )
             logger.warning(
-                "Tavily search failed for %s: %s",
+                "Tavily search failed for %s (status=%s): %s",
                 self.target.fqdn,
+                status_code,
                 exc,
-                extra={"target_id": self.target.id, "collector": self.name.value},
+                extra={
+                    "target_id": self.target.id,
+                    "collector": self.name.value,
+                    "status_code": status_code,
+                    "query": query,
+                },
             )
             return None
 
-    async def _with_retry(self, request: Callable[[], Awaitable[dict[str, Any]]]) -> dict[str, Any]:
+    async def _with_retry(
+        self, request: Callable[[], Awaitable[dict[str, Any]]], query: str
+    ) -> dict[str, Any]:
         """Retry on 429, 5xx and transport errors only; other errors propagate at once."""
         for attempt in range(_RETRIES + 1):
+            status_code: int | None = None
             try:
                 return await request()
             except httpx.HTTPStatusError as exc:
-                if attempt >= _RETRIES or not _is_retryable_status(exc.response.status_code):
+                status_code = exc.response.status_code
+                if attempt >= _RETRIES or not _is_retryable_status(status_code):
                     raise
             except httpx.TransportError:
                 if attempt >= _RETRIES:
                     raise
             delay = float(2**attempt)
             logger.warning(
-                "Tavily request failed, retrying in %.0fs (attempt %d/%d)",
+                "Tavily request failed (status=%s), retrying in %.0fs (attempt %d/%d)",
+                status_code,
                 delay,
                 attempt + 1,
                 _RETRIES,
-                extra={"target_id": self.target.id, "collector": self.name.value},
+                extra={
+                    "target_id": self.target.id,
+                    "collector": self.name.value,
+                    "status_code": status_code,
+                    "query": query,
+                },
             )
             await asyncio.sleep(delay)
         raise RuntimeError("unreachable")  # pragma: no cover
