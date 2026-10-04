@@ -118,7 +118,18 @@ def _target(*, llm: str = "local", language: str | None = None) -> Target:
 # ─── FakeLLMClient ────────────────────────────────────────────────────────────
 
 
-class FakeLLMClient:
+class _ReportsModel:
+    """Mixin giving the fakes the ``model_for_route`` half of the LLMClient protocol."""
+
+    served_model = "fake-model"
+    provider = "fake"
+
+    def model_for_route(self, route: str) -> str:
+        _ = route
+        return self.served_model
+
+
+class FakeLLMClient(_ReportsModel):
     """Returns a canonical JSON Finding on every call."""
 
     def __init__(self, response: str | None = None):
@@ -140,7 +151,7 @@ class FakeLLMClient:
         return self._response
 
 
-class FailingLLMClient:
+class FailingLLMClient(_ReportsModel):
     """Always raises asyncio.TimeoutError to simulate a timeout."""
 
     async def complete(
@@ -158,7 +169,7 @@ class FailingLLMClient:
         raise TimeoutError("LLM timed out")
 
 
-class MalformedLLMClient:
+class MalformedLLMClient(_ReportsModel):
     """Returns non-JSON on first call, valid JSON on the second (repair)."""
 
     def __init__(self, *, always_bad: bool = False):
@@ -237,6 +248,10 @@ async def test_fake_client_produces_correct_finding_and_persists(
     assert record is not None
     assert record.risk_level == "low"
     assert json.loads(record.new_since_last_run) == _CANONICAL_FINDING["new_since_last_run"]
+    # The persisted model is the one the client reports it served, not the
+    # route resolution: Ollama ignores the route and serves OLLAMA_MODEL.
+    assert record.model == FakeLLMClient.served_model
+    assert record.provider == FakeLLMClient.provider
 
     # Check report.md contains the synthesis section
     report_path = await generate_report(report_data, report_dir=str(tmp_path), finding=finding)
@@ -311,7 +326,7 @@ async def test_retry_success_raw_response_is_second_call(
     first_bad = "definitely not json"
     second_good = json.dumps(_CANONICAL_FINDING)
 
-    class TwoCallClient:
+    class TwoCallClient(_ReportsModel):
         calls = 0
 
         async def complete(
@@ -380,6 +395,24 @@ async def test_timeout_annotates_run_error_and_returns_none(
     assert "synthesis" in run_db.error
 
 
+@pytest.mark.asyncio
+async def test_client_without_provider_member_is_a_failed_synthesis(
+    mem_db, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """synthesize() never raises: a client missing ``provider`` returns ``failed``."""
+
+    class LegacyClient:
+        async def complete(self, system, user, *, timeout, **_):
+            return json.dumps(_CANONICAL_FINDING)
+
+    import orchestrator.synthesizer.providers as prov_module
+
+    monkeypatch.setattr(prov_module, "get_client", lambda t: LegacyClient())
+    finding, status = await synthesize(_target(), 1, _make_report_data())
+    assert finding is None
+    assert status == "failed"
+
+
 # ─── Test 4: target.llm="local" always uses OllamaClient ─────────────────────
 
 
@@ -425,7 +458,7 @@ async def test_prompt_language_default_es_and_en_override(
 
     captured_prompts: list[tuple[str, str]] = []
 
-    class CapturingClient:
+    class CapturingClient(_ReportsModel):
         async def complete(
             self,
             system: str,
@@ -460,7 +493,7 @@ async def test_synthesis_calls_reasoning_model_route_when_supported(
 ) -> None:
     captured_routes: list[str] = []
 
-    class RouteCapturingClient:
+    class RouteCapturingClient(_ReportsModel):
         async def complete(
             self,
             system: str,
@@ -493,7 +526,7 @@ async def test_authorization_not_in_prompt(
 
     captured_prompts: list[str] = []
 
-    class CapturingClient:
+    class CapturingClient(_ReportsModel):
         async def complete(
             self,
             system: str,
@@ -573,7 +606,7 @@ async def test_truncation_keeps_new_and_respects_max(
 
     captured: list[str] = []
 
-    class CapturingClient:
+    class CapturingClient(_ReportsModel):
         async def complete(
             self,
             system: str,

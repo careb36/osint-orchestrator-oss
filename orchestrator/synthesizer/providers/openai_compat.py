@@ -1,11 +1,24 @@
 """
 OpenAI-compatible LLM provider (optional extra).
 
-Works with the official OpenAI API, Azure OpenAI, or any local server that
-speaks the OpenAI chat-completions protocol (e.g. LM Studio, vLLM).
+Works with the official OpenAI API, Nebius Token Factory, Azure OpenAI, or any
+local server that speaks the OpenAI chat-completions protocol (e.g. LM Studio,
+vLLM).
 
 Install: pip install openai
-Config:  OPENAI_API_KEY, optionally OPENAI_BASE_URL for compatible endpoints.
+Config:  OPENAI_API_KEY, optionally OPENAI_BASE_URL for compatible endpoints;
+         NEBIUS_API_KEY / NEBIUS_BASE_URL for the Nebius preset.
+
+Retry policy
+------------
+The SDK's own retries are disabled (``max_retries=0``) and replaced by a loop
+that the caller's ``timeout`` bounds as a whole: every attempt gets the
+remaining budget, backoff waits are capped by it, and the call never outlives
+``LLM_TIMEOUT_SECONDS``. Retries happen on 408, 409, 429, every 5xx and
+transport errors, honouring ``Retry-After`` when the provider sends one. A
+provider that rejects ``response_format`` (400/422) gets the same request once
+more without it; that capability probe is counted as ``schema_downgrade`` and
+does not consume an attempt.
 """
 
 from __future__ import annotations
@@ -13,12 +26,18 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import re
 import time
 from typing import Any, Literal
 
-from orchestrator import metrics
-from orchestrator.config import settings
+from orchestrator.config import NEBIUS_DEFAULT_BASE_URL, settings
 from orchestrator.synthesizer.model_routing import resolve_model_for_route
+from orchestrator.synthesizer.providers._policy import (
+    SCHEMA_REJECT_STATUS_CODES,
+    is_retryable_status,
+    status_label,
+)
+from orchestrator.synthesizer.providers._telemetry import record_request
 
 logger = logging.getLogger(__name__)
 
@@ -31,9 +50,33 @@ except ImportError:
     _HAS_OPENAI = False
 
 
-_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 _MAX_ATTEMPTS = 3
+# Named presets and the endpoint they must never fall away from. "openai"
+# follows OPENAI_BASE_URL (blank = SDK default); any other preset without a
+# URL is a configuration error rather than a silent call to api.openai.com.
+_PRESET_BASE_URLS: dict[str, str] = {"nebius": NEBIUS_DEFAULT_BASE_URL}
+# Message heuristic for servers that return no ``error.param``: the schema
+# field must be named within 80 characters of a rejection verb, in either
+# order, inside one sentence (a dot followed by a word character, as in
+# ``response_format.type``, is part of an identifier, not a sentence end). "Unrecognized request argument supplied: json_schema",
+# "response_format is not supported by this model" and "Invalid value for
+# 'response_format'" match; an unrelated error that merely echoes the request
+# body does not.
+_SCHEMA_FIELD = r"(?:response_format|json_schema|json schema)"
+_REJECTION = (
+    r"(?:unrecognized|not recognized|unsupported|not supported|does ?n[o'\u2019]t support|"
+    r"do ?n[o'\u2019]t support|unknown|invalid|not (?:a )?valid|cannot|can ?n[o'\u2019]t|can['\u2019]t|"
+    r"not allowed|"
+    r"not permitted|forbidden|unexpected|extra|no longer|disabled|removed|deprecated|"
+    r"must be|not available|unavailable)"
+)
+_SPAN = r"(?:[^.\n]|\.(?=\w)){0,80}"
+_SCHEMA_REJECTION_RE = re.compile(
+    rf"\b{_REJECTION}\b{_SPAN}\b{_SCHEMA_FIELD}\b|\b{_SCHEMA_FIELD}\b{_SPAN}\b{_REJECTION}\b",
+    re.IGNORECASE,
+)
 _BACKOFF_BASE_SECONDS = 1.0
+_BACKOFF_CAP_SECONDS = 30.0
 _BACKOFF_JITTER_RATIO = 0.25
 
 
@@ -44,56 +87,69 @@ def _usage_tokens(response: Any) -> tuple[int, int]:
     return in_tokens, out_tokens
 
 
-def _error_status_label(exc: Exception) -> str:
-    status_code = getattr(exc, "status_code", None)
-    if status_code == 429:
-        return "http_429"
-    if isinstance(status_code, int) and status_code >= 500:
-        return "http_5xx"
-    timeout_types = tuple(
-        cls
-        for cls in (
-            getattr(_openai_sdk, "APITimeoutError", None),
-            TimeoutError,
-            asyncio.TimeoutError,
-        )
-        if cls is not None
+def _sdk_types(*names: str) -> tuple[type[BaseException], ...]:
+    return tuple(
+        cls for cls in (getattr(_openai_sdk, name, None) for name in names) if cls is not None
     )
-    if timeout_types and isinstance(exc, timeout_types):
-        return "timeout"
-    return "error"
+
+
+def _error_status_label(exc: Exception) -> str:
+    return status_label(exc, timeout_types=_sdk_types("APITimeoutError"))
 
 
 def _is_retryable(exc: Exception) -> bool:
     status_code = getattr(exc, "status_code", None)
-    if status_code in _RETRYABLE_STATUS_CODES:
-        return True
-    retryable_types = tuple(
-        cls
-        for cls in (
-            getattr(_openai_sdk, "RateLimitError", None),
-            getattr(_openai_sdk, "APITimeoutError", None),
-            getattr(_openai_sdk, "APIConnectionError", None),
-            TimeoutError,
-            asyncio.TimeoutError,
-        )
-        if cls is not None
+    if isinstance(status_code, int):
+        return is_retryable_status(status_code)
+    retryable_types = (
+        *_sdk_types("RateLimitError", "APITimeoutError", "APIConnectionError"),
+        TimeoutError,
+        asyncio.TimeoutError,
     )
-    return bool(retryable_types and isinstance(exc, retryable_types))
+    return isinstance(exc, retryable_types)
 
 
-def _supports_json_schema_response(exc: Exception) -> bool:
-    status_code = getattr(exc, "status_code", None)
-    if status_code != 400:
-        return True
-    message = str(exc).lower()
-    has_response_format = "response_format" in message
-    has_json_schema = "json_schema" in message or "json schema" in message
-    return not (has_response_format and has_json_schema)
+def _error_param(exc: Exception) -> str | None:
+    """The ``error.param`` of an OpenAI-style error body, when the SDK exposes one."""
+    body = getattr(exc, "body", None)
+    error = body.get("error", body) if isinstance(body, dict) else None
+    param = error.get("param") if isinstance(error, dict) else None
+    return str(param) if param else None
+
+
+def _rejects_json_schema(exc: Exception) -> bool:
+    """True when the provider refused the request because of ``response_format``.
+
+    The structured ``error.param`` is authoritative when present. Without it
+    (gateways, older servers) the message must name the schema field next to
+    a rejection verb (``_SCHEMA_REJECTION_RE``); some servers answer 422
+    instead of 400. The probe runs once per call (the key is popped), so a
+    misread costs one tolerant-parsing request, never schema enforcement on
+    the retries of an unrelated error.
+    """
+    if getattr(exc, "status_code", None) not in SCHEMA_REJECT_STATUS_CODES:
+        return False
+    param = _error_param(exc)
+    if param is not None:
+        return param.startswith("response_format")
+    return _SCHEMA_REJECTION_RE.search(str(exc)) is not None
+
+
+def _retry_after_seconds(exc: Exception) -> float | None:
+    """Seconds from a ``Retry-After`` header, if the provider sent a numeric one."""
+    headers = getattr(getattr(exc, "response", None), "headers", None)
+    raw = headers.get("retry-after") if hasattr(headers, "get") else None
+    if raw is None:
+        return None
+    try:
+        value = float(str(raw).strip())
+    except ValueError:  # HTTP-date form: fall back to the exponential delay
+        return None
+    return value if value >= 0 else None
 
 
 def _backoff_seconds(attempt_index: int) -> float:
-    delay = min(_BACKOFF_BASE_SECONDS * (2**attempt_index), 30.0)
+    delay = min(_BACKOFF_BASE_SECONDS * (2**attempt_index), _BACKOFF_CAP_SECONDS)
     jitter = delay * _BACKOFF_JITTER_RATIO
     return max(0.0, random.uniform(delay - jitter, delay + jitter))
 
@@ -110,7 +166,28 @@ class OpenAICompatClient:
     ) -> None:
         self._provider_name = provider_name
         self._api_key = api_key if api_key is not None else settings.openai_api_key
-        self._base_url = base_url if base_url is not None else (settings.openai_base_url or None)
+        # A blank URL never reaches the SDK as a schemeless "": "openai" falls
+        # back to OPENAI_BASE_URL and then to the SDK default; a named preset
+        # falls back to its own endpoint; anything else must say where it goes.
+        cleaned = (base_url or "").strip()
+        if not cleaned:
+            if provider_name == "openai":
+                cleaned = settings.openai_base_url.strip()
+            elif provider_name in _PRESET_BASE_URLS:
+                cleaned = _PRESET_BASE_URLS[provider_name]
+            else:
+                raise ValueError(f"LLM preset {provider_name!r} needs an explicit base_url")
+        self._base_url = cleaned or None
+
+    @property
+    def provider(self) -> str:
+        """Provider name as recorded on findings and metrics (``openai`` or a preset)."""
+        return self._provider_name
+
+    @staticmethod
+    def model_for_route(route: Literal["reasoning", "fast"]) -> str:
+        """The model a request on *route* is sent to (persisted with the finding)."""
+        return resolve_model_for_route(route)
 
     async def complete(
         self,
@@ -121,17 +198,18 @@ class OpenAICompatClient:
         model_route: Literal["reasoning", "fast"] = "reasoning",
         response_schema: dict[str, Any] | None = None,
     ) -> str:
-        """One /v1/chat/completions call (temperature 0); returns the raw text."""
+        """One /v1/chat/completions call (temperature 0) within *timeout*; returns the raw text."""
         if not _HAS_OPENAI:
             raise RuntimeError("openai package is not installed; run: pip install openai")
 
-        model = resolve_model_for_route(model_route)
+        model = self.model_for_route(model_route)
         client = _openai_sdk.AsyncOpenAI(
             api_key=self._api_key,
             base_url=self._base_url,
             timeout=timeout,
             max_retries=0,
         )
+        log_extra = {"provider": self._provider_name, "model": model}
 
         payload: dict[str, Any] = {
             "model": model,
@@ -151,45 +229,57 @@ class OpenAICompatClient:
                 },
             }
 
-        schema_downgraded = False
-        for attempt in range(_MAX_ATTEMPTS):
+        call_started = time.monotonic()
+        deadline = call_started + timeout
+        attempt = 0
+        last_exc: Exception | None = None
+        while True:
             started = time.monotonic()
-            try:
-                response = await client.chat.completions.create(**payload)
-                duration_ms = int((time.monotonic() - started) * 1000)
-                in_tokens, out_tokens = _usage_tokens(response)
-                logger.info(
-                    "LLM request completed: provider=%s model=%s status=ok",
+            remaining = deadline - started
+            if remaining <= 0:
+                # Budget gone before this attempt could start: never send a
+                # doomed request whose timeout would mask the real outcome.
+                if last_exc is not None:
+                    raise last_exc
+                # Reached after a slow schema probe (an ordinary failure raises
+                # inside its except block) or with a non-positive timeout. The
+                # probe was already sampled as schema_downgrade and no request
+                # is sent here, so no further metric sample: one sample is one
+                # SDK completion call. Surface it as the timeout it is, not as
+                # the 400 that was deliberately not a failure.
+                logger.warning(
+                    "LLM request budget exhausted before the next attempt: provider=%s model=%s",
                     self._provider_name,
                     model,
                     extra={
-                        "provider": self._provider_name,
-                        "model": model,
-                        "status": "ok",
-                        "latency_ms": duration_ms,
-                        "input_tokens": in_tokens,
-                        "output_tokens": out_tokens,
+                        **log_extra,
+                        "status": "timeout",
+                        # elapsed since the first attempt: the whole budget
+                        "latency_ms": int((time.monotonic() - call_started) * 1000),
+                        "input_tokens": 0,
+                        "output_tokens": 0,
                     },
                 )
-                metrics.llm_requests_total.labels(model, "ok").inc()
-                metrics.llm_tokens_total.labels(model, "input").inc(in_tokens)
-                metrics.llm_tokens_total.labels(model, "output").inc(out_tokens)
-                return str(response.choices[0].message.content or "")
+                raise TimeoutError(f"LLM request budget of {timeout:.0f}s exhausted")
+            try:
+                response = await client.chat.completions.create(**payload, timeout=remaining)
             except Exception as exc:  # noqa: BLE001
-                if (
-                    "response_format" in payload
-                    and not schema_downgraded
-                    and not _supports_json_schema_response(exc)
-                ):
-                    status = _error_status_label(exc)
-                    metrics.llm_requests_total.labels(model, status).inc()
-                    schema_downgraded = True
-                    payload.pop("response_format", None)
+                if "response_format" in payload and _rejects_json_schema(exc):
+                    # Capability probe, not a failure: the request is repeated
+                    # without the schema and the attempt counter is untouched.
+                    payload.pop("response_format")
+                    record_request(self._provider_name, model, "schema_downgrade")
                     logger.info(
-                        "LLM provider does not support JSON schema response_format; retrying without it"
+                        "LLM provider rejected JSON schema response_format; retrying without it: "
+                        "provider=%s model=%s",
+                        self._provider_name,
+                        model,
+                        extra={**log_extra, "status": "schema_downgrade"},
                     )
                     continue
 
+                last_exc = exc
+                attempt += 1
                 duration_ms = int((time.monotonic() - started) * 1000)
                 status = _error_status_label(exc)
                 logger.warning(
@@ -197,20 +287,44 @@ class OpenAICompatClient:
                     self._provider_name,
                     model,
                     status,
-                    attempt + 1,
+                    attempt,
                     _MAX_ATTEMPTS,
                     extra={
-                        "provider": self._provider_name,
-                        "model": model,
+                        **log_extra,
                         "status": status,
+                        "attempt": attempt,
+                        "max_attempts": _MAX_ATTEMPTS,
                         "latency_ms": duration_ms,
                         "input_tokens": 0,
                         "output_tokens": 0,
                     },
                 )
-                metrics.llm_requests_total.labels(model, status).inc()
-                if attempt == _MAX_ATTEMPTS - 1 or not _is_retryable(exc):
+                record_request(self._provider_name, model, status)
+                if attempt >= _MAX_ATTEMPTS or not _is_retryable(exc):
                     raise
-                await asyncio.sleep(_backoff_seconds(attempt))
+                retry_after = _retry_after_seconds(exc)
+                delay = retry_after if retry_after is not None else _backoff_seconds(attempt - 1)
+                if delay >= deadline - time.monotonic():
+                    # Waiting would leave no budget for the next attempt.
+                    raise
+                await asyncio.sleep(delay)
+                continue
 
-        raise RuntimeError("unreachable")
+            duration_ms = int((time.monotonic() - started) * 1000)
+            in_tokens, out_tokens = _usage_tokens(response)
+            logger.info(
+                "LLM request completed: provider=%s model=%s status=ok",
+                self._provider_name,
+                model,
+                extra={
+                    **log_extra,
+                    "status": "ok",
+                    "latency_ms": duration_ms,
+                    "input_tokens": in_tokens,
+                    "output_tokens": out_tokens,
+                },
+            )
+            record_request(
+                self._provider_name, model, "ok", in_tokens=in_tokens, out_tokens=out_tokens
+            )
+            return str(response.choices[0].message.content or "")

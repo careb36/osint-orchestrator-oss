@@ -500,8 +500,8 @@ Two groups of variables live in the same `.env`:
 | `SPIDERFOOT_URL` | `http://spiderfoot:5001` | SpiderFoot service URL on the internal network. |
 | `SPIDERFOOT_TIMEOUT_SECONDS` | `600` | Timeout for one SpiderFoot collection run. |
 | `LLM_PROVIDER` / `LLM_MODEL` / `LLM_BASE_URL` | `ollama` / `llama3.2` / `http://ollama:11434` | Synthesis backend; `ollama` keeps data on-prem. `none` switches synthesis off for every target. `nebius` uses the Token Factory OpenAI-compatible endpoint. |
-| `LLM_MODEL_REASONING` | *(empty)* | Optional model override for synthesis and relationship-heavy reasoning calls; falls back to `LLM_MODEL`. |
-| `LLM_MODEL_FAST` | *(empty)* | Optional model override for lightweight classification/extraction calls; falls back to `LLM_MODEL`. |
+| `LLM_MODEL_REASONING` | *(empty)* | Optional model override for synthesis and relationship-heavy reasoning calls on the cloud providers (`anthropic`, `openai`, `nebius`); falls back to `LLM_MODEL`. Ollama always serves `OLLAMA_MODEL`. |
+| `LLM_MODEL_FAST` | *(empty)* | Optional model override for lightweight classification/extraction calls on the cloud providers; falls back to `LLM_MODEL`. |
 | `OLLAMA_MODEL` | `llama3.2` | Model Ollama serves for targets with `llm: local` (separate from `LLM_MODEL`, which names the cloud model). |
 | `LLM_TIMEOUT_SECONDS` | `120` | End-to-end timeout for a synthesis request. |
 | `LLM_MAX_TOKENS` | `2048` | Upper bound on the model reply. |
@@ -946,8 +946,8 @@ or a run id.
 | `alert_deliveries_pending` | — | Alert deliveries waiting for a retry |
 | `alert_deliveries_dead_letter` | — | Alert deliveries parked in the dead-letter queue (need operator action) |
 | `synthesis_total` | `target_id`, `status` (`ok`, `skipped`, `failed`) | LLM synthesis attempts |
-| `llm_requests_total` | `model`, `status` | LLM API requests by model and status (`ok`, `http_429`, `http_5xx`, `timeout`, `error`) |
-| `llm_tokens_total` | `model`, `direction` (`input`, `output`) | LLM token usage split by prompt vs completion direction |
+| `llm_requests_total` | `provider`, `model`, `status` | LLM API requests by provider (`anthropic`, `openai`, `nebius`, `ollama`), model and status (`ok`, `http_429`, `http_5xx`, `timeout`, `error`, `schema_downgrade`). One sample per SDK completion call: the Anthropic SDK's single internal retry is not sampled. |
+| `llm_tokens_total` | `provider`, `model`, `direction` (`input`, `output`) | LLM token usage by provider and model, split by prompt vs completion direction |
 | `alerts_total` | `channel`, `status` | Alert lifecycle events (`sent`, `failed`, `retried`, `dlq`) |
 | `scheduled_jobs` | — | Cron jobs registered in the scheduler |
 | `build_info` | `version` | Build metadata |
@@ -1198,4 +1198,6 @@ MIT — see [LICENSE](LICENSE).
 Notes:
 - Nebius uses the same OpenAI-compatible provider path as `openai` (no duplicated integration code).
 - Synthesis requests use the reasoning route.
-- JSON-schema response format is requested when supported by the model, with automatic fallback to tolerant JSON parsing.
+- JSON-schema response format is requested first; a provider that rejects `response_format` (400/422) gets the same request once more without it, counted as `schema_downgrade` and not as a failed attempt, and the reply goes through the tolerant JSON parser.
+- Retries: up to 3 attempts on 408, 409, 429, any 5xx and transport errors, honouring `Retry-After`, all inside `LLM_TIMEOUT_SECONDS` — the budget bounds every attempt and backoff of one call.
+- The finding records the provider (`openai`, `nebius`, `anthropic`, `ollama` — the same value as the metrics' `provider` label) and the model that actually served the request (`/runs/{id}/finding`).
