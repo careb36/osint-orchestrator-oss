@@ -86,7 +86,7 @@ Defaults shown are the ones shipped in `.env.example` for Docker.
 | `AMASS_ENUM_BIN` | `oam_enum` | Amass CLI clients (absolute paths when running outside Docker). |
 | `AMASS_SUBS_BIN` | `oam_subs` | Amass CLI clients (absolute paths when running outside Docker). |
 | `AMASS_TIMEOUT_SECONDS` | `1800` | Default wall-clock bound for a full Amass run (enum + subs). |
-| `TAVILY_API_KEY` | *(empty)* | Required when `collectors.tavily.enabled=true`; leave blank to keep the collector off. |
+| `TAVILY_API_KEY` | *(empty)* | Required when `collectors.tavily.enabled=true`; blank records a collector failure on every run. Use `TAVILY_MAX_CALLS_PER_RUN=0` to switch the collector off. |
 | `TAVILY_SEARCH_DEPTH` | `basic` | Tavily query depth: `basic` or `advanced`. |
 | `TAVILY_MAX_RESULTS` | `5` | Global ceiling for results per query, 1–20; the per-target `max_results` is clamped to it. |
 | `TAVILY_MAX_CALLS_PER_RUN` | `3` | Global ceiling for search requests per run, 0–20; the per-target `max_calls_per_run` is clamped to it and `0` switches the collector off for every target (skipped, not failed). |
