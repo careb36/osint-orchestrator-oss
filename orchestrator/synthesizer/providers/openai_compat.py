@@ -29,14 +29,14 @@ import random
 import time
 from typing import Any, Literal
 
-from orchestrator.config import settings
+from orchestrator.config import NEBIUS_DEFAULT_BASE_URL, settings
 from orchestrator.synthesizer.model_routing import resolve_model_for_route
-from orchestrator.synthesizer.providers._telemetry import (
+from orchestrator.synthesizer.providers._policy import (
     SCHEMA_REJECT_STATUS_CODES,
     is_retryable_status,
-    record_request,
     status_label,
 )
+from orchestrator.synthesizer.providers._telemetry import record_request
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +50,10 @@ except ImportError:
 
 
 _MAX_ATTEMPTS = 3
+# Named presets and the endpoint they must never fall away from. "openai"
+# follows OPENAI_BASE_URL (blank = SDK default); any other preset without a
+# URL is a configuration error rather than a silent call to api.openai.com.
+_PRESET_BASE_URLS: dict[str, str] = {"nebius": NEBIUS_DEFAULT_BASE_URL}
 _BACKOFF_BASE_SECONDS = 1.0
 _BACKOFF_CAP_SECONDS = 30.0
 _BACKOFF_JITTER_RATIO = 0.25
@@ -84,16 +88,30 @@ def _is_retryable(exc: Exception) -> bool:
     return isinstance(exc, retryable_types)
 
 
+def _error_param(exc: Exception) -> str | None:
+    """The ``error.param`` of an OpenAI-style error body, when the SDK exposes one."""
+    body = getattr(exc, "body", None)
+    error = body.get("error", body) if isinstance(body, dict) else None
+    param = error.get("param") if isinstance(error, dict) else None
+    return str(param) if param else None
+
+
 def _rejects_json_schema(exc: Exception) -> bool:
     """True when the provider refused the request because of ``response_format``.
 
-    Servers word the rejection differently ("Unrecognized request argument
-    supplied: json_schema", "response_format is not supported", ...) and some
-    gateways answer 422 instead of 400, so any mention of either token on a
-    400/422 counts.
+    The structured ``error.param`` is authoritative when present. Without it
+    (gateways, older servers) the message is inspected: servers word the
+    rejection differently ("Unrecognized request argument supplied:
+    json_schema", "response_format is not supported", ...) and some answer 422
+    instead of 400. The probe runs once per call (the key is popped), so a
+    misread costs one tolerant-parsing request, never schema enforcement on
+    the retries of an unrelated error.
     """
     if getattr(exc, "status_code", None) not in SCHEMA_REJECT_STATUS_CODES:
         return False
+    param = _error_param(exc)
+    if param is not None:
+        return param.startswith("response_format")
     message = str(exc).lower()
     return "response_format" in message or "json_schema" in message or "json schema" in message
 
@@ -129,14 +147,23 @@ class OpenAICompatClient:
     ) -> None:
         self._provider_name = provider_name
         self._api_key = api_key if api_key is not None else settings.openai_api_key
-        # A blank URL (explicit or from OPENAI_BASE_URL) means "SDK default",
-        # never a schemeless "" that the SDK rejects as an invalid URL. Presets
-        # such as nebius pass their own URL; get_client() fills it in when the
-        # operator blanked NEBIUS_BASE_URL.
+        # A blank URL never reaches the SDK as a schemeless "": "openai" falls
+        # back to OPENAI_BASE_URL and then to the SDK default; a named preset
+        # falls back to its own endpoint; anything else must say where it goes.
         cleaned = (base_url or "").strip()
-        if not cleaned and provider_name == "openai":
-            cleaned = settings.openai_base_url.strip()
+        if not cleaned:
+            if provider_name == "openai":
+                cleaned = settings.openai_base_url.strip()
+            elif provider_name in _PRESET_BASE_URLS:
+                cleaned = _PRESET_BASE_URLS[provider_name]
+            else:
+                raise ValueError(f"LLM preset {provider_name!r} needs an explicit base_url")
         self._base_url = cleaned or None
+
+    @property
+    def provider(self) -> str:
+        """Provider name as recorded on findings and metrics (``openai`` or a preset)."""
+        return self._provider_name
 
     @staticmethod
     def model_for_route(route: Literal["reasoning", "fast"]) -> str:
@@ -185,12 +212,20 @@ class OpenAICompatClient:
 
         deadline = time.monotonic() + timeout
         attempt = 0
+        last_exc: Exception | None = None
         while True:
             started = time.monotonic()
-            remaining = max(deadline - started, 0.001)
+            remaining = deadline - started
+            if remaining <= 0:
+                # Budget gone (a slow failure or a slow schema probe): never
+                # start a doomed request that would mask the real error.
+                if last_exc is not None:
+                    raise last_exc
+                raise TimeoutError(f"LLM request budget of {timeout:.0f}s exhausted")
             try:
                 response = await client.chat.completions.create(**payload, timeout=remaining)
             except Exception as exc:  # noqa: BLE001
+                last_exc = exc
                 if "response_format" in payload and _rejects_json_schema(exc):
                     # Capability probe, not a failure: the request is repeated
                     # without the schema and the attempt counter is untouched.
@@ -218,6 +253,8 @@ class OpenAICompatClient:
                     extra={
                         **log_extra,
                         "status": status,
+                        "attempt": attempt,
+                        "max_attempts": _MAX_ATTEMPTS,
                         "latency_ms": duration_ms,
                         "input_tokens": 0,
                         "output_tokens": 0,

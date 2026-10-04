@@ -90,14 +90,14 @@ class Settings(BaseSettings):
     nebius_base_url: str = NEBIUS_DEFAULT_BASE_URL
 
     # Synthesizer
+    # Budget of one completion call. The OpenAI-compatible client (openai |
+    # nebius) retries inside it: every attempt and backoff of one call fits
+    # in LLM_TIMEOUT_SECONDS. The Anthropic SDK makes at most one retry of its
+    # own (max_retries=1), so a hung provider never holds one call for more
+    # than 2 × LLM_TIMEOUT_SECONDS.
     llm_timeout_seconds: float = 120.0
     # Upper bound on the model's reply. 2048 tokens is ample for the JSON
-    # finding; raise it only if summaries come back truncated. Timeout
-    # invariant: the OpenAI-compatible client (openai | nebius) retries inside
-    # LLM_TIMEOUT_SECONDS, which bounds every attempt and backoff of one call;
-    # the Anthropic SDK makes at most one retry of its own (max_retries=1). A
-    # hung provider therefore never holds one call for more than
-    # 2 × LLM_TIMEOUT_SECONDS.
+    # finding; raise it only if summaries come back truncated.
     llm_max_tokens: int = 2048
     llm_max_observables_in_prompt: int = 200
     synthesis_history_runs: int = 5

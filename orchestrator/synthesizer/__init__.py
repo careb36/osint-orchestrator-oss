@@ -427,7 +427,9 @@ async def synthesize(
     if client is None:
         return None, "skipped"
 
-    provider_name = type(client).__module__.rsplit(".", 1)[-1]
+    # The same name the client puts in the metrics' ``provider`` label, so a
+    # finding joins with llm_requests_total (nebius and openai share a module).
+    provider_name = client.provider
 
     try:
         history = await _fetch_history(target.id, run_id)

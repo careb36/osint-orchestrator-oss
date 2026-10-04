@@ -12,7 +12,8 @@ from typing import Any, Literal
 
 from orchestrator.config import settings
 from orchestrator.synthesizer.model_routing import resolve_model_for_route
-from orchestrator.synthesizer.providers._telemetry import record_request, status_label
+from orchestrator.synthesizer.providers._policy import status_label
+from orchestrator.synthesizer.providers._telemetry import record_request
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,8 @@ def _timeout_types() -> tuple[type[BaseException], ...]:
 class AnthropicClient:
     """Calls the Anthropic Messages API using the official SDK."""
 
+    provider = _PROVIDER
+
     @staticmethod
     def model_for_route(route: Literal["reasoning", "fast"]) -> str:
         """The model a request on *route* is sent to (persisted with the finding)."""
@@ -56,7 +59,9 @@ class AnthropicClient:
         model = self.model_for_route(model_route)
         client = _anthropic_sdk.AsyncAnthropic(
             api_key=settings.anthropic_api_key,
-            # The SDK default is 2 retries × timeout; see config.llm_max_tokens.
+            # The SDK default is 2 retries; one keeps a call within
+            # 2 × LLM_TIMEOUT_SECONDS (see config.llm_timeout_seconds). That
+            # retry is internal: metrics see one sample per completion.
             max_retries=1,
         )
         started = time.monotonic()

@@ -5,6 +5,7 @@ Protocol
 --------
     LLMClient.complete(system, user, *, timeout, model_route, response_schema) -> str
     LLMClient.model_for_route(route) -> str   (the model a route is actually sent to)
+    LLMClient.provider -> str                 (name recorded on findings and metrics)
 
 Factory
 -------
@@ -37,6 +38,11 @@ logger = logging.getLogger(__name__)
 @runtime_checkable
 class LLMClient(Protocol):
     """Minimal contract satisfied by all provider implementations."""
+
+    @property
+    def provider(self) -> str:
+        """Provider name as recorded on findings and in the ``provider`` metric label."""
+        ...
 
     def model_for_route(self, route: Literal["reasoning", "fast"]) -> str:
         """Return the model a request on *route* is sent to, so callers persist the truth."""

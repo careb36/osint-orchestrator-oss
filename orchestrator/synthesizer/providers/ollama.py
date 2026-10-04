@@ -13,15 +13,25 @@ from typing import Any, Literal
 import httpx
 
 from orchestrator.config import settings
-from orchestrator.synthesizer.providers._telemetry import record_request, status_label
+from orchestrator.synthesizer.providers._policy import status_label
+from orchestrator.synthesizer.providers._telemetry import record_request
 
 logger = logging.getLogger(__name__)
 
 _PROVIDER = "ollama"
 
 
+def _count(value: Any) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 class OllamaClient:
     """Calls the Ollama /api/chat endpoint asynchronously (stream: false)."""
+
+    provider = _PROVIDER
 
     @staticmethod
     def model_for_route(route: Literal["reasoning", "fast"]) -> str:
@@ -59,6 +69,10 @@ class OllamaClient:
                 response.raise_for_status()
                 data = response.json()
             content = str(data["message"]["content"])
+            # Counts are informational: a non-numeric value from another
+            # Ollama-compatible server must not fail a completed request.
+            in_tokens = _count(data.get("prompt_eval_count"))
+            out_tokens = _count(data.get("eval_count"))
         except Exception as exc:  # noqa: BLE001
             status = status_label(
                 exc,
@@ -81,8 +95,6 @@ class OllamaClient:
             )
             record_request(_PROVIDER, model, status)
             raise
-        in_tokens = int(data.get("prompt_eval_count") or 0)
-        out_tokens = int(data.get("eval_count") or 0)
         logger.info(
             "LLM request completed: provider=%s model=%s status=ok",
             _PROVIDER,
