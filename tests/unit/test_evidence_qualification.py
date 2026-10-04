@@ -653,3 +653,99 @@ async def test_qualified_evidence_file_is_in_manifest_and_tampering_breaks_chain
     assert result["detail"] == "qualified_evidence.json"
 
     await engine.dispose()
+
+
+def _items(count: int) -> list[EvidenceItem]:
+    return [
+        EvidenceItem(
+            url=f"https://example.org/{i}",
+            title=f"Item {i}",
+            snippet="Snippet",
+            published=None,
+            query='"Acme" sanctions',
+        )
+        for i in range(count)
+    ]
+
+
+def _entry(index: object, **overrides: object) -> dict:
+    return {
+        "index": index,
+        "category": "sanctions",
+        "relevance": "high",
+        "confidence": 0.9,
+        "rationale": "about the entity",
+        **overrides,
+    }
+
+
+async def test_duplicate_index_and_bool_values_are_not_qualified(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(settings, "llm_qualify_enabled", True)
+    monkeypatch.setattr(settings, "llm_qualify_max_items", 30)
+    client = _RouteCapturingClient(
+        {
+            "items": [
+                _entry(0),
+                _entry(0, category="litigation"),  # same index twice: first wins
+                _entry(True),  # bool is not an index
+                _entry(2, confidence=True),  # bool is not a confidence
+            ]
+        }
+    )
+    target = Target(id="t1", fqdn="example.com", authorization="self-owned", purpose="test")
+
+    with caplog.at_level("WARNING", logger="orchestrator.synthesizer.qualify"):
+        rows = await qualify_evidence(target, 1, _items(3), client=client)
+
+    assert [(row.url, row.category) for row in rows] == [("https://example.org/0", "sanctions")]
+    # The gap is visible to the operator in the message itself.
+    assert "qualified=1 of 3" in caplog.text
+
+
+async def test_unparseable_answer_is_logged_not_silent(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(settings, "llm_qualify_enabled", True)
+    monkeypatch.setattr(settings, "llm_qualify_max_items", 30)
+
+    class _Garbage(_RouteCapturingClient):
+        async def complete(self, system: str, user: str, **kwargs) -> str:
+            return "I cannot help with that."
+
+    target = Target(id="t1", fqdn="example.com", authorization="self-owned", purpose="test")
+    with caplog.at_level("WARNING", logger="orchestrator.synthesizer.qualify"):
+        rows = await qualify_evidence(target, 1, _items(2), client=_Garbage({}))
+
+    assert rows == []
+    assert "qualified=0 of 2 parseable=False" in caplog.text
+
+
+async def test_prompt_names_the_entity_and_the_rationale_language(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "llm_qualify_enabled", True)
+    monkeypatch.setattr(settings, "llm_qualify_max_items", 30)
+    client = _RouteCapturingClient({"items": [_entry(0)]})
+    target = Target(
+        id="t1", fqdn="example.com", authorization="self-owned", purpose="test", language="es"
+    )
+    target.collectors.tavily.search_terms = ["Acme Holdings"]
+
+    await qualify_evidence(target, 1, _items(1), client=client)
+
+    header = client.calls[0]["user"].split("===== BEGIN UNTRUSTED DATA =====")[0]
+    assert 'search terms: "Acme Holdings"' in header
+    assert "Language for rationale: es" in header
+    assert "not about the" in client.calls[0]["system"]
+
+
+def test_tavily_evidence_snippet_keeps_more_context_than_the_note() -> None:
+    from orchestrator.collectors.tavily import TavilyCollector  # noqa: PLC0415
+
+    item = {"url": "https://example.org/a", "title": "T", "content": "x" * 1000}
+    evidence = TavilyCollector._evidence_item_from_result(item, '"Acme" sanctions')
+
+    assert len(evidence.snippet) == 600
+    assert evidence.query == '"Acme" sanctions'

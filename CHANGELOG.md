@@ -11,6 +11,13 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- Evidence qualification on the fast LLM route (`LLM_QUALIFY_ENABLED`,
+  `LLM_QUALIFY_MAX_ITEMS`): each Tavily result is classified (category,
+  relevance, confidence, rationale) against the entity under review, stored in
+  `evidence_qualifications` (migration `0006`), written to
+  `qualified_evidence.json` under the signed manifest, labelled on its STIX
+  Note, listed in the report and served by `GET /runs/{id}/evidence`; high and
+  medium items are passed to the synthesis, which must cite their URLs.
 - Evidence chain (ADR-007): every run writes a signed `manifest.json` (artefact
   SHA-256s, HMAC-SHA256 with `ORCHESTRATOR_SECRET_KEY`) chained to the previous
   sealed run of the target; `runs.manifest_sha256` (migration `0005`);
