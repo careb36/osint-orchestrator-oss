@@ -200,14 +200,19 @@ class TavilyCollector(BaseCollector):
         language = resolve_language(self.target.language)
         templates = _QUERY_TEMPLATES.get(language, _QUERY_TEMPLATES["en"])
         terms = self.target.collectors.tavily.search_terms or [fqdn]
-        queries: list[str] = []
+        quoted_terms: list[str] = []
         for term in terms:
             flat = flatten_untrusted(term)
             if not flat:
                 continue
-            quoted = f'"{flat}"'
-            queries.extend(template.format(target=quoted) for template in templates)
-        return queries or [template.format(target=f'"{fqdn}"') for template in templates]
+            quoted_terms.append(f'"{flat}"')
+        if not quoted_terms:
+            return [template.format(target=f'"{fqdn}"') for template in templates]
+        return [
+            template.format(target=quoted_term)
+            for template in templates
+            for quoted_term in quoted_terms
+        ]
 
     # ─── HTTP ─────────────────────────────────────────────────────────────────
 

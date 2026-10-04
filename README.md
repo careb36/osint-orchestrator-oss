@@ -420,7 +420,9 @@ because adverse media is published elsewhere. Use `include_domains` /
 `exclude_domains` to restrict the sources. A page returned by several queries,
 in any scheme/case/trailing-slash variant, yields one `url` observable and one
 note. A query that fails after its retries is recorded in a note; the run fails
-only when every query failed.
+only when every query failed. With several terms, query order alternates by
+term inside each template so a tighter call budget still reaches every term
+with the first template(s).
 
 ### Usage
 

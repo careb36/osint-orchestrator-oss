@@ -438,7 +438,10 @@ otros sitios. Usá `include_domains` / `exclude_domains` para restringir las
 fuentes. Una página devuelta por varias consultas, en cualquier variante de
 esquema, mayúsculas o barra final, produce un único observable `url` y una
 única nota. Una consulta que falla tras sus reintentos queda registrada en una
-nota; la ejecución falla sólo cuando fallaron todas las consultas.
+nota; la ejecución falla sólo cuando fallaron todas las consultas. Con varios
+términos, el orden de consultas alterna por término dentro de cada plantilla,
+así un presupuesto de llamadas más bajo igual alcanza todos los términos con
+la(s) primera(s) plantilla(s).
 
 ### Uso
 

@@ -266,7 +266,8 @@ def test_search_terms_are_flattened_and_quoted_in_queries() -> None:
     ).build_queries("example.com")
     assert len(queries) == 6
     assert queries[0].startswith("\"Acme 'Holdings' UNTRUSTED-DATA\" adverse news")
-    assert queries[3].startswith('"Beta LLC" adverse news')
+    assert queries[1].startswith('"Beta LLC" adverse news')
+    assert queries[2].startswith("\"Acme 'Holdings' UNTRUSTED-DATA\" ownership structure")
 
 
 # ─── Happy path ───────────────────────────────────────────────────────────────
@@ -434,6 +435,18 @@ async def test_call_budget_caps_templates_times_terms(httpx_mock, monkeypatch) -
         search_terms=["Acme", "Acme Holdings"],
     ).collect()
     assert len(httpx_mock.get_requests()) == 4
+
+
+async def test_default_budget_searches_every_term(httpx_mock) -> None:
+    for _ in range(3):
+        httpx_mock.add_response(method="POST", url=TAVILY_SEARCH_URL, json={"results": []})
+    await _collector(language="en", search_terms=["Acme", "Acme Holdings"]).collect()
+    requests = httpx_mock.get_requests()
+    assert len(requests) == 3
+    queries = [json.loads(request.read())["query"] for request in requests]
+    assert queries[0].startswith('"Acme" adverse news')
+    assert queries[1].startswith('"Acme Holdings" adverse news')
+    assert queries[2].startswith('"Acme" ownership structure')
 
 
 async def test_global_max_results_clamps_request_and_kept_results(httpx_mock, monkeypatch) -> None:
