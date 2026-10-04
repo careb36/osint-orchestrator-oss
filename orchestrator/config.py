@@ -128,6 +128,22 @@ class Settings(BaseSettings):
     # for collectors.amass.timeout_seconds in targets.yaml.
     amass_timeout_seconds: int = 1800
 
+    # ─── Tavily collector (opt-in) ───────────────────────────────────────────
+    # Tavily search API for web research on authorised targets. Disabled by
+    # default: the collector is only enabled when a target opts in.
+    tavily_api_key: str = ""
+    tavily_search_depth: str = "basic"  # basic | advanced
+    # Global ceilings for the per-target ``max_results`` / ``max_calls_per_run``.
+    tavily_max_results: int = 5
+    tavily_max_calls_per_run: int = 3
+    # Default wall-clock budget (seconds) of a whole Tavily run per target,
+    # retries included; targets.yaml ``timeout_seconds`` overrides it.
+    tavily_timeout_seconds: int = 120
+    # Comma-separated domain lists, like ALERT_EMAIL_TO (pydantic-settings would
+    # otherwise require JSON for a list field and refuse the documented values).
+    tavily_include_domains: str = ""
+    tavily_exclude_domains: str = ""
+
     # ─── Retention ───────────────────────────────────────────────────────────
     # Days to keep run rows and daily_reports directories (0 = disabled).
     orchestrator_retention_days: int = 90

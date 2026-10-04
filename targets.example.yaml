@@ -67,6 +67,18 @@ targets:
         progress_timeout_minutes: 10
         # Límite total (tiempo de pared) para todo el collector.
         timeout_seconds: 1800
+      tavily:
+        # Recolección web opt-in con Tavily para diligencia de dominio.
+        # Está desactivado por defecto y requiere la clave TAVILY_API_KEY.
+        enabled: false
+        search_depth: basic
+        max_results: 5
+        include_domains: []
+        exclude_domains: []
+        include_answer: false
+        max_calls_per_run: 3
+        # Tiempo de pared total del recolector (reintentos incluidos).
+        timeout_seconds: 120
 
     # Planificación: todos los días a las 08:00 UTC.
     schedule:

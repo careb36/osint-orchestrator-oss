@@ -44,6 +44,7 @@ class CollectorName(StrEnum):
     SPIDERFOOT = "spiderfoot"
     SOCIALOSINT = "socialosint"
     AMASS = "amass"
+    TAVILY = "tavily"
 
 
 # ─── Collector contract ───────────────────────────────────────────────────────
@@ -106,13 +107,17 @@ class CollectorResult(BaseModel):
 class CollectorConfig(BaseModel):
     """Per-collector block under ``collectors:`` in targets.yaml.
 
-    One flat schema shared by all four collectors; each reads only its own
+    One flat schema shared by all five collectors; each reads only its own
     keys (openosint: ``investigation_type`` + budget keys, spiderfoot:
     ``modules`` + ``timeout_seconds``, socialosint: ``usernames``,
     ``platforms`` + ``timeout_seconds``, amass: ``active``, ``brute``,
     ``include``, ``exclude``, ``progress_timeout_minutes`` +
-    ``timeout_seconds``). The full field contract is documented in the README
-    "Target Configuration" section.
+    ``timeout_seconds``, tavily: ``search_depth``, ``max_results``,
+    ``include_domains``, ``exclude_domains``, ``include_answer``,
+    ``max_calls_per_run`` + ``timeout_seconds``). A field must be declared
+    once: a repeated name silently replaces the earlier default for every
+    collector. The full field contract is documented in the README "Target
+    Configuration" section.
     """
 
     enabled: bool = True
@@ -152,6 +157,16 @@ class CollectorConfig(BaseModel):
     # bound for the whole collector run.
     progress_timeout_minutes: int = Field(default=10, ge=1)
 
+    # tavily: request limits. ``timeout_seconds`` (declared above) is the
+    # wall-clock budget of the whole collector run. Both caps are also clamped
+    # by the global TAVILY_MAX_RESULTS / TAVILY_MAX_CALLS_PER_RUN settings.
+    max_results: int = Field(default=5, ge=1, le=20)
+    search_depth: str = "basic"
+    include_domains: list[str] = Field(default_factory=list)
+    exclude_domains: list[str] = Field(default_factory=list)
+    include_answer: bool = False
+    max_calls_per_run: int = Field(default=3, ge=1, le=20)
+
 
 def _socialosint_default_timeout() -> int:
     """Return the global SocialOSINT timeout from settings (lazy import to avoid circulars)."""
@@ -167,12 +182,18 @@ def _amass_default_timeout() -> int:
     return settings.amass_timeout_seconds
 
 
-class CollectorSet(BaseModel):
-    """The four collector blocks of a target; socialosint and amass are opt-in.
+def _tavily_default_timeout() -> int:
+    """Return the global Tavily timeout from settings (lazy import to avoid circulars)."""
+    from orchestrator.config import settings  # noqa: PLC0415
 
-    Defaults: openosint and spiderfoot enabled, socialosint disabled with its
-    timeout taken from ``SOCIALOSINT_TIMEOUT_SECONDS``, amass disabled with
-    its timeout taken from ``AMASS_TIMEOUT_SECONDS``.
+    return settings.tavily_timeout_seconds
+
+
+class CollectorSet(BaseModel):
+    """The collector blocks of a target; optional collectors are opt-in.
+
+    Defaults: openosint and spiderfoot enabled, socialosint, amass and tavily
+    disabled with their timeout taken from the corresponding global settings.
     """
 
     openosint: CollectorConfig = Field(default_factory=CollectorConfig)
@@ -187,6 +208,12 @@ class CollectorSet(BaseModel):
         default_factory=lambda: CollectorConfig(
             enabled=False,
             timeout_seconds=_amass_default_timeout(),
+        )
+    )
+    tavily: CollectorConfig = Field(
+        default_factory=lambda: CollectorConfig(
+            enabled=False,
+            timeout_seconds=_tavily_default_timeout(),
         )
     )
 
