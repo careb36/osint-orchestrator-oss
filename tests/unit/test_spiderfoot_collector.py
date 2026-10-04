@@ -8,17 +8,21 @@ patched out.
 
 from __future__ import annotations
 
+import logging
+import pathlib
 import re
 from unittest.mock import patch
 
 import httpx
 import pytest
+import yaml
 
 from orchestrator.collectors import spiderfoot as spiderfoot_module
 from orchestrator.collectors.spiderfoot import SpiderFootCollector
 from orchestrator.config import settings
 from orchestrator.models import Target
 
+REPO_ROOT = pathlib.Path(__file__).parents[2]
 BASE_URL = "http://spiderfoot.test:5001"
 SCAN_ID = "D90E1172"
 
@@ -133,6 +137,8 @@ async def test_startscan_error_reply_fails_the_collector(httpx_mock):
         (_status("RUNNING"), "RUNNING"),
         (_status("FINISHED"), "FINISHED"),
         ({"status": "ERROR-FAILED"}, "ERROR-FAILED"),
+        # A build that wraps the row in a list of rows.
+        ([_status("FINISHED")], "FINISHED"),
         ([], "UNKNOWN"),
     ],
 )
@@ -140,10 +146,54 @@ def test_extract_status(payload, expected):
     assert SpiderFootCollector._extract_status(payload) == expected
 
 
-def test_default_modules_are_real_spiderfoot4_modules():
-    # sfp_dns and sfp_ssl do not exist in SpiderFoot 4; an unknown module makes
-    # the scan run nothing.
+def test_parse_survives_a_different_row_arity():
+    collector = _collector()
+    # One extra trailing column: the type is no longer last but still present.
+    wider = [*_row("104.20.23.154", "IP_ADDRESS"), 0]
+    # One column fewer, type still last.
+    narrower = _row("example.org", "INTERNET_NAME")[:4] + ["INTERNET_NAME"]
+
+    result = collector._parse([wider, narrower], "example.com")
+
+    values = {(o.type, o.value) for o in result.observables}
+    assert ("ipv4-addr", "104.20.23.154") in values
+    assert ("domain-name", "example.org") in values
+
+
+def test_parse_logs_rows_with_an_unrecognised_layout(caplog):
+    unknown = ["2026-10-04 13:26:05", "104.20.23.154", "example.com", 0]
+
+    with caplog.at_level(logging.WARNING, logger=spiderfoot_module.__name__):
+        result = _collector()._parse([unknown, "not-a-row"], "example.com")
+
+    assert [o.value for o in result.observables] == ["example.com"]
+    assert "2 of 2 result rows had an unrecognised layout" in caplog.text
+
+
+def _env_example_value(key: str) -> str:
+    text = (REPO_ROOT / ".env.example").read_text(encoding="utf-8")
+    match = re.search(rf"(?m)^{key}=(\S*)", text)
+    assert match, f"{key} missing from .env.example"
+    return match.group(1)
+
+
+def test_default_modules_are_in_sync_across_config_env_and_helm():
     from orchestrator.config import Settings  # noqa: PLC0415
 
     default = Settings.model_fields["spiderfoot_modules"].default
-    assert default.split(",") == ["sfp_dnsresolve", "sfp_whois", "sfp_sslcert"]
+    values = yaml.safe_load(
+        (REPO_ROOT / "deploy/helm/osint-orchestrator/values.yaml").read_text(encoding="utf-8")
+    )
+
+    assert _env_example_value("SPIDERFOOT_MODULES") == default
+    assert values["config"]["spiderfootModules"] == default
+
+
+def test_default_modules_do_not_use_names_missing_from_spiderfoot4():
+    # Checked against the module list of the SpiderFoot 4 image on 2026-10-04:
+    # sfp_dns and sfp_ssl do not exist, and an unknown module makes the scan
+    # run nothing. This catches a revert, not an upstream rename.
+    from orchestrator.config import Settings  # noqa: PLC0415
+
+    modules = Settings.model_fields["spiderfoot_modules"].default.split(",")
+    assert not {"sfp_dns", "sfp_ssl"} & set(modules)

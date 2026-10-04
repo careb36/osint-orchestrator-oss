@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+import re
 import uuid
 from datetime import UTC, datetime
 
@@ -55,6 +56,9 @@ _SF_EVENT_TO_STIX: dict[str, str] = {
     "NETBLOCK_OWNER": "autonomous-system",
     "BGP_AS_OWNER": "autonomous-system",
 }
+
+# SpiderFoot event type names: upper-case tokens such as IP_ADDRESS.
+_SF_EVENT_TYPE_RE = re.compile(r"[A-Z][A-Z0-9_]*")
 
 # Which SF event types create a "resolves-to" relationship with the target domain
 _RESOLVES_FROM_DOMAIN = {"IP_ADDRESS", "IPV6_ADDRESS", "INTERNET_NAME"}
@@ -163,9 +167,28 @@ class SpiderFootCollector(BaseCollector):
         """Normalise the scan status out of SpiderFoot's dict-or-rows response."""
         if isinstance(data, dict):
             return data.get("status", "UNKNOWN")
+        # Some builds wrap the row in a list of rows; read the first one.
+        if isinstance(data, list) and data and isinstance(data[0], list):
+            data = data[0]
         if isinstance(data, list) and len(data) >= 6 and isinstance(data[5], str):
             return data[5]
         return "UNKNOWN"
+
+    @staticmethod
+    def _row_event_type(row: list) -> str | None:
+        """Event type of a /scaneventresults row, or None for an unknown layout.
+
+        SpiderFoot 4 puts the type in the last column. Should a build add or
+        drop columns, fall back to any column (other than the data one) that
+        holds a mapped event type rather than silently mapping nothing.
+        """
+        last = row[-1]
+        if isinstance(last, str) and _SF_EVENT_TYPE_RE.fullmatch(last):
+            return last
+        for index, value in enumerate(row):
+            if index != 1 and isinstance(value, str) and value in _SF_EVENT_TO_STIX:
+                return value
+        return None
 
     async def _fetch_results(self, client: httpx.AsyncClient, scan_id: str) -> list[dict]:
         """GET /scaneventresults and return list of event rows."""
@@ -198,14 +221,20 @@ class SpiderFootCollector(BaseCollector):
         observables.append(Observable(type="domain-name", value=fqdn))
         seen_values.add(fqdn)
 
+        unrecognised = 0
         for event in events:
-            if isinstance(event, list) and len(event) >= 11:
-                event_type = str(event[-1])
+            if isinstance(event, list) and len(event) >= 2:
+                row_type = self._row_event_type(event)
+                if row_type is None:
+                    unrecognised += 1
+                    continue
+                event_type = row_type
                 data = html.unescape(str(event[1]))
             elif isinstance(event, dict):
                 event_type = event.get("type", "")
                 data = event.get("data", "")
             else:
+                unrecognised += 1
                 continue
 
             if not data or data in seen_values:
@@ -227,6 +256,21 @@ class SpiderFootCollector(BaseCollector):
                             relationship_type="resolves-to",
                         )
                     )
+
+        if unrecognised:
+            # A layout change would otherwise look like a clean scan that found
+            # nothing but the root domain.
+            logger.warning(
+                "SpiderFoot: %d of %d result rows had an unrecognised layout for %s",
+                unrecognised,
+                len(events),
+                fqdn,
+                extra={
+                    "target_id": self.target.id,
+                    "collector": self.name.value,
+                    "skipped_rows": unrecognised,
+                },
+            )
 
         return CollectorResult(
             collector=self.name,
