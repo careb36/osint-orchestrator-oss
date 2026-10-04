@@ -56,8 +56,8 @@ _MAX_ATTEMPTS = 3
 # URL is a configuration error rather than a silent call to api.openai.com.
 _PRESET_BASE_URLS: dict[str, str] = {"nebius": NEBIUS_DEFAULT_BASE_URL}
 # Message heuristic for servers that return no ``error.param``: the schema
-# field must be named next to a rejection verb, in either order, within one
-# sentence. "Unrecognized request argument supplied: json_schema",
+# field must be named within 80 characters of a rejection verb, in either
+# order, on the same line. "Unrecognized request argument supplied: json_schema",
 # "response_format is not supported by this model" and "Invalid value for
 # 'response_format'" match; an unrelated error that merely echoes the request
 # body does not.
@@ -69,7 +69,7 @@ _REJECTION = (
     r"must be|not available|unavailable)"
 )
 _SCHEMA_REJECTION_RE = re.compile(
-    rf"{_REJECTION}[^.\n]{{0,80}}{_SCHEMA_FIELD}|{_SCHEMA_FIELD}[^.\n]{{0,80}}{_REJECTION}",
+    rf"{_REJECTION}[^\n]{{0,80}}{_SCHEMA_FIELD}|{_SCHEMA_FIELD}[^\n]{{0,80}}{_REJECTION}",
     re.IGNORECASE,
 )
 _BACKOFF_BASE_SECONDS = 1.0
