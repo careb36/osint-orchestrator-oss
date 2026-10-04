@@ -254,6 +254,15 @@ async def test_schema_downgrade_does_not_consume_an_attempt(
         (400, "Unrecognized request argument supplied: json_schema"),
         (422, "response_format is not supported by this model"),
         (400, "Invalid value for 'response_format'"),
+        (400, "This model doesn't support response_format"),
+        (400, "This model doesn\u2019t support json_schema"),
+        (400, "response_format: forbidden for this deployment"),
+        (400, "json_schema is not permitted on this endpoint"),
+        (400, "response_format is no longer accepted"),
+        (400, "Structured outputs are disabled: response_format rejected"),
+        (400, "response_format.type must be one of: text, json_object"),
+        (400, "Extra inputs are not permitted: response_format"),
+        (422, "response_format is deprecated for this model"),
     ],
 )
 async def test_schema_rejections_are_detected_across_wordings(
@@ -522,9 +531,12 @@ async def test_slow_schema_probe_exhausting_the_budget_is_a_timeout(
     )
     labels = {"provider": "nebius", "model": settings.llm_model}
     before_timeout = _metric_value(REQ_METRIC, status="timeout", **labels)
+    before_probe = _metric_value(REQ_METRIC, status="schema_downgrade", **labels)
 
     with pytest.raises(TimeoutError, match="budget"):
         await _client().complete("sys", "user", timeout=5, response_schema={"type": "object"})
 
     assert len(state["payloads"]) == 1  # the probe; no downgraded retry without budget
-    assert _metric_value(REQ_METRIC, status="timeout", **labels) - before_timeout == 1
+    # one sample per SDK call: the probe was sampled once, the budget exit adds none
+    assert _metric_value(REQ_METRIC, status="schema_downgrade", **labels) - before_probe == 1
+    assert _metric_value(REQ_METRIC, status="timeout", **labels) - before_timeout == 0

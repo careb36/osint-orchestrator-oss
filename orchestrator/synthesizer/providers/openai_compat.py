@@ -62,7 +62,12 @@ _PRESET_BASE_URLS: dict[str, str] = {"nebius": NEBIUS_DEFAULT_BASE_URL}
 # 'response_format'" match; an unrelated error that merely echoes the request
 # body does not.
 _SCHEMA_FIELD = r"(?:response_format|json_schema|json schema)"
-_REJECTION = r"(?:unrecognized|unsupported|not supported|does not support|unknown|invalid|cannot|can't|not allowed|unexpected)"
+_REJECTION = (
+    r"(?:unrecognized|not recognized|unsupported|not supported|does ?n[o'\u2019]t support|"
+    r"do ?n[o'\u2019]t support|unknown|invalid|not (?:a )?valid|cannot|can ?n[o'\u2019]t|not allowed|"
+    r"not permitted|forbidden|unexpected|extra|no longer|disabled|removed|deprecated|"
+    r"must be|not available|unavailable)"
+)
 _SCHEMA_REJECTION_RE = re.compile(
     rf"{_REJECTION}[^.\n]{{0,80}}{_SCHEMA_FIELD}|{_SCHEMA_FIELD}[^.\n]{{0,80}}{_REJECTION}",
     re.IGNORECASE,
@@ -232,15 +237,23 @@ class OpenAICompatClient:
                 # doomed request whose timeout would mask the real outcome.
                 if last_exc is not None:
                     raise last_exc
-                # Only a slow schema probe gets here (an ordinary failure
-                # raises inside its except block); report it as the timeout
-                # it is, not as the 400 that was deliberately not a failure.
-                record_request(self._provider_name, model, "timeout")
+                # Reached after a slow schema probe (an ordinary failure raises
+                # inside its except block) or with a non-positive timeout. The
+                # probe was already sampled as schema_downgrade and no request
+                # is sent here, so no further metric sample: one sample is one
+                # SDK completion call. Surface it as the timeout it is, not as
+                # the 400 that was deliberately not a failure.
                 logger.warning(
-                    "LLM request budget exhausted after the schema probe: provider=%s model=%s",
+                    "LLM request budget exhausted before the next attempt: provider=%s model=%s",
                     self._provider_name,
                     model,
-                    extra={**log_extra, "status": "timeout"},
+                    extra={
+                        **log_extra,
+                        "status": "timeout",
+                        "latency_ms": int((time.monotonic() - started) * 1000),
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                    },
                 )
                 raise TimeoutError(f"LLM request budget of {timeout:.0f}s exhausted")
             try:
