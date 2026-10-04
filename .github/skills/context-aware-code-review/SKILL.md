@@ -81,7 +81,7 @@ Ask for or verify output for:
 - `ruff format --check orchestrator/ tests/unit/`
 - `pytest tests/unit/ -v -m "not integration"`
 - If a migration was added: `ORCHESTRATOR_DATABASE_URL=sqlite+aiosqlite:////tmp/migration_check.db alembic upgrade head && alembic check` (the default URL is the real `./orchestrator.db`).
-- Run the tests on a checkout without a local `.env` (`ORCHESTRATOR_ENV_FILE=""`), as CI does.
+- Run the tests on a checkout without a local `.env`: `tests/conftest.py` already pins `ORCHESTRATOR_ENV_FILE=""` and a temp database, so a developer's `.env` cannot change the result. Check `ORCHESTRATOR_ENV_FILE=""` explicitly for the paths that do not go through pytest (`alembic`, app startup).
 - If `deploy/helm/` changed:
   - `helm lint deploy/helm/osint-orchestrator --strict`
   - `helm template osint deploy/helm/osint-orchestrator --kube-version 1.30.0`
