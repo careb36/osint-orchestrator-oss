@@ -111,13 +111,21 @@ def test_global_call_cap_zero_is_allowed(monkeypatch) -> None:
     assert Settings().tavily_max_calls_per_run == 0
 
 
-def test_partial_tavily_block_gets_the_tavily_timeout_default() -> None:
-    # ``tavily: {enabled: true}`` bypasses the default factory; the validator
-    # must still apply the Tavily global instead of the generic 600 s.
-    cfg = CollectorSet.model_validate({"tavily": {"enabled": True}}).tavily
+@pytest.mark.parametrize(
+    ("block", "setting"),
+    [
+        ("tavily", "tavily_timeout_seconds"),
+        ("socialosint", "socialosint_timeout_seconds"),
+        ("amass", "amass_timeout_seconds"),
+    ],
+)
+def test_partial_block_gets_the_collector_global_timeout(block: str, setting: str) -> None:
+    # ``<block>: {enabled: true}`` bypasses the default factory; the validator
+    # must still apply the collector's global instead of the generic 600 s.
+    cfg = getattr(CollectorSet.model_validate({block: {"enabled": True}}), block)
     assert cfg.enabled is True
-    assert cfg.timeout_seconds == settings.tavily_timeout_seconds
-    explicit = CollectorSet.model_validate({"tavily": {"timeout_seconds": 7}}).tavily
+    assert cfg.timeout_seconds == getattr(settings, setting) != 600
+    explicit = getattr(CollectorSet.model_validate({block: {"timeout_seconds": 7}}), block)
     assert explicit.timeout_seconds == 7
 
 
@@ -188,7 +196,9 @@ async def test_missing_authorization_or_purpose_is_rejected(httpx_mock, field: s
     assert httpx_mock.get_requests() == []
 
 
-async def test_zero_global_call_cap_disables_the_collector(httpx_mock, monkeypatch) -> None:
+async def test_zero_global_call_cap_is_a_guard_in_the_collector(httpx_mock, monkeypatch) -> None:
+    # Defence in depth: the pipeline never instantiates the collector with a
+    # zero cap (see test_pipeline_skips_tavily_when_global_cap_is_zero).
     monkeypatch.setattr(settings, "tavily_max_calls_per_run", 0)
     result = await _collector().collect()
     assert result.success is False
@@ -301,17 +311,38 @@ async def test_include_answer_is_surfaced_as_bounded_note(httpx_mock) -> None:
     assert json.loads(httpx_mock.get_requests()[0].read())["include_answer"] is True
 
 
-async def test_same_url_from_two_queries_yields_one_observable_and_one_note(httpx_mock) -> None:
-    for title in ("First", "Second"):
-        httpx_mock.add_response(
-            method="POST",
-            url=TAVILY_SEARCH_URL,
-            json={"results": [_result("https://news.example.com/same", title=title)]},
-        )
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "https://news.example.com/same",
+        "https://News.Example.com/same/",
+        "http://news.example.com:80/same",
+        "https://news.example.com:443/same#section",
+    ],
+)
+async def test_same_page_from_two_queries_yields_one_observable_and_one_note(
+    httpx_mock, variant: str
+) -> None:
+    httpx_mock.add_response(
+        method="POST",
+        url=TAVILY_SEARCH_URL,
+        json={"results": [_result("https://news.example.com/same", title="First")]},
+    )
+    httpx_mock.add_response(
+        method="POST", url=TAVILY_SEARCH_URL, json={"results": [_result(variant, title="Second")]}
+    )
     result = await _collector(max_calls_per_run=2).collect()
     assert [o.value for o in result.observables] == ["https://news.example.com/same"]
     assert len(result.notes) == 1
     assert result.notes[0].startswith("tavily | First |")
+
+
+def test_dedupe_key_keeps_distinct_pages_apart() -> None:
+    key = TavilyCollector._dedupe_key
+    assert key("https://a.example/x") != key("https://a.example/y")
+    assert key("https://a.example/x?p=1") != key("https://a.example/x?p=2")
+    assert key("https://a.example:8443/x") != key("https://a.example/x")
+    assert key("https://a.example/") == key("https://a.example")
 
 
 # ─── Partial and total query failure ──────────────────────────────────────────
@@ -369,6 +400,24 @@ async def test_domain_lists_fall_back_to_global_settings(httpx_mock, monkeypatch
     body = json.loads(httpx_mock.get_requests()[0].read())
     assert body["include_domains"] == ["a.example.com", "b.example.com"]
     assert body["exclude_domains"] == []
+
+
+async def test_timeout_keeps_the_partial_failure_note(httpx_mock) -> None:
+    collector = _collector(timeout_seconds=1, max_calls_per_run=2)
+    real_search = TavilyCollector._search
+
+    async def _first_fails_then_hangs(self, query, cfg, max_results, deadline):
+        if query == collector.build_queries("example.com")[0]:
+            return await real_search(self, query, cfg, max_results, deadline)
+        await asyncio.get_running_loop().create_future()
+
+    httpx_mock.add_response(method="POST", url=TAVILY_SEARCH_URL, status_code=401)
+    with patch.object(TavilyCollector, "_search", _first_fails_then_hangs):
+        result = await asyncio.wait_for(collector.collect(), timeout=5)
+
+    assert result.success is False
+    assert result.error == "Tavily: timed out after 1s"
+    assert "tavily: 1 of 2 queries failed" in result.notes
 
 
 async def test_wall_clock_budget_bounds_the_whole_run() -> None:
@@ -445,3 +494,14 @@ def test_pipeline_registers_tavily_only_when_enabled() -> None:
     assert any(isinstance(c, TavilyCollector) for c in _get_collectors(target))
     target.collectors.tavily.enabled = False
     assert not any(isinstance(c, TavilyCollector) for c in _get_collectors(target))
+
+
+def test_pipeline_skips_tavily_when_global_cap_is_zero(monkeypatch, caplog) -> None:
+    # The off switch is a skip, not a failure recorded on every run.
+    from orchestrator.pipeline import _get_collectors  # noqa: PLC0415
+
+    monkeypatch.setattr(settings, "tavily_max_calls_per_run", 0)
+    with caplog.at_level("INFO", logger="orchestrator.pipeline"):
+        collectors = _get_collectors(_target())
+    assert not any(isinstance(c, TavilyCollector) for c in collectors)
+    assert any("TAVILY_MAX_CALLS_PER_RUN=0" in r.getMessage() for r in caplog.records)
