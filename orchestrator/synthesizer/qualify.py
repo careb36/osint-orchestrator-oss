@@ -13,6 +13,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from orchestrator.config import settings
 from orchestrator.database import get_session
+from orchestrator.i18n import resolve_language
 from orchestrator.models import (
     EvidenceCategory,
     EvidenceItem,
@@ -58,9 +59,12 @@ _RESPONSE_SCHEMA: dict[str, Any] = {
 
 
 def _build_user_prompt(target: Target, batch: list[EvidenceItem]) -> str:
+    terms = [flatten_untrusted(term) for term in target.collectors.tavily.search_terms]
+    entity = ", ".join(f'"{term}"' for term in terms if term) or "(the domain itself)"
     lines = [
         "# Evidence qualification request",
-        f"Target: {flatten_untrusted(target.fqdn)}",
+        f"Entity under review: domain {flatten_untrusted(target.fqdn)}; search terms: {entity}",
+        f"Language for rationale: {resolve_language(target.language)}",
         "",
         "Classify each item and return only JSON matching the requested schema.",
         "",
@@ -122,6 +126,7 @@ def _validated_rows(
     values = payload.get("items")
     if not isinstance(values, list):
         return rows
+    seen_indexes: set[int] = set()
     for value in values:
         if not isinstance(value, dict):
             continue
@@ -130,14 +135,20 @@ def _validated_rows(
         relevance = value.get("relevance")
         confidence = value.get("confidence")
         rationale = value.get("rationale")
-        if not isinstance(index, int) or index < 0 or index >= len(batch):
+        # bool is an int subclass: True must not pass as index 1 / confidence 1.0.
+        if type(index) is not int or index < 0 or index >= len(batch) or index in seen_indexes:
             continue
-        if category not in _VALID_CATEGORIES or relevance not in _VALID_RELEVANCE:
+        if not isinstance(category, str) or category not in _VALID_CATEGORIES:
             continue
-        if not isinstance(confidence, (int, float)) or not (0 <= float(confidence) <= 1):
+        if not isinstance(relevance, str) or relevance not in _VALID_RELEVANCE:
+            continue
+        if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+            continue
+        if not (0 <= float(confidence) <= 1):
             continue
         if not isinstance(rationale, str):
             continue
+        seen_indexes.add(index)
         item = batch[index]
         rows.append(
             EvidenceQualification(
@@ -201,9 +212,7 @@ async def qualify_evidence(
                 response_schema=_RESPONSE_SCHEMA,
             )
             payload = _extract_json(raw)
-            if payload is None:
-                continue
-            rows.extend(
+            batch_rows = (
                 _validated_rows(
                     payload=payload,
                     batch=batch,
@@ -212,7 +221,29 @@ async def qualify_evidence(
                     provider=provider,
                     model=model,
                 )
+                if payload is not None
+                else []
             )
+            rows.extend(batch_rows)
+            if len(batch_rows) < len(batch):
+                # Unqualified items never reach the synthesis; make the gap
+                # visible instead of dropping it silently.
+                logger.warning(
+                    "Evidence qualification incomplete target=%s run_id=%d batch_start=%d "
+                    "qualified=%d of %d parseable=%s",
+                    target.id,
+                    run_id,
+                    start,
+                    len(batch_rows),
+                    len(batch),
+                    payload is not None,
+                    extra={
+                        "target_id": target.id,
+                        "run_id": run_id,
+                        "qualified": len(batch_rows),
+                        "batch_size": len(batch),
+                    },
+                )
         except Exception as exc:  # noqa: BLE001
             failures.append(str(exc))
             logger.exception(
@@ -226,6 +257,15 @@ async def qualify_evidence(
                     "error_detail": str(exc),
                 },
             )
+    logger.info(
+        "Evidence qualified target=%s run_id=%d qualified=%d of %d model=%s",
+        target.id,
+        run_id,
+        len(rows),
+        len(limited),
+        model,
+        extra={"target_id": target.id, "run_id": run_id, "qualified": len(rows), "model": model},
+    )
     if failures:
         unique_failures = list(dict.fromkeys(failures))
         message = unique_failures[0]

@@ -41,6 +41,7 @@ from orchestrator.textsafe import flatten_untrusted
 logger = logging.getLogger(__name__)
 
 TAVILY_SEARCH_URL = "https://api.tavily.com/search"
+_EVIDENCE_SNIPPET_CHARS = 600
 
 # Three templates per language so the default ``max_calls_per_run`` (3) covers
 # the whole set; raising the cap does not change coverage.
@@ -354,7 +355,8 @@ class TavilyCollector(BaseCollector):
         return EvidenceItem(
             url=url,
             title=title,
-            snippet=snippet[:200],
+            # More context than the 200-char note: the qualifier decides on it.
+            snippet=snippet[:_EVIDENCE_SNIPPET_CHARS],
             published=published,
             query=query,
         )

@@ -906,14 +906,15 @@ async def _run_target_pipeline(target: Target, run_id: int, log_ctx: dict) -> Ru
             if report_error:
                 run.error = f"{run.error}; {report_error}" if run.error else report_error
             if report_path is not None:
-                _write_qualified_evidence_file(
-                    report_path, qualifications, attempted=qualification_attempted
-                )
                 # ADR-007: the manifest is the run's last file and its hash is
                 # stored in the same commit as the final status. A failure here
                 # leaves the run unsealed (counted, never read as tampering)
                 # instead of losing the final status.
                 try:
+                    # Before the manifest, so the signed chain covers it.
+                    _write_qualified_evidence_file(
+                        report_path, qualifications, attempted=qualification_attempted
+                    )
                     previous = await session.exec(
                         select(Run.manifest_sha256)
                         .where(Run.target_id == target.id)
