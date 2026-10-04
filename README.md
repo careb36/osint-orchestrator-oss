@@ -504,7 +504,7 @@ Two groups of variables live in the same `.env`:
 | `ORCHESTRATOR_ENV_FILE` | `.env` | Bootstrap dotenv path used while building `Settings()`. Set empty to disable dotenv loading (tests do this to avoid reading a developer's local `.env`). |
 | `ORCHESTRATOR_DATABASE_URL` | `sqlite+aiosqlite:////app/data/orchestrator.db` | Container path is the persistent volume; use `./orchestrator.db` bare-metal. |
 | `TARGETS_FILE` | `targets.yaml` | Re-read on every API and scheduler call. |
-| `OPENCTI_ENABLED` | `true` | Set `false` to run without OpenCTI ingest/outbox while keeping reports, findings, delta and alerts. |
+| `OPENCTI_ENABLED` | `true` | Set `false` to run without OpenCTI ingest/outbox while keeping reports, findings, delta and alerts. For installs without OpenCTI only: not for outages (the outbox handles those), and runs made while disabled are never backfilled ([ADR-008](docs/adr/ADR-008-optional-opencti-sink.md)). |
 | `OPENCTI_SSL_VERIFY` | `true` | Set `false` only for local/self-signed TLS in dev. |
 | `SPIDERFOOT_MODULES` | `sfp_dnsresolve,sfp_whois,sfp_sslcert` | Fallback when a target lists no modules. |
 | `SPIDERFOOT_URL` | `http://spiderfoot:5001` | SpiderFoot service URL on the internal network. |
