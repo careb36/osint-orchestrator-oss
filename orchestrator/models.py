@@ -442,20 +442,23 @@ class FindingRecord(SQLModel, table=True):
     raw_response: str = ""
 
     @staticmethod
-    def _decode_string_list(value: str, *, run_id: int, field: str) -> list[str]:
+    def _decode_string_list(value: str | None, *, run_id: int, field: str) -> list[str]:
+        def _log_invalid() -> None:
+            logger.warning(
+                "FindingRecord field could not be decoded as list[str]; using empty list",
+                extra={"run_id": run_id, "field": field},
+            )
+
+        if value is None:
+            _log_invalid()
+            return []
         try:
             decoded = json.loads(value)
         except (json.JSONDecodeError, TypeError):
-            logger.warning(
-                "FindingRecord field could not be decoded as list[str]; using empty list",
-                extra={"run_id": run_id, "field": field},
-            )
+            _log_invalid()
             return []
         if not isinstance(decoded, list) or not all(isinstance(item, str) for item in decoded):
-            logger.warning(
-                "FindingRecord field could not be decoded as list[str]; using empty list",
-                extra={"run_id": run_id, "field": field},
-            )
+            _log_invalid()
             return []
         return decoded
 
