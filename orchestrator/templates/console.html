@@ -129,6 +129,8 @@
 
     <script nonce="{{ csp_nonce }}">
       const STORAGE_KEY = "osint_operator_api_key";
+      const VIEW_STORAGE_KEY = "osint_operator_view";
+      const RUN_STORAGE_KEY = "osint_operator_run_id";
       let I18N = { es: {}, en: {} };
 
       const state = {
@@ -137,6 +139,10 @@
         targets: [],
         runs: [],
         riskTrends: [],
+        activeRunId: null,
+        activeTargetId: null,
+        currentView: "summary",
+        statusPollTimer: null,
       };
 
       const views = {
@@ -147,8 +153,9 @@
         detail: document.getElementById("detail-view"),
       };
 
-      function t(key) {
-        return (I18N[state.language] && I18N[state.language][key]) || key;
+      function t(key, values = {}) {
+        let template = (I18N[state.language] && I18N[state.language][key]) || key;
+        return template.replace(/\{(\w+)\}/g, (_, name) => values[name] ?? `{${name}}`);
       }
 
       // Everything rendered into innerHTML that did not come from the I18N
@@ -185,6 +192,7 @@
       }
 
       function setActive(viewName) {
+        state.currentView = viewName;
         Object.keys(views).forEach((key) => {
           views[key].classList.toggle("hidden", key !== viewName);
           const nav = document.getElementById(`nav-${key}`);
@@ -196,10 +204,10 @@
         if (views[viewName]) views[viewName].focus();
       }
 
-      async function apiFetch(path) {
-        const headers = {};
+      async function apiFetch(path, init = {}) {
+        const headers = { ...(init.headers || {}) };
         if (state.apiKey) headers["X-API-Key"] = state.apiKey;
-        const response = await fetch(path, { headers });
+        const response = await fetch(path, { ...init, headers });
         if (response.status === 401) {
           const err = new Error("auth_401");
           err.name = "AuthRequiredError";
@@ -566,12 +574,18 @@
           const status = latest ? latest.status : "-";
           const runId = latest ? latest.id : "-";
           const newObs = latest ? latest.new_observables : "-";
+          const startButton = `
+            <button type="button" class="start-run-btn" data-target-id="${esc(target.id)}">
+              ${t("startRun")}
+            </button>
+          `;
           return `
             <tr>
               <td>${esc(target.id)}</td>
               <td>${esc(runId)}</td>
               <td class="status">${esc(status)}</td>
               <td>${esc(newObs)}</td>
+              <td>${startButton}</td>
             </tr>
           `;
         });
@@ -584,11 +598,18 @@
                 <th>${t("lastRun")}</th>
                 <th>${t("status")}</th>
                 <th>${t("newObservables")}</th>
+                <th>${t("actions")}</th>
               </tr>
             </thead>
             <tbody>${rows.join("")}</tbody>
           </table>
         `;
+        for (const button of document.querySelectorAll(".start-run-btn")) {
+          button.addEventListener("click", async (event) => {
+            const targetId = event.currentTarget.getAttribute("data-target-id");
+            await startRun(targetId);
+          });
+        }
       }
 
       function localizeRisk(riskLevel) {
@@ -682,6 +703,82 @@
         }
       }
 
+      function setStartRunButton(targetId, stateName) {
+        const selector = `.start-run-btn[data-target-id="${CSS.escape(targetId)}"]`;
+        const button = document.querySelector(selector);
+        if (!button) return;
+        button.disabled = stateName === "running";
+        button.textContent = stateName === "running" ? t("runInProgress") : t("startRun");
+      }
+
+      async function startRun(targetId) {
+        const target = state.targets.find((item) => item.id === targetId);
+        if (!target) return;
+        setStartRunButton(targetId, "running");
+        try {
+          const response = await apiFetch(`/targets/${encodeURIComponent(targetId)}/run`, { method: "POST" });
+          const payload = await response.json();
+          setAuthHelp("");
+          document.getElementById("run-id-input").value = payload.run_id;
+          await loadRunDetail(payload.run_id);
+          await loadData();
+        } catch (error) {
+          if (error.name === "AuthRequiredError") {
+            handleAuthError();
+            return;
+          }
+          const message = error.message || String(error);
+          setAuthHelp(t("startRunError") + " " + esc(message));
+          setStartRunButton(targetId, "idle");
+        }
+      }
+
+      function startPolling(runId, targetId) {
+        if (state.statusPollTimer) clearInterval(state.statusPollTimer);
+        state.activeRunId = runId;
+        state.activeTargetId = targetId;
+        sessionStorage.setItem(RUN_STORAGE_KEY, String(runId));
+        state.statusPollTimer = setInterval(async () => {
+          try {
+            const run = await apiGet(`/runs/${encodeURIComponent(runId)}`);
+            if (run.status === "pending" || run.status === "running") {
+              if (state.currentView === "detail") {
+                await loadRunDetail(runId);
+              }
+              return;
+            }
+            if (["success", "partial", "failed"].includes(run.status)) {
+              clearInterval(state.statusPollTimer);
+              state.statusPollTimer = null;
+              sessionStorage.removeItem(RUN_STORAGE_KEY);
+              setStartRunButton(targetId, "idle");
+              if (state.currentView === "detail") {
+                await loadRunDetail(runId);
+              }
+              await loadData();
+              return;
+            }
+            clearInterval(state.statusPollTimer);
+            state.statusPollTimer = null;
+            sessionStorage.removeItem(RUN_STORAGE_KEY);
+            setStartRunButton(targetId, "idle");
+            await loadData();
+          } catch (error) {
+            if (error.name === "AuthRequiredError") {
+              clearInterval(state.statusPollTimer);
+              state.statusPollTimer = null;
+              handleAuthError();
+              return;
+            }
+            clearInterval(state.statusPollTimer);
+            state.statusPollTimer = null;
+            sessionStorage.removeItem(RUN_STORAGE_KEY);
+            if (targetId) setStartRunButton(targetId, "idle");
+            await loadData();
+          }
+        }, 3000);
+      }
+
       async function loadRunDetail(runId) {
         const container = document.getElementById("detail-content");
         container.innerHTML = `<p class="muted">${t("loading")}</p>`;
@@ -689,10 +786,15 @@
         try {
           const run = await apiGet(`/runs/${runId}`);
           const delta = await apiGet(`/runs/${runId}/delta`);
+          const statusText = run.status === "pending" || run.status === "running" ? t("runStatusProgress", { status: run.status }) : t("runStatusTerminal", { status: run.status });
+          state.activeRunId = run.id;
+          if (["pending", "running"].includes(run.status)) {
+            startPolling(run.id);
+          }
           setAuthHelp("");
           container.innerHTML = `
             <p><strong>${t("target")}:</strong> ${esc(run.target_id)}</p>
-            <p><strong>${t("status")}:</strong> ${esc(run.status)}</p>
+            <p><strong>${t("status")}:</strong> ${esc(statusText)}</p>
             <p><strong>${t("newObservables")}:</strong> ${esc(run.new_observables)}</p>
             <p><strong>${t("deltaCount")}:</strong> ${esc(delta.length)}</p>
             <p><strong>${t("errors")}:</strong> ${esc(run.error || "-")}</p>

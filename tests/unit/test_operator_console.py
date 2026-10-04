@@ -43,6 +43,7 @@ def test_console_route_renders_html(monkeypatch: pytest.MonkeyPatch) -> None:
     assert 'id="nav-risk"' in resp.text
     assert 'id="risk-table-wrap"' in resp.text
     assert "/console/i18n.json" in resp.text
+    assert 'class="start-run-btn"' in resp.text
 
 
 def test_console_ships_a_nonce_csp_and_hardening_headers(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -126,6 +127,8 @@ def test_console_template_fetches_artifacts_with_api_key() -> None:
     assert 'data-artifact="manifest"' in src
     assert "sessionStorage.setItem" in src
     assert "localStorage.setItem" not in src
+    assert 'data-target-id="${esc(target.id)}"' in src
+    assert "await startRun(targetId);" in src
 
 
 def test_console_run_workspace_supports_evidence_search_filter_and_sort() -> None:

@@ -352,6 +352,14 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "es": "Reporte",
         "en": "Report",
     },
+    "console_start_run": {
+        "es": "Iniciar ejecución",
+        "en": "Start run",
+    },
+    "console_run_in_progress": {
+        "es": "Ejecución en curso…",
+        "en": "Run in progress…",
+    },
     "console_finding": {
         "es": "Hallazgo",
         "en": "Finding",
@@ -496,6 +504,18 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "es": 'Verifica la API key, luego pulsa "Usar clave".',
         "en": 'Verify the API key, then click "Use key".',
     },
+    "console_start_run_error": {
+        "es": "No se pudo iniciar la ejecución:",
+        "en": "Could not start the run:",
+    },
+    "console_run_status_progress": {
+        "es": "Estado actual: {status}",
+        "en": "Current status: {status}",
+    },
+    "console_run_status_terminal": {
+        "es": "Estado final: {status}",
+        "en": "Final status: {status}",
+    },
 }
 
 _CONSOLE_I18N_KEYS = (
@@ -534,6 +554,8 @@ _CONSOLE_I18N_KEYS = (
     "console_actions",
     "console_open_detail",
     "console_report",
+    "console_start_run",
+    "console_run_in_progress",
     "console_finding",
     "console_evidence",
     "console_manifest",
@@ -550,6 +572,9 @@ _CONSOLE_I18N_KEYS = (
     "console_artifact_missing",
     "console_errors",
     "console_delta_count",
+    "console_start_run_error",
+    "console_run_status_progress",
+    "console_run_status_terminal",
     "console_run_table_caption",
     "console_summary_table_caption",
     "console_risk_table_caption",
