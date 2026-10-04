@@ -172,6 +172,25 @@ def test_parse_logs_rows_with_an_unrecognised_layout(caplog):
     assert "3 of 3 result rows had an unrecognised layout" in caplog.text
 
 
+def test_dict_rows_map_and_malformed_ones_are_skipped(caplog):
+    rows = [
+        {"type": "IP_ADDRESS", "data": "104.20.23.154"},
+        {"type": ["IP_ADDRESS"], "data": "1.2.3.4"},
+        {"type": "IP_ADDRESS", "data": ["1.2.3.4"]},
+    ]
+
+    with caplog.at_level(logging.WARNING, logger=spiderfoot_module.__name__):
+        result = _collector()._parse(rows, "example.com")
+
+    ip = next(o for o in result.observables if o.value == "104.20.23.154")
+    assert ip.type == "ipv4-addr"
+    assert ip.extra["sf_event"] == "IP_ADDRESS"
+    assert [(r.target_value, r.relationship_type) for r in result.relationships] == [
+        ("104.20.23.154", "resolves-to")
+    ]
+    assert "2 of 3 result rows had an unrecognised layout" in caplog.text
+
+
 def test_mapped_type_wins_over_an_uppercase_trailing_column():
     # A trailing upper-case token that is not an event type (e.g. a risk label)
     # must not hide the real type earlier in the row.

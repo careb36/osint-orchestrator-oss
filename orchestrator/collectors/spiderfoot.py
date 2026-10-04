@@ -232,11 +232,13 @@ class SpiderFootCollector(BaseCollector):
                 event_type = row_type
                 data = html.unescape(str(event[1]))
             elif isinstance(event, dict):
-                if not event.get("type"):
+                # Only strings are usable: a list or dict here would be an
+                # unhashable map/set key and fail the whole parse.
+                event_type = event.get("type")
+                data = event.get("data", "")
+                if not isinstance(event_type, str) or not event_type or not isinstance(data, str):
                     unrecognised += 1
                     continue
-                event_type = event["type"]
-                data = event.get("data", "")
             else:
                 unrecognised += 1
                 continue
