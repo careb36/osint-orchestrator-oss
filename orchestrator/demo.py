@@ -21,6 +21,7 @@ from orchestrator.models import Target
 logger = logging.getLogger(__name__)
 
 _DEMO_TARGETS_ERROR = "<targets-file>"
+_DEMO_ALLOWLIST: list[Target] | None = None
 
 
 class DemoDailyUsage(SQLModel, table=True):
@@ -110,12 +111,13 @@ async def record_demo_usage(
         ip_row.updated_at = datetime.now(UTC)
         await session.commit()
 
-    return {
-        "global_runs": row.run_count,
-        "ip_runs": ip_row.run_count,
-        "global_tavily_calls": row.tavily_calls,
-        "global_llm_calls": row.llm_calls,
-    }
+        summary = {
+            "global_runs": row.run_count,
+            "ip_runs": ip_row.run_count,
+            "global_tavily_calls": row.tavily_calls,
+            "global_llm_calls": row.llm_calls,
+        }
+    return summary
 
 
 async def demo_usage_available(
@@ -172,6 +174,8 @@ async def demo_usage_available(
 
 def load_demo_targets(path: str) -> tuple[list[Target], list[str], bool]:
     """Load allowlisted demo targets from the demo targets file."""
+    global _DEMO_ALLOWLIST
+
     targets_path = Path(path)
     if not targets_path.exists():
         logger.warning("demo targets file not found: %s", path)
@@ -204,6 +208,7 @@ def load_demo_targets(path: str) -> tuple[list[Target], list[str], bool]:
             target_id = str(raw.get("id", f"<index {idx}>"))
             logger.warning("Skipping invalid demo target %s from %s: %s", target_id, path, exc)
             invalid.append(target_id)
+    _DEMO_ALLOWLIST = loaded
     return loaded, sorted(set(invalid)), False
 
 

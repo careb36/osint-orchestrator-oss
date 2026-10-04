@@ -4,13 +4,13 @@ services:
       context: .
       dockerfile: Dockerfile.demo
     environment:
-      ORCHESTRATOR_API_KEY: "demo-key"
-      ORCHESTRATOR_SECRET_KEY: "demo-secret-key"
+      ORCHESTRATOR_API_KEY: "<placeholder>"
+      ORCHESTRATOR_SECRET_KEY: "<placeholder>"
       DEMO_MODE: "true"
       DEMO_TARGETS_FILE: "demo/targets.demo.yaml"
       ORCHESTRATOR_DATABASE_URL: "sqlite+aiosqlite:///./demo.db"
     ports:
       - "8000:8000"
     volumes:
-      - .:/app
+      - ./demo:/app/demo
     command: python -m orchestrator.api

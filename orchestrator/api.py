@@ -718,22 +718,19 @@ async def public_demo_verify_target_chain(target_id: str) -> dict[str, Any]:
     """Check the proof chain for a demo target with redacted risk data."""
     if not settings.demo_mode:
         raise HTTPException(status_code=404, detail="demo_mode_disabled")
-    try:
-        async with get_session() as session:
-            result = await verify_target_chain(
-                target_id=target_id,
-                secret_key=settings.orchestrator_secret_key,
-                session=session,
-            )
-        if result.get("reason"):
-            result["message"] = t(
-                f"chain.reason.{result['reason']}",
-                name=result.get("detail"),
-                run_id=result.get("first_broken_run_id"),
-            )
-        return strip_demo_risk_fields(result)
-    except Exception:
-        raise
+    async with get_session() as session:
+        result = await verify_target_chain(
+            target_id=target_id,
+            secret_key=settings.orchestrator_secret_key,
+            session=session,
+        )
+    if result.get("reason"):
+        result["message"] = t(
+            f"chain.reason.{result['reason']}",
+            name=result.get("detail"),
+            run_id=result.get("first_broken_run_id"),
+        )
+    return strip_demo_risk_fields(result)
 
 
 app.include_router(router)
