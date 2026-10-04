@@ -336,6 +336,34 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "es": "Buscar",
         "en": "Search",
     },
+    "console_all": {
+        "es": "Todo",
+        "en": "All",
+    },
+    "console_category": {
+        "es": "Categoría",
+        "en": "Category",
+    },
+    "console_sort": {
+        "es": "Orden",
+        "en": "Sort",
+    },
+    "console_url": {
+        "es": "URL",
+        "en": "URL",
+    },
+    "console_relevance": {
+        "es": "Relevancia",
+        "en": "Relevance",
+    },
+    "console_confidence": {
+        "es": "Confianza",
+        "en": "Confidence",
+    },
+    "console_rationale": {
+        "es": "Razonamiento",
+        "en": "Rationale",
+    },
     "console_empty_artifact": {
         "es": "No hay {artifact} disponible para esta ejecución.",
         "en": "No {artifact} is available for this run.",
@@ -474,6 +502,13 @@ _CONSOLE_I18N_KEYS = (
     "console_manifest",
     "console_download",
     "console_search",
+    "console_all",
+    "console_category",
+    "console_sort",
+    "console_url",
+    "console_relevance",
+    "console_confidence",
+    "console_rationale",
     "console_empty_artifact",
     "console_artifact_missing",
     "console_errors",

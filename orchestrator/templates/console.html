@@ -263,8 +263,47 @@
         container.innerHTML = `<p class="error">${esc(detailText)}</p>`;
       }
 
-      function renderEvidenceTable(items) {
-        const rows = items && items.length ? items.map((item) => {
+      function evidenceSortRank(level) {
+        return { high: 3, medium: 2, low: 1, "": 0 }[String(level || "").toLowerCase()] ?? 0;
+      }
+
+      function prepareEvidenceRows(items, searchTerm, categoryFilter, relevanceFilter, sortValue) {
+        const term = String(searchTerm || "").trim().toLowerCase();
+        const filtered = (items || []).filter((item) => {
+          const haystack = [item.title, item.url, item.category, item.relevance, item.rationale].filter(Boolean).join(" ").toLowerCase();
+          const matchesText = !term || haystack.includes(term);
+          const matchesCategory = !categoryFilter || (item.category || "") === categoryFilter;
+          const matchesRelevance = !relevanceFilter || (item.relevance || "") === relevanceFilter;
+          return matchesText && matchesCategory && matchesRelevance;
+        });
+        const sorted = [...filtered].sort((lhs, rhs) => {
+          switch (sortValue) {
+            case "title-asc":
+              return String(lhs.title || "").localeCompare(String(rhs.title || ""));
+            case "title-desc":
+              return String(rhs.title || "").localeCompare(String(lhs.title || ""));
+            case "confidence-desc":
+              return Number(rhs.confidence || 0) - Number(lhs.confidence || 0);
+            case "confidence-asc":
+              return Number(lhs.confidence || 0) - Number(rhs.confidence || 0);
+            case "relevance-desc":
+              return evidenceSortRank(rhs.relevance) - evidenceSortRank(lhs.relevance);
+            case "relevance-asc":
+              return evidenceSortRank(lhs.relevance) - evidenceSortRank(rhs.relevance);
+            default:
+              return Number(rhs.confidence || 0) - Number(lhs.confidence || 0);
+          }
+        });
+        return sorted;
+      }
+
+      function renderEvidenceTable(items, options = {}) {
+        const searchTerm = options.searchTerm || "";
+        const categoryFilter = options.categoryFilter || "";
+        const relevanceFilter = options.relevanceFilter || "";
+        const sortValue = options.sortValue || "relevance-desc";
+        const prepared = prepareEvidenceRows(items, searchTerm, categoryFilter, relevanceFilter, sortValue);
+        const rows = prepared.length ? prepared.map((item) => {
           const title = item.title || "-";
           const url = item.url || "-";
           const category = item.category || "-";
@@ -283,7 +322,28 @@
           `;
         }).join("") : `<tr><td colspan="6" class="muted">${esc(t("empty"))}</td></tr>`;
 
+        const categories = [...new Set((items || []).map((item) => item.category).filter(Boolean))].sort();
+        const relevanceLevels = ["high", "medium", "low"];
         return `
+          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; align-items:center;">
+            <input id="evidence-search" type="search" value="${esc(searchTerm)}" placeholder="${esc(t("search"))}" aria-label="${esc(t("search"))}" style="min-width:220px;" />
+            <select id="evidence-category-filter" aria-label="${esc(t("category"))}">
+              <option value="">${esc(t("all"))}</option>
+              ${categories.map((category) => `<option value="${esc(category)}" ${category === categoryFilter ? "selected" : ""}>${esc(category)}</option>`).join("")}
+            </select>
+            <select id="evidence-relevance-filter" aria-label="${esc(t("relevance"))}">
+              <option value="">${esc(t("all"))}</option>
+              ${relevanceLevels.map((level) => `<option value="${esc(level)}" ${level === relevanceFilter ? "selected" : ""}>${esc(level)}</option>`).join("")}
+            </select>
+            <select id="evidence-sort" aria-label="${esc(t("sort"))}">
+              <option value="relevance-desc" ${sortValue === "relevance-desc" ? "selected" : ""}>${esc(t("relevance"))} ↓</option>
+              <option value="relevance-asc" ${sortValue === "relevance-asc" ? "selected" : ""}>${esc(t("relevance"))} ↑</option>
+              <option value="confidence-desc" ${sortValue === "confidence-desc" ? "selected" : ""}>${esc(t("confidence"))} ↓</option>
+              <option value="confidence-asc" ${sortValue === "confidence-asc" ? "selected" : ""}>${esc(t("confidence"))} ↑</option>
+              <option value="title-asc" ${sortValue === "title-asc" ? "selected" : ""}>${esc(t("title"))} A→Z</option>
+              <option value="title-desc" ${sortValue === "title-desc" ? "selected" : ""}>${esc(t("title"))} Z→A</option>
+            </select>
+          </div>
           <div style="overflow:auto; max-height:420px; border:1px solid #e2e8f0; border-radius:8px;">
             <table>
               <thead>
