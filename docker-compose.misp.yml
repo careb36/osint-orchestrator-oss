@@ -126,16 +126,16 @@ services:
       CONNECTOR_LOG_LEVEL: "error"
       CONNECTOR_DURATION_PERIOD: "PT5M"                # import every 5 minutes
       # misp-core exposes HTTPS on port 443. Use https:// and disable cert
-      # verification (MISP_SSL=false) because misp-docker ships a self-signed
-      # certificate by default. In production, supply a real cert and set
-      # MISP_SSL=true.
+      # verification (MISP_SSL=false, MISP_SSL_VERIFY=false) because misp-docker
+      # ships a self-signed certificate by default. In production, supply a
+      # real cert and set both to true in .env.
       MISP_URL: "${MISP_URL:-https://misp}"
       MISP_REFERENCE_URL: "${MISP_URL:-https://misp}"
       MISP_KEY: "${MISP_KEY:?}"   # API key from MISP admin UI
       MISP_SSL_VERIFY: "${MISP_SSL_VERIFY:-false}"
       MISP_IMPORT_ONLY_PUBLISHED: "${MISP_IMPORT_ONLY_PUBLISHED:-false}"
       MISP_IMPORT_TO_IDS_NO_SCORE: "${MISP_IMPORT_TO_IDS_NO_SCORE:-40}"
-      MISP_SSL: "false"                                 # dev: skip TLS verify
+      MISP_SSL: "${MISP_SSL:-false}"                    # dev: skip TLS verify
       MISP_DATETIME_ATTRIBUTE: "timestamp"
       MISP_CREATE_REPORTS: "true"
       MISP_CREATE_INDICATORS: "true"
