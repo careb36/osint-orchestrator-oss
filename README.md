@@ -493,6 +493,7 @@ Two groups of variables live in the same `.env`:
 | `ORCHESTRATOR_LOG_LEVEL` | `INFO` | `DEBUG` \| `INFO` \| `WARNING` \| `ERROR`. |
 | `ORCHESTRATOR_LOG_FORMAT` | `text` | `text` for a terminal, `json` for a log shipper. |
 | `ORCHESTRATOR_METRICS_ENABLED` | `true` | `false` makes `GET /metrics` return 404. |
+| `ORCHESTRATOR_ENV_FILE` | `.env` | Bootstrap dotenv path used while building `Settings()`. Set empty to disable dotenv loading (tests do this to avoid reading a developer's local `.env`). |
 | `ORCHESTRATOR_DATABASE_URL` | `sqlite+aiosqlite:////app/data/orchestrator.db` | Container path is the persistent volume; use `./orchestrator.db` bare-metal. |
 | `TARGETS_FILE` | `targets.yaml` | Re-read on every API and scheduler call. |
 | `OPENCTI_SSL_VERIFY` | `true` | Set `false` only for local/self-signed TLS in dev. |

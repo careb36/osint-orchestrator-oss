@@ -45,6 +45,11 @@ helm template osint deploy/helm/osint-orchestrator --kube-version 1.30.0 > /dev/
 Integration tests need the full compose stack:
 `docker compose up -d && pytest tests/integration/ -m integration -v`.
 
+Unit tests are intentionally isolated from a developer's local `.env`:
+`tests/conftest.py` sets `ORCHESTRATOR_ENV_FILE=""` before importing
+`orchestrator.config`, so local machine settings cannot change unit-test
+results.
+
 ## Pull request workflow
 
 1. Branch from `main`. One logical change per PR.
