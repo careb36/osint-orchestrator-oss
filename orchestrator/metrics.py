@@ -137,13 +137,13 @@ synthesis_total = Counter(
 )
 llm_requests_total = Counter(
     f"{PREFIX}_llm_requests_total",
-    "LLM API requests by model and status",
-    ["model", "status"],
+    "LLM API requests by provider, model and status",
+    ["provider", "model", "status"],
 )
 llm_tokens_total = Counter(
     f"{PREFIX}_llm_tokens_total",
-    "LLM token usage by model and direction (input | output)",
-    ["model", "direction"],
+    "LLM token usage by provider, model and direction (input | output)",
+    ["provider", "model", "direction"],
 )
 alerts_total = Counter(
     f"{PREFIX}_alerts_total",

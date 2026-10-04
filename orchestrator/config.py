@@ -9,6 +9,9 @@ from __future__ import annotations
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Nebius Token Factory OpenAI-compatible endpoint (default for NEBIUS_BASE_URL).
+NEBIUS_DEFAULT_BASE_URL = "https://api.tokenfactory.nebius.com/v1"
+
 
 class Settings(BaseSettings):
     """The environment contract of the application (single source of truth).
@@ -82,15 +85,19 @@ class Settings(BaseSettings):
     # base_url for the openai-compat provider (empty = default OpenAI API)
     openai_base_url: str = ""
     nebius_api_key: str = ""
-    # Nebius Token Factory OpenAI-compatible API base URL.
-    nebius_base_url: str = "https://api.tokenfactory.nebius.com/v1"
+    # Nebius Token Factory OpenAI-compatible API base URL. A blank value falls
+    # back to this default rather than to the OpenAI endpoint.
+    nebius_base_url: str = NEBIUS_DEFAULT_BASE_URL
 
     # Synthesizer
     llm_timeout_seconds: float = 120.0
     # Upper bound on the model's reply. 2048 tokens is ample for the JSON
-    # finding; raise it only if summaries come back truncated. The SDK clients
-    # make at most one retry of their own (max_retries=1): a hung provider
-    # must not hold a run for 3 × LLM_TIMEOUT_SECONDS.
+    # finding; raise it only if summaries come back truncated. Timeout
+    # invariant: the OpenAI-compatible client (openai | nebius) retries inside
+    # LLM_TIMEOUT_SECONDS, which bounds every attempt and backoff of one call;
+    # the Anthropic SDK makes at most one retry of its own (max_retries=1). A
+    # hung provider therefore never holds one call for more than
+    # 2 × LLM_TIMEOUT_SECONDS.
     llm_max_tokens: int = 2048
     llm_max_observables_in_prompt: int = 200
     synthesis_history_runs: int = 5

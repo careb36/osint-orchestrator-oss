@@ -3,7 +3,8 @@ LLM provider abstraction for the synthesizer.
 
 Protocol
 --------
-    LLMClient.complete(system, user, *, timeout) -> str
+    LLMClient.complete(system, user, *, timeout, model_route, response_schema) -> str
+    LLMClient.model_for_route(route) -> str   (the model a route is actually sent to)
 
 Factory
 -------
@@ -27,7 +28,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Literal, Protocol, runtime_checkable
 
-from orchestrator.config import settings
+from orchestrator.config import NEBIUS_DEFAULT_BASE_URL, settings
 from orchestrator.models import Target
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,10 @@ logger = logging.getLogger(__name__)
 @runtime_checkable
 class LLMClient(Protocol):
     """Minimal contract satisfied by all provider implementations."""
+
+    def model_for_route(self, route: Literal["reasoning", "fast"]) -> str:
+        """Return the model a request on *route* is sent to, so callers persist the truth."""
+        ...
 
     async def complete(
         self,
@@ -102,7 +107,8 @@ def get_client(target: Target) -> LLMClient | None:
         return OpenAICompatClient(
             provider_name="nebius",
             api_key=settings.nebius_api_key,
-            base_url=settings.nebius_base_url,
+            # A blanked NEBIUS_BASE_URL must not fall through to api.openai.com.
+            base_url=settings.nebius_base_url.strip() or NEBIUS_DEFAULT_BASE_URL,
         )
 
     # Default: Ollama

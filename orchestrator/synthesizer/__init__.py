@@ -33,7 +33,7 @@ import re
 import time
 from collections import defaultdict, deque
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ValidationError, field_validator
 from sqlmodel import col, select
@@ -43,7 +43,7 @@ from orchestrator.database import get_session
 from orchestrator.i18n import resolve_language, t
 from orchestrator.models import Finding, FindingRecord, Run, RunObservable, RunStatus, Target
 from orchestrator.reports import CollectorReportResult, ReportObservable, RunReportData
-from orchestrator.synthesizer.model_routing import resolve_model_for_route
+from orchestrator.synthesizer.providers import LLMClient
 from orchestrator.textsafe import flatten_untrusted, neutralise_markdown
 
 logger = logging.getLogger(__name__)
@@ -128,12 +128,12 @@ _FINDING_JSON_SCHEMA = _FindingOutput.model_json_schema()
 
 
 async def _complete_with_optional_schema(
-    client: Any,
+    client: LLMClient,
     system: str,
     user: str,
     *,
     timeout: float,
-    model_route: str,
+    model_route: Literal["reasoning", "fast"],
     response_schema: dict[str, Any] | None,
 ) -> str:
     return await client.complete(
@@ -493,7 +493,10 @@ async def synthesize(
         await _persist_finding(
             finding,
             provider=provider_name,
-            model=resolve_model_for_route("reasoning"),
+            # The model the client really sent the request to: Ollama ignores
+            # the route and serves OLLAMA_MODEL, so resolving it here would
+            # record a model that was never used.
+            model=client.model_for_route("reasoning"),
             duration_ms=duration_ms,
             raw_response=raw,
         )
