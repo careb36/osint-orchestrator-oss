@@ -129,13 +129,14 @@ class TavilyCollector(BaseCollector):
                         continue
                     items = [item for item in data.get("results") or [] if isinstance(item, dict)]
                     for item in items[:max_results]:
-                        # One observable and one note per distinct URL: the
-                        # same page answering two queries must not produce two
-                        # STIX Notes with different ids.
+                        # One observable and one note per distinct page: the
+                        # same URL (or a scheme/case/trailing-slash variant of
+                        # it) answering two queries must not produce two STIX
+                        # Notes with different ids.
                         url = self._safe_url(item.get("url"))
-                        if url is None or url in seen_urls:
+                        if url is None or self._dedupe_key(url) in seen_urls:
                             continue
-                        seen_urls.add(url)
+                        seen_urls.add(self._dedupe_key(url))
                         results.append(item)
                         note = self._note_from_result(item)
                         if note:
@@ -147,6 +148,11 @@ class TavilyCollector(BaseCollector):
                         )
         except TimeoutError:
             timed_out = True
+
+        if failures and (timed_out or len(failures) < len(queries)):
+            # Recorded before the timeout return too, so a hard failure on an
+            # early query is not hidden behind the budget expiry.
+            notes.append(f"tavily: {len(failures)} of {len(queries)} queries failed")
 
         if timed_out:
             logger.warning(
@@ -176,9 +182,6 @@ class TavilyCollector(BaseCollector):
                 observables=[],
                 notes=notes,
             )
-        if failures:
-            notes.append(f"tavily: {len(failures)} of {len(queries)} queries failed")
-
         if not results:
             notes.append("tavily: no public results matched the query set")
 
@@ -288,6 +291,18 @@ class TavilyCollector(BaseCollector):
             return None
         return url
 
+    @staticmethod
+    def _dedupe_key(url: str) -> str:
+        """Identity of a page for deduplication: host (lowercase, default port
+        dropped), path without a trailing slash and the query string. The
+        scheme and the fragment do not identify a different document."""
+        parts = urlsplit(url)
+        host = parts.hostname or parts.netloc.lower()
+        if parts.port and parts.port not in (80, 443):
+            host = f"{host}:{parts.port}"
+        path = parts.path.rstrip("/") or "/"
+        return f"{host}{path}?{parts.query}" if parts.query else f"{host}{path}"
+
     @classmethod
     def _note_from_result(cls, item: dict[str, Any]) -> str | None:
         # Only fields that are stable across re-crawls go into the note: the
@@ -310,9 +325,9 @@ class TavilyCollector(BaseCollector):
         seen: set[str] = set()
         for item in results:
             url = cls._safe_url(item.get("url")) if isinstance(item, dict) else None
-            if url is None or url in seen:
+            if url is None or cls._dedupe_key(url) in seen:
                 continue
-            seen.add(url)
+            seen.add(cls._dedupe_key(url))
             observables.append(Observable(type="url", value=url, extra={"source": "tavily"}))
         return observables
 

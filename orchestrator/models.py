@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Callable
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 from sqlalchemy import Index
 from sqlmodel import Column, DateTime, SQLModel
 from sqlmodel import Field as SQLField
@@ -189,6 +190,13 @@ def _tavily_default_timeout() -> int:
     return settings.tavily_timeout_seconds
 
 
+_GLOBAL_TIMEOUT_DEFAULTS: dict[str, Callable[[], int]] = {
+    "socialosint": _socialosint_default_timeout,
+    "amass": _amass_default_timeout,
+    "tavily": _tavily_default_timeout,
+}
+
+
 class CollectorSet(BaseModel):
     """The collector blocks of a target; optional collectors are opt-in.
 
@@ -217,14 +225,16 @@ class CollectorSet(BaseModel):
         )
     )
 
-    @field_validator("tavily")
+    @field_validator("socialosint", "amass", "tavily")
     @classmethod
-    def _tavily_timeout_default(cls, cfg: CollectorConfig) -> CollectorConfig:
-        # A block such as ``tavily: {enabled: true}`` bypasses the default
-        # factory above and would inherit the generic ``timeout_seconds``
-        # default; apply the Tavily-specific global unless the operator set one.
+    def _global_timeout_default(cls, cfg: CollectorConfig, info: ValidationInfo) -> CollectorConfig:
+        # A partial block such as ``amass: {enabled: true}`` bypasses the
+        # default factory above and would inherit the generic
+        # ``timeout_seconds`` (600 s); apply the collector's global default
+        # unless the operator set a value explicitly.
         if "timeout_seconds" not in cfg.model_fields_set:
-            return cfg.model_copy(update={"timeout_seconds": _tavily_default_timeout()})
+            default = _GLOBAL_TIMEOUT_DEFAULTS[info.field_name]
+            return cfg.model_copy(update={"timeout_seconds": default()})
         return cfg
 
     @field_validator("socialosint")
