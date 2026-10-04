@@ -79,6 +79,16 @@ class Relationship(BaseModel):
     relationship_type: str  # e.g. "resolves-to", "related-to", "belongs-to"
 
 
+class EvidenceItem(BaseModel):
+    """One structured web-evidence item extracted by a collector."""
+
+    url: str
+    title: str
+    snippet: str
+    published: str | None = None
+    query: str
+
+
 class CollectorResult(BaseModel):
     """
     Output of a single collector for a single target.
@@ -96,6 +106,7 @@ class CollectorResult(BaseModel):
     relationships: list[Relationship] = Field(default_factory=list)
     # Free-form notes (converted to STIX Note objects)
     notes: list[str] = Field(default_factory=list)
+    evidence: list[EvidenceItem] = Field(default_factory=list)
     # Whether the collector ran successfully
     success: bool = True
     error: str | None = None
@@ -478,6 +489,43 @@ class FindingRecord(SQLModel, table=True):
             field="suggested_pivots",
         )
         return payload
+
+
+class EvidenceCategory(StrEnum):
+    ADVERSE_MEDIA = "adverse_media"
+    SANCTIONS = "sanctions"
+    LITIGATION = "litigation"
+    REGULATORY_ACTION = "regulatory_action"
+    CORPORATE_PROFILE = "corporate_profile"
+    UNRELATED = "unrelated"
+
+
+class EvidenceRelevance(StrEnum):
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+class EvidenceQualification(SQLModel, table=True):
+    """Persisted output of the evidence-qualification LLM step."""
+
+    __tablename__ = "evidence_qualifications"
+
+    id: int | None = SQLField(default=None, primary_key=True)
+    run_id: int = SQLField(index=True)
+    target_id: str = SQLField(index=True)
+    url: str = ""
+    title: str = ""
+    category: str = EvidenceCategory.UNRELATED.value
+    relevance: str = EvidenceRelevance.LOW.value
+    confidence: float = 0.0
+    rationale: str = ""
+    provider: str = ""
+    model: str = ""
+    created_at: datetime = SQLField(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
 
 
 # ─── Alert audit ──────────────────────────────────────────────────────────────

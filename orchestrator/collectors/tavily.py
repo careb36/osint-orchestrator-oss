@@ -35,7 +35,7 @@ import httpx
 from orchestrator.collectors import BaseCollector
 from orchestrator.config import settings
 from orchestrator.i18n import resolve_language
-from orchestrator.models import CollectorName, CollectorResult, Observable
+from orchestrator.models import CollectorName, CollectorResult, EvidenceItem, Observable
 from orchestrator.textsafe import flatten_untrusted
 
 logger = logging.getLogger(__name__)
@@ -117,6 +117,7 @@ class TavilyCollector(BaseCollector):
 
         results: list[dict[str, Any]] = []
         notes: list[str] = []
+        evidence: list[EvidenceItem] = []
         failures: list[str] = []
         seen_urls: set[str] = set()
         timed_out = False
@@ -138,6 +139,7 @@ class TavilyCollector(BaseCollector):
                             continue
                         seen_urls.add(self._dedupe_key(url))
                         results.append(item)
+                        evidence.append(self._evidence_item_from_result(item, query))
                         note = self._note_from_result(item)
                         if note:
                             notes.append(note)
@@ -165,6 +167,7 @@ class TavilyCollector(BaseCollector):
                 error=f"Tavily: timed out after {cfg.timeout_seconds}s",
                 observables=self._to_observables(results),
                 notes=notes,
+                evidence=evidence,
             )
 
         if failures and len(failures) == len(queries):
@@ -181,6 +184,7 @@ class TavilyCollector(BaseCollector):
                 error=f"Tavily: all {len(queries)} queries failed; see the collector log",
                 observables=[],
                 notes=notes,
+                evidence=evidence,
             )
         if not results:
             notes.append("tavily: no public results matched the query set")
@@ -190,6 +194,7 @@ class TavilyCollector(BaseCollector):
             target_fqdn=fqdn,
             observables=self._to_observables(results),
             notes=notes,
+            evidence=evidence,
             success=True,
         )
 
@@ -338,6 +343,21 @@ class TavilyCollector(BaseCollector):
         if snippet:
             bits.append(f"snippet={snippet[:200]}")
         return " | ".join(bits)
+
+    @classmethod
+    def _evidence_item_from_result(cls, item: dict[str, Any], query: str) -> EvidenceItem:
+        url = cls._safe_url(item.get("url")) or ""
+        title = flatten_untrusted(str(item.get("title") or "")) or "result"
+        snippet = flatten_untrusted(str(item.get("content") or item.get("snippet") or ""))
+        published_raw = item.get("published_date") or item.get("publishedAt")
+        published = flatten_untrusted(str(published_raw)) if published_raw is not None else None
+        return EvidenceItem(
+            url=url,
+            title=title,
+            snippet=snippet[:200],
+            published=published,
+            query=query,
+        )
 
     @classmethod
     def _to_observables(cls, results: Iterable[dict[str, Any]]) -> list[Observable]:

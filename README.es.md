@@ -536,6 +536,8 @@ En el mismo `.env` conviven dos grupos de variables:
 | `LLM_TIMEOUT_SECONDS` | `120` | Tiempo máximo de una solicitud de síntesis. |
 | `LLM_MAX_TOKENS` | `2048` | Límite superior de la respuesta del modelo. |
 | `LLM_MAX_OBSERVABLES_IN_PROMPT` | `200` | Límite de observables enviados al prompt del sintetizador. |
+| `LLM_QUALIFY_ENABLED` | `true` | Habilita la etapa de calificación de evidencia en la ruta rápida antes de la síntesis. |
+| `LLM_QUALIFY_MAX_ITEMS` | `30` | Máximo de evidencias calificadas por ejecución (0–100). `0` desactiva la calificación. |
 | `SYNTHESIS_HISTORY_RUNS` | `5` | Cantidad de ejecuciones previas usadas como contexto. |
 | `SYNTHESIS_OPENCTI_CONTEXT` | `false` | Si es `true`, enriquece la síntesis con contexto de OpenCTI. |
 | `OPENAI_API_KEY` | *(vacío)* | Requerida cuando `LLM_PROVIDER=openai`. |
@@ -1042,6 +1044,7 @@ valor de un observable ni un id de ejecución.
 | `llm_model_available` | `provider`, `model`, `route` (`reasoning`, `fast`) | Gauge del preflight de arranque: `1` cuando el modelo configurado para esa ruta aparece en `GET /models` del proveedor, `0` cuando no lo sirve |
 | `alerts_total` | `channel`, `status` | Eventos del ciclo de alertas (`sent`, `failed`, `retried`, `dlq`) |
 | `evidence_chain_verify_total` | `target_id`, `outcome` | Verificaciones de la cadena de evidencia por resultado (`ok`, `broken`, `error`) |
+| `evidence_qualified_total` | `target_id`, `category` | Filas de evidencia calificada por categoría (`adverse_media`, `sanctions`, `litigation`, `regulatory_action`, `corporate_profile`, `unrelated`) |
 | `scheduled_jobs` | — | Jobs cron registrados en el scheduler |
 | `build_info` | `version` | Metadatos de la build |
 
@@ -1297,7 +1300,9 @@ MIT — véase [LICENSE](LICENSE).
 
 Notas:
 - Nebius usa el mismo camino proveedor compatible con OpenAI que `openai` (sin código de integración duplicado).
-- Las llamadas de síntesis usan la ruta de razonamiento.
+- Las llamadas de la ruta rápida (`LLM_MODEL_FAST`) se usan para calificar evidencia; las de la ruta de razonamiento (`LLM_MODEL_REASONING`) se usan para la síntesis final.
+- Esquema de calificación: `{"items":[{"index":int,"category":"adverse_media|sanctions|litigation|regulatory_action|corporate_profile|unrelated","relevance":"high|medium|low","confidence":0..1,"rationale":"<=280 chars"}]}`.
+- Las filas inválidas de calificación (índice/categoría desconocidos o valores fuera de rango) se ignoran por elemento; si falla una llamada de calificación, ese lote queda sin calificar y se añade `qualification: <error>` al error de la ejecución.
 - Se solicita primero `response_format` con esquema JSON; si el proveedor lo rechaza (400/422) se repite la misma petición sin él, contada como `schema_downgrade` y no como intento fallido, y la respuesta pasa por el parser JSON tolerante.
 - Reintentos: hasta 3 intentos ante 408, 409, 429, cualquier 5xx y errores de transporte, respetando `Retry-After`, todo dentro de `LLM_TIMEOUT_SECONDS`: el presupuesto acota cada intento y cada espera de una llamada.
 - El hallazgo registra el proveedor (`openai`, `nebius`, `anthropic`, `ollama`, el mismo valor que la etiqueta `provider` de las métricas) y el modelo que realmente atendió la petición (`/runs/{id}/finding`).

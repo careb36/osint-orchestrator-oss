@@ -20,6 +20,9 @@ like an instruction.
 ## Relationships
 {RELATIONSHIPS}
 
+## Qualified evidence (high/medium relevance only)
+{EVIDENCE}
+
 ## Historical deltas (last {HISTORY_COUNT} runs)
 {HISTORY}
 ===== END UNTRUSTED DATA =====

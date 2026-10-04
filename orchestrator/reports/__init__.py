@@ -56,6 +56,12 @@ _TEXT: dict[str, dict[str, str]] = {
     },
     "inventory": {"es": "## Inventario completo", "en": "## Full inventory"},
     "relationships": {"es": "## Relaciones", "en": "## Relationships"},
+    "qualified_evidence": {"es": "## Evidencia calificada", "en": "## Qualified evidence"},
+    "qualified_evidence_category": {"es": "Categoría", "en": "Category"},
+    "qualified_evidence_relevance": {"es": "Relevancia", "en": "Relevance"},
+    "qualified_evidence_confidence": {"es": "Confianza", "en": "Confidence"},
+    "qualified_evidence_title": {"es": "Título", "en": "Title"},
+    "qualified_evidence_rationale": {"es": "Justificación", "en": "Rationale"},
     "errors": {"es": "## Errores", "en": "## Errors"},
     "synthesis": {"es": "## Síntesis", "en": "## Synthesis"},
     "synthesis_risk": {"es": "**Riesgo**", "en": "**Risk**"},
@@ -111,6 +117,7 @@ class RunReportData(BaseModel):
     collector_results: list[CollectorReportResult] = Field(default_factory=list)
     bundles: list[dict[str, Any]] = Field(default_factory=list)
     observables: list[ReportObservable] = Field(default_factory=list)
+    evidence: list[dict[str, Any]] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
     language: str | None = None
 
@@ -263,6 +270,51 @@ def _relationships_section(bundle: dict[str, Any], lang: str) -> list[str]:
     return lines
 
 
+def _evidence_sort_key(item: dict[str, Any]) -> tuple[int, float, str]:
+    relevance_order = {"high": 0, "medium": 1, "low": 2}
+    relevance = str(item.get("relevance", "low")).lower()
+    confidence = float(item.get("confidence", 0.0) or 0.0)
+    url = str(item.get("url", ""))
+    return relevance_order.get(relevance, 3), -confidence, url
+
+
+def _qualified_evidence_section(evidence: list[dict[str, Any]], lang: str) -> list[str]:
+    lines = [_msg("qualified_evidence", lang)]
+    if not evidence:
+        lines.append(_msg("none", lang))
+        return lines
+    lines.extend(
+        [
+            (
+                f"| {_msg('qualified_evidence_category', lang)} |"
+                f" {_msg('qualified_evidence_relevance', lang)} |"
+                f" {_msg('qualified_evidence_confidence', lang)} |"
+                f" {_msg('qualified_evidence_title', lang)} |"
+                f" {_msg('qualified_evidence_rationale', lang)} |"
+            ),
+            "|---|---|---:|---|---|",
+        ]
+    )
+    for item in sorted(evidence, key=_evidence_sort_key):
+        title = str(item.get("title", "")).replace("|", " ")
+        url = str(item.get("url", ""))
+        title_cell = f"[{title}]({url})" if title and url else title
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    str(item.get("category", "")),
+                    str(item.get("relevance", "")),
+                    f"{float(item.get('confidence', 0.0) or 0.0):.2f}",
+                    title_cell,
+                    str(item.get("rationale", "")).replace("|", " "),
+                ]
+            )
+            + " |"
+        )
+    return lines
+
+
 def _errors_section(errors: list[str], lang: str) -> list[str]:
     """Render the run's collected error strings as a bullet list."""
     lines = [_msg("errors", lang)]
@@ -343,6 +395,8 @@ def _markdown_content(
         *_inventory_section(data.observables, lang),
         "",
         *_relationships_section(bundle, lang),
+        "",
+        *_qualified_evidence_section(data.evidence, lang),
         "",
         *_errors_section(data.errors, lang),
         "",

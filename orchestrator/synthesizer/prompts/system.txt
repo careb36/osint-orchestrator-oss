@@ -22,6 +22,9 @@ Rules:
   user message.
 - suggested_pivots are actionable investigative leads derived strictly from
   the data; do not suggest investigating things not evidenced in the data.
+- risk_justification MUST cite the evidence URLs it relies on when qualified
+  evidence exists; when there is no qualified adverse evidence, it must state
+  exactly "no qualified adverse evidence".
 - Respond ONLY with a valid JSON object.  No prose before or after.
 
 Output schema (all fields required):

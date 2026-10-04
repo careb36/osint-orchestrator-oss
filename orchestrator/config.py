@@ -139,6 +139,11 @@ class Settings(BaseSettings):
     # finding; raise it only if summaries come back truncated.
     llm_max_tokens: int = 2048
     llm_max_observables_in_prompt: int = 200
+    # Evidence-qualification stage toggle (fast route). False disables the
+    # step for every run.
+    llm_qualify_enabled: bool = True
+    # Upper bound of evidence items qualified per run; 0 disables the step.
+    llm_qualify_max_items: int = Field(default=30, ge=0, le=100)
     synthesis_history_runs: int = 5
     # Set to True to enrich synthesis with OpenCTI context; fails silently if
     # OpenCTI is unavailable.  Off by default so synthesis works standalone.

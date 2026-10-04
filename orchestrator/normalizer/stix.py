@@ -33,7 +33,7 @@ from typing import Any
 
 import stix2
 
-from orchestrator.models import CollectorName, CollectorResult, Observable
+from orchestrator.models import CollectorName, CollectorResult, EvidenceQualification, Observable
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +170,7 @@ _TOOL_CONFIDENCE: dict[CollectorName, int] = {
     CollectorName.AMASS: 70,
     CollectorName.TAVILY: 60,
 }
+_TAVILY_URL_IN_NOTE = re.compile(r"\|\s*url=([^|]+)")
 
 
 # ── Observable → STIX SCO ─────────────────────────────────────────────────────
@@ -352,7 +353,32 @@ def _fallback_indicator(
 # ── Main entry point ──────────────────────────────────────────────────────────
 
 
-def normalize(result: CollectorResult) -> stix2.Bundle:
+def _qualified_note_extras(
+    result: CollectorResult,
+    note_text: str,
+    qualification_by_url: dict[str, EvidenceQualification],
+) -> tuple[list[str], dict[str, Any]]:
+    labels = [result.target_fqdn, result.collector.value]
+    custom: dict[str, Any] = {}
+    if result.collector != CollectorName.TAVILY:
+        return labels, custom
+    match = _TAVILY_URL_IN_NOTE.search(note_text)
+    if not match:
+        return labels, custom
+    url = match.group(1).strip()
+    row = qualification_by_url.get(url)
+    if row is None:
+        return labels, custom
+    labels.extend([f"category:{row.category}", f"relevance:{row.relevance}"])
+    custom["x_orchestrator_confidence"] = row.confidence
+    return labels, custom
+
+
+def normalize(
+    result: CollectorResult,
+    *,
+    qualification_by_url: dict[str, EvidenceQualification] | None = None,
+) -> stix2.Bundle:
     """
     Convert a CollectorResult to a stix2.Bundle.
 
@@ -366,6 +392,7 @@ def normalize(result: CollectorResult) -> stix2.Bundle:
     identity_id: str = identity.id
     confidence = _TOOL_CONFIDENCE.get(result.collector, 60)
     labels = [result.target_fqdn, result.collector.value]
+    qualification_by_url = qualification_by_url or {}
 
     objects: list[Any] = [identity]
     # Keyed by (type, canonical value): two observables of different types may
@@ -414,14 +441,17 @@ def normalize(result: CollectorResult) -> stix2.Bundle:
         if not note_text or not note_text.strip():
             continue
         try:
+            note_labels, note_custom = _qualified_note_extras(
+                result, note_text, qualification_by_url
+            )
             note = stix2.Note(
                 id=f"note--{_det_uuid(f'{identity_id}|{note_text}')}",
                 abstract=note_text[:128],
                 content=note_text,
                 created_by_ref=identity_id,
                 object_refs=[identity_id],
-                labels=labels,
-                custom_properties={"x_opencti_score": confidence},
+                labels=note_labels,
+                custom_properties={"x_opencti_score": confidence, **note_custom},
             )
             objects.append(note)
         except Exception as exc:  # noqa: BLE001

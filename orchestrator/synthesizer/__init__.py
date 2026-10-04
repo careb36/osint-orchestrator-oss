@@ -216,6 +216,38 @@ def _interleave_by_collector(items: list[ReportObservable]) -> list[ReportObserv
     return interleaved
 
 
+def _format_qualified_evidence(items: list[dict[str, Any]]) -> str:
+    """Render high/medium qualified evidence rows for the synthesis prompt."""
+    selected = [
+        item for item in items if str(item.get("relevance", "")).lower() in {"high", "medium"}
+    ]
+    if not selected:
+        return "_(none)_"
+    lines = []
+    for item in sorted(
+        selected,
+        key=lambda row: (
+            0 if str(row.get("relevance", "")).lower() == "high" else 1,
+            -float(row.get("confidence", 0.0) or 0.0),
+            str(row.get("url", "")),
+        ),
+    ):
+        lines.append(
+            "- "
+            + " | ".join(
+                [
+                    f"category={flatten_untrusted(str(item.get('category', '')))}",
+                    f"relevance={flatten_untrusted(str(item.get('relevance', '')))}",
+                    f"confidence={float(item.get('confidence', 0.0) or 0.0):.2f}",
+                    f"title={flatten_untrusted(str(item.get('title', '')))}",
+                    f"url={flatten_untrusted(str(item.get('url', '')))}",
+                    f"rationale={flatten_untrusted(str(item.get('rationale', '')))}",
+                ]
+            )
+        )
+    return "\n".join(lines)
+
+
 def _build_user_prompt(
     target: Target,
     report_data: RunReportData,
@@ -265,6 +297,7 @@ def _build_user_prompt(
         TOTAL_COUNT=total_count,
         FULL_INVENTORY=_format_observables(shown_obs),
         RELATIONSHIPS=_format_relationships(report_data.bundles),
+        EVIDENCE=_format_qualified_evidence(report_data.evidence),
         HISTORY_COUNT=len(history),
         HISTORY=history_str,
         LANGUAGE=lang,

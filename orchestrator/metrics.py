@@ -160,6 +160,11 @@ evidence_chain_verify_total = Counter(
     "Evidence chain verification outcomes per target (ok | broken | error)",
     ["target_id", "outcome"],
 )
+evidence_qualified_total = Counter(
+    f"{PREFIX}_evidence_qualified_total",
+    "Qualified evidence rows by target and category",
+    ["target_id", "category"],
+)
 
 # ─── Scheduler ────────────────────────────────────────────────────────────────
 
