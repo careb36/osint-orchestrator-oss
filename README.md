@@ -484,7 +484,7 @@ Two groups of variables live in the same `.env`:
 | `OPENCTI_ADMIN_PASSWORD` | `ChangeMe!` | Placeholder — OpenCTI's web login. |
 | `MINIO_ROOT_PASSWORD` | `ChangeMinio!` | Placeholder. |
 | `RABBITMQ_DEFAULT_PASS` | `guest` | Placeholder. |
-| `ORCHESTRATOR_SECRET_KEY` | `insecure-dev-key` | Placeholder. |
+| `ORCHESTRATOR_SECRET_KEY` | `insecure-dev-key` | HMAC key that signs the per-run evidence manifests ([Evidence chain](#evidence-chain)). Empty or the default logs a WARNING at startup. Generate with `openssl rand -hex 32`. |
 | `ALERT_WEBHOOK_SECRET` | *(empty)* | Without it webhook payloads are unsigned. |
 
 **Commonly tuned:**
@@ -848,6 +848,62 @@ def verify_signature(body: bytes, header: str, secret: str) -> bool:
 
 ---
 
+## Evidence chain
+
+Every run that writes its report also writes `manifest.json` as the last file
+of its directory (`daily_reports/<date>/<target>/run-<run_id>/`), as decided in
+[ADR-007](docs/adr/ADR-007-evidence-chain.md):
+
+- the SHA-256 of every artefact of the run (`report.md`, `bundle.stix.json`,
+  `delta.json` and `report.pdf` when present);
+- `previous_manifest_sha256`, the hash of the previous sealed run of the same
+  target, which chains the runs: altering or removing an earlier run breaks
+  every later link;
+- an HMAC-SHA256 signature over the canonical JSON of every other field (keys
+  sorted, no whitespace, UTF-8), keyed with `ORCHESTRATOR_SECRET_KEY`.
+
+The manifest's own SHA-256 is stored in `runs.manifest_sha256` in the same
+commit as the run's final status. A run that fails before its manifest is
+written stays *unsealed*: it is counted, never reported as tampering, and the
+next run chains past it.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /runs/{id}/manifest` | The run's manifest (404 when the run is unsealed) |
+| `GET /targets/{id}/chain/verify` | Re-hashes every sealed run's artefacts, checks signatures and links, and stops at the first broken run |
+
+The verification answer has `ok`, `checked`, `unsealed`, `first_broken_run_id`,
+`reason` and `detail`, plus `message` in the operator language when something
+is broken. `reason` is one of:
+
+| `reason` | Meaning |
+| --- | --- |
+| `artefact_hash` / `artefact_missing` | A report file was changed or removed after the run (`detail` names it) |
+| `manifest_missing` | The manifest file is gone while the run row says it was sealed |
+| `signature` | The manifest bytes differ from the hash recorded for the run: it was edited |
+| `signature_key` | The manifest is the recorded one but its signature does not match the current key (a key rotation looks like this) |
+| `chain_link` | A run does not point to the previous sealed run (a run in between was removed) |
+| `unsupported_version` | A manifest format this version cannot read |
+
+When retention has purged a target's oldest runs, the oldest remaining run
+still points to a manifest that is no longer on record. Verification then starts
+at that run and reports it as `anchor_run_id` with the hash it links to
+(`anchor_previous_manifest_sha256`). This is not tampering, but it also means
+removing the oldest runs of a target cannot be told apart from retention; keep
+the manifests you need to prove older history.
+
+**Offline verification** (an auditor with the key and the run directory): check
+each artefact with `sha256sum`, then recompute the HMAC over the manifest
+without its `signature` field:
+
+```bash
+python3 -c 'import hashlib,hmac,json,sys; m=json.load(open(sys.argv[1])); s=m.pop("signature"); body=json.dumps(m,ensure_ascii=False,separators=(",",":"),sort_keys=True).encode(); print(hmac.compare_digest(s,"hmac-sha256:"+hmac.new(sys.argv[2].encode(),body,hashlib.sha256).hexdigest()))' manifest.json "$ORCHESTRATOR_SECRET_KEY"
+```
+
+Rotating `ORCHESTRATOR_SECRET_KEY` does not re-sign old manifests (that would
+rewrite evidence): runs signed before the rotation report `signature_key` and
+are verified offline with the retired key.
+
 ## Retention
 
 Old run records and `daily_reports/` directories are purged automatically by a
@@ -955,6 +1011,7 @@ or a run id.
 | `llm_requests_total` | `provider`, `model`, `status` | LLM API requests by provider (`anthropic`, `openai`, `nebius`, `ollama`), model and status (`ok`, `http_429`, `http_5xx`, `timeout`, `error`, `schema_downgrade`). One sample per SDK completion call: the Anthropic SDK's single internal retry is not sampled. |
 | `llm_tokens_total` | `provider`, `model`, `direction` (`input`, `output`) | LLM token usage by provider and model, split by prompt vs completion direction |
 | `alerts_total` | `channel`, `status` | Alert lifecycle events (`sent`, `failed`, `retried`, `dlq`) |
+| `evidence_chain_verify_total` | `target_id`, `outcome` | Evidence-chain verifications by outcome (`ok`, `broken`, `error`) |
 | `scheduled_jobs` | — | Cron jobs registered in the scheduler |
 | `build_info` | `version` | Build metadata |
 
@@ -1153,6 +1210,7 @@ The CI pipeline runs `alembic upgrade head` on a temporary SQLite database and t
 | **4a** | ✅ Done | Observable-seen fix (#8), DB-based delta endpoint (#10), webhook + email alerts |
 | **4b** | ✅ Done | SocialOSINT collector (HTTP, opt-in) + MISP real stack + `connector-misp` |
 | **5** | ✅ Done | API-key auth, JSON logs + request ids, Prometheus `/metrics`, Helm chart |
+| **6** | ✅ Done | Evidence chain: signed per-run manifests chained per target ([ADR-007](docs/adr/ADR-007-evidence-chain.md)) |
 
 ---
 

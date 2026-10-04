@@ -504,7 +504,7 @@ En el mismo `.env` conviven dos grupos de variables:
 | `OPENCTI_ADMIN_PASSWORD` | `ChangeMe!` | Marcador de posición — es el login web de OpenCTI. |
 | `MINIO_ROOT_PASSWORD` | `ChangeMinio!` | Marcador de posición. |
 | `RABBITMQ_DEFAULT_PASS` | `guest` | Marcador de posición. |
-| `ORCHESTRATOR_SECRET_KEY` | `insecure-dev-key` | Marcador de posición. |
+| `ORCHESTRATOR_SECRET_KEY` | `insecure-dev-key` | Clave HMAC que firma los manifiestos de evidencia de cada corrida ([Cadena de evidencia](#cadena-de-evidencia)). Vacía o con el valor por defecto registra un WARNING al arrancar. Genérela con `openssl rand -hex 32`. |
 | `ALERT_WEBHOOK_SECRET` | *(vacío)* | Sin él los payloads de webhook van sin firmar. |
 
 **Las que se ajustan habitualmente:**
@@ -864,6 +864,63 @@ def verify_signature(body: bytes, header: str, secret: str) -> bool:
 
 ---
 
+## Cadena de evidencia
+
+Cada corrida que escribe su reporte escribe también `manifest.json` como último
+archivo de su directorio (`daily_reports/<fecha>/<objetivo>/run-<run_id>/`),
+según [ADR-007](docs/adr/ADR-007-evidence-chain-es.md):
+
+- el SHA-256 de cada artefacto de la corrida (`report.md`, `bundle.stix.json`,
+  `delta.json` y `report.pdf` si existe);
+- `previous_manifest_sha256`, el hash de la corrida sellada anterior del mismo
+  objetivo, que encadena las corridas: alterar o quitar una corrida anterior
+  rompe todos los eslabones siguientes;
+- una firma HMAC-SHA256 sobre el JSON canónico del resto de los campos (claves
+  ordenadas, sin espacios, UTF-8), con la clave `ORCHESTRATOR_SECRET_KEY`.
+
+El SHA-256 del propio manifiesto se guarda en `runs.manifest_sha256` en el mismo
+commit que el estado final de la corrida. Una corrida que falla antes de
+escribir su manifiesto queda *sin sellar*: se cuenta, nunca se informa como
+manipulación, y la siguiente corrida se encadena saltándola.
+
+| Endpoint | Propósito |
+| --- | --- |
+| `GET /runs/{id}/manifest` | El manifiesto de la corrida (404 si está sin sellar) |
+| `GET /targets/{id}/chain/verify` | Recalcula los hashes de los artefactos de cada corrida sellada, comprueba firmas y eslabones, y se detiene en la primera corrida rota |
+
+La respuesta tiene `ok`, `checked`, `unsealed`, `first_broken_run_id`, `reason`
+y `detail`, y además `message` en el idioma del operador cuando algo está roto.
+`reason` es uno de:
+
+| `reason` | Significado |
+| --- | --- |
+| `artefact_hash` / `artefact_missing` | Un archivo del reporte se modificó o se borró después de la corrida (`detail` lo nombra) |
+| `manifest_missing` | Falta el archivo del manifiesto aunque la corrida figura como sellada |
+| `signature` | Los bytes del manifiesto difieren del hash registrado para la corrida: se editó |
+| `signature_key` | El manifiesto es el registrado pero su firma no coincide con la clave actual (así se ve una rotación de clave) |
+| `chain_link` | Una corrida no apunta a la corrida sellada anterior (se quitó una corrida intermedia) |
+| `unsupported_version` | Un formato de manifiesto que esta versión no puede leer |
+
+Cuando la retención eliminó las corridas más antiguas de un objetivo, la más
+antigua que queda sigue apuntando a un manifiesto que ya no está registrado. La
+verificación empieza entonces en esa corrida y la informa como `anchor_run_id`
+con el hash al que apunta (`anchor_previous_manifest_sha256`). No es una
+manipulación, pero también significa que quitar las corridas más antiguas de un
+objetivo no se distingue de la retención; conserve los manifiestos que necesite
+para probar el historial anterior.
+
+**Verificación offline** (un auditor con la clave y el directorio de la
+corrida): compruebe cada artefacto con `sha256sum` y recalcule el HMAC del
+manifiesto sin su campo `signature`:
+
+```bash
+python3 -c 'import hashlib,hmac,json,sys; m=json.load(open(sys.argv[1])); s=m.pop("signature"); body=json.dumps(m,ensure_ascii=False,separators=(",",":"),sort_keys=True).encode(); print(hmac.compare_digest(s,"hmac-sha256:"+hmac.new(sys.argv[2].encode(),body,hashlib.sha256).hexdigest()))' manifest.json "$ORCHESTRATOR_SECRET_KEY"
+```
+
+Rotar `ORCHESTRATOR_SECRET_KEY` no vuelve a firmar los manifiestos viejos (eso
+reescribiría evidencia): las corridas firmadas antes de la rotación informan
+`signature_key` y se verifican offline con la clave retirada.
+
 ## Retención
 
 Los registros antiguos y los directorios `daily_reports/` se eliminan
@@ -976,6 +1033,7 @@ valor de un observable ni un id de ejecución.
 | `llm_requests_total` | `provider`, `model`, `status` | Solicitudes al API LLM por proveedor (`anthropic`, `openai`, `nebius`, `ollama`), modelo y estado (`ok`, `http_429`, `http_5xx`, `timeout`, `error`, `schema_downgrade`). Una muestra por llamada al SDK: el único reintento interno del SDK de Anthropic no se muestrea. |
 | `llm_tokens_total` | `provider`, `model`, `direction` (`input`, `output`) | Uso de tokens LLM por proveedor y modelo, separado por dirección (prompt vs completion) |
 | `alerts_total` | `channel`, `status` | Eventos del ciclo de alertas (`sent`, `failed`, `retried`, `dlq`) |
+| `evidence_chain_verify_total` | `target_id`, `outcome` | Verificaciones de la cadena de evidencia por resultado (`ok`, `broken`, `error`) |
 | `scheduled_jobs` | — | Jobs cron registrados en el scheduler |
 | `build_info` | `version` | Metadatos de la build |
 
@@ -1176,6 +1234,7 @@ El pipeline de CI ejecuta `alembic upgrade head` sobre una base de datos SQLite 
 | **4a** | ✅ Completada | Corrección de observables vistos (#8), endpoint delta desde la base (#10), alertas por webhook y email |
 | **4b** | ✅ Completada | Recolector SocialOSINT (HTTP, opt-in) + stack MISP real + `connector-misp` |
 | **5** | ✅ Completada | Autenticación por clave de API, logs JSON + ids de petición, `/metrics` Prometheus, chart de Helm |
+| **6** | ✅ Completada | Cadena de evidencia: manifiestos firmados por corrida, encadenados por objetivo ([ADR-007](docs/adr/ADR-007-evidence-chain-es.md)) |
 
 ---
 

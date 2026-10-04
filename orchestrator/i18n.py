@@ -137,8 +137,8 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "en": "Manifest missing for run {run_id}",
     },
     "chain.reason.signature": {
-        "es": "La firma del manifiesto no es válida",
-        "en": "Manifest signature is invalid",
+        "es": "El manifiesto se modificó después de la ejecución (su hash no coincide con el registrado)",
+        "en": "The manifest was modified after the run (its hash does not match the recorded one)",
     },
     "chain.reason.signature_key": {
         "es": "La firma del manifiesto no coincide con la clave configurada",

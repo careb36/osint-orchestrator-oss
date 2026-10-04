@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import hmac
 import json
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +57,17 @@ def verify_signature(payload: dict[str, Any], *, secret_key: str, signature: str
     return hmac.compare_digest(signature, expected)
 
 
+def _iso_utc(value: datetime) -> str:
+    """ISO 8601 in UTC; a naive datetime (SQLite) is UTC, never host-local time.
+
+    ``datetime.astimezone()`` on a naive value assumes the host's zone, which
+    would make the same run produce different manifests on different hosts.
+    """
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).isoformat()
+
+
 def build_manifest(
     *,
     run_id: int,
@@ -70,9 +82,9 @@ def build_manifest(
 ) -> dict[str, Any]:
     """Create a signed manifest payload without storing it to disk."""
     if isinstance(started_at, datetime):
-        started_at = started_at.astimezone().isoformat()
+        started_at = _iso_utc(started_at)
     if isinstance(finished_at, datetime):
-        finished_at = finished_at.astimezone().isoformat()
+        finished_at = _iso_utc(finished_at)
 
     payload: dict[str, Any] = {
         "manifest_version": MANIFEST_VERSION,
@@ -133,97 +145,108 @@ def verify_manifest_payload(payload: dict[str, Any], *, secret_key: str) -> tupl
     return True, None
 
 
+def _broken(run_id: int | None, reason: str, detail: str) -> dict[str, Any]:
+    return {"first_broken_run_id": run_id, "reason": reason, "detail": detail}
+
+
+def _check_sealed_run(run: Any, previous_manifest_sha256: str | None, secret_key: str):
+    """Check one sealed run; return (broken_or_None, this_manifest_sha256)."""
+    manifest_path = manifest_path_for_report(run.report_path)
+    if manifest_path is None or not manifest_path.exists():
+        return _broken(run.id, "manifest_missing", "manifest.json"), None
+    # The stored hash first: a manifest whose bytes changed was edited after
+    # the run (reason "signature"); a manifest that is byte-identical to what
+    # the run stored but fails the HMAC was signed with another key
+    # ("signature_key"), which is what a key rotation looks like.
+    actual_sha256 = sha256_file(manifest_path)
+    if actual_sha256 != run.manifest_sha256:
+        return _broken(run.id, "signature", "manifest.json"), None
+    try:
+        payload = load_manifest_file(manifest_path)
+    except (json.JSONDecodeError, OSError, ValueError):
+        return _broken(run.id, "signature", "manifest.json"), None
+    if payload.get("manifest_version") not in _SUPPORTED_MANIFEST_VERSIONS:
+        return _broken(run.id, "unsupported_version", str(payload.get("manifest_version"))), None
+    ok, sig_reason = verify_manifest_payload(payload, secret_key=secret_key)
+    if not ok:
+        return _broken(run.id, sig_reason or "signature", "manifest.json"), None
+    if payload.get("previous_manifest_sha256") != previous_manifest_sha256:
+        return _broken(run.id, "chain_link", str(payload.get("previous_manifest_sha256"))), None
+    artefacts = payload.get("artefacts")
+    if not isinstance(artefacts, dict):
+        return _broken(run.id, "artefact_hash", "artefacts"), None
+    for name, expected_hash in sorted(artefacts.items()):
+        file_path = manifest_path.parent / str(name)
+        if not file_path.exists():
+            return _broken(run.id, "artefact_missing", str(name)), None
+        if sha256_file(file_path) != expected_hash:
+            return _broken(run.id, "artefact_hash", str(name)), None
+    return None, actual_sha256
+
+
 async def verify_target_chain(
     *,
     target_id: str,
     secret_key: str,
-    session,
+    session: Any,
 ) -> dict[str, Any]:
-    """Verify the manifest chain for a target, skipping unsealed runs."""
-    from orchestrator.models import Run
-    from sqlmodel import select
+    """Verify a target's manifest chain (ADR-007 §4), oldest sealed run first.
+
+    Unsealed runs (no ``manifest_sha256``) are counted, never treated as
+    tampering. When retention has purged the oldest runs, the oldest retained
+    sealed run links to a manifest whose row no longer exists: the chain is
+    verified from that run on and ``anchor_run_id`` /
+    ``anchor_previous_manifest_sha256`` say where, so an auditor holding the
+    archived manifests can check the earlier part offline.
+    """
+    from sqlmodel import select  # noqa: PLC0415 — keep this module import-light
+
+    from orchestrator.models import Run  # noqa: PLC0415
 
     result = await session.exec(
-        select(Run)
-        .where(Run.target_id == target_id)
-        .order_by(Run.started_at.asc())
+        select(Run).where(Run.target_id == target_id).order_by(Run.started_at.asc(), Run.id.asc())
     )
     runs = result.all()
+    retained_hashes = {run.manifest_sha256 for run in runs if run.manifest_sha256}
+
     checked = 0
     unsealed = 0
+    broken: dict[str, Any] | None = None
     previous_manifest_sha256: str | None = None
-    first_broken_run_id: int | None = None
-    reason: str | None = None
-    detail: str | None = None
+    anchor_run_id: int | None = None
+    anchor_previous: str | None = None
 
     for run in runs:
         if run.manifest_sha256 is None:
             unsealed += 1
             continue
+        if checked == 0:
+            # First sealed run still on record: accept a link to a manifest
+            # whose run row retention has removed (it cannot be checked here).
+            manifest_path = manifest_path_for_report(run.report_path)
+            with contextlib.suppress(OSError, ValueError, json.JSONDecodeError):
+                if manifest_path is not None and manifest_path.exists():
+                    link = load_manifest_file(manifest_path).get("previous_manifest_sha256")
+                    if link is not None and link not in retained_hashes:
+                        previous_manifest_sha256 = link
+                        anchor_run_id = run.id
+                        anchor_previous = link
         checked += 1
-        manifest_path = manifest_path_for_report(run.report_path)
-        if manifest_path is None or not manifest_path.exists():
-            first_broken_run_id = run.id
-            reason = "manifest_missing"
-            detail = str(manifest_path.name if manifest_path else "manifest.json")
+        broken, this_sha256 = _check_sealed_run(run, previous_manifest_sha256, secret_key)
+        if broken is not None:
             break
-        try:
-            payload = load_manifest_file(manifest_path)
-        except (json.JSONDecodeError, OSError, ValueError):
-            first_broken_run_id = run.id
-            reason = "manifest_missing"
-            detail = manifest_path.name
-            break
-        if payload.get("manifest_version") not in _SUPPORTED_MANIFEST_VERSIONS:
-            first_broken_run_id = run.id
-            reason = "unsupported_version"
-            detail = str(payload.get("manifest_version"))
-            break
-        if payload.get("previous_manifest_sha256") != previous_manifest_sha256:
-            first_broken_run_id = run.id
-            reason = "chain_link"
-            detail = str(payload.get("previous_manifest_sha256"))
-            break
-        ok, sig_reason = verify_manifest_payload(payload, secret_key=secret_key)
-        if not ok:
-            first_broken_run_id = run.id
-            reason = sig_reason or "signature"
-            detail = str(payload.get("signature", ""))
-            break
-        artefacts = payload.get("artefacts")
-        if not isinstance(artefacts, dict):
-            first_broken_run_id = run.id
-            reason = "artefact_hash"
-            detail = "artefacts"
-            break
-        for name, expected_hash in artefacts.items():
-            file_path = manifest_path.parent / str(name)
-            if not file_path.exists():
-                first_broken_run_id = run.id
-                reason = "artefact_missing"
-                detail = str(name)
-                break
-            actual = sha256_file(file_path)
-            if actual != expected_hash:
-                first_broken_run_id = run.id
-                reason = "artefact_hash"
-                detail = str(name)
-                break
-        if first_broken_run_id is not None:
-            break
-        actual_manifest_sha256 = sha256_file(manifest_path)
-        if actual_manifest_sha256 != run.manifest_sha256:
-            first_broken_run_id = run.id
-            reason = "chain_link"
-            detail = run.manifest_sha256 or "manifest_sha256"
-            break
-        previous_manifest_sha256 = actual_manifest_sha256
+        previous_manifest_sha256 = this_sha256
 
-    return {
-        "ok": first_broken_run_id is None,
+    response: dict[str, Any] = {
+        "ok": broken is None,
         "checked": checked,
         "unsealed": unsealed,
-        "first_broken_run_id": first_broken_run_id,
-        "reason": reason,
-        "detail": detail,
+        "first_broken_run_id": None,
+        "reason": None,
+        "detail": None,
+        "anchor_run_id": anchor_run_id,
+        "anchor_previous_manifest_sha256": anchor_previous,
     }
+    if broken is not None:
+        response.update(broken)
+    return response

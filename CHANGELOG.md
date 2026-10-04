@@ -11,6 +11,12 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- Evidence chain (ADR-007): every run writes a signed `manifest.json` (artefact
+  SHA-256s, HMAC-SHA256 with `ORCHESTRATOR_SECRET_KEY`) chained to the previous
+  sealed run of the target; `runs.manifest_sha256` (migration `0005`);
+  `GET /runs/{id}/manifest`, `GET /targets/{id}/chain/verify` and the metric
+  `evidence_chain_verify_total`. Retention-purged runs anchor the chain instead
+  of reading as tampering. An empty or default signing key logs a WARNING.
 - Tavily web-research collector (opt-in, `collectors.tavily`): three
   due-diligence queries per run that search the target's domain as a quoted
   term, `url` observables and one STIX Note per distinct page, wall-clock

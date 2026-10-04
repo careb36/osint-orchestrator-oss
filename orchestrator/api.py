@@ -565,7 +565,9 @@ async def get_run_manifest(run_id: int) -> dict[str, Any]:
     try:
         payload = load_manifest_file(manifest_path)
     except (OSError, TypeError, ValueError):
-        raise HTTPException(status_code=404, detail=t("manifest.not_found", run_id=run_id)) from None
+        raise HTTPException(
+            status_code=404, detail=t("manifest.not_found", run_id=run_id)
+        ) from None
     return payload
 
 
@@ -581,6 +583,13 @@ async def verify_target_chain_endpoint(target_id: str) -> dict[str, Any]:
             )
         outcome = "ok" if result["ok"] else "broken"
         metrics.evidence_chain_verify_total.labels(target_id, outcome).inc()
+        if result["reason"]:
+            # Operator-facing text (ADR-004); `reason` stays the stable English id.
+            result["message"] = t(
+                f"chain.reason.{result['reason']}",
+                name=result["detail"],
+                run_id=result["first_broken_run_id"],
+            )
         return result
     except Exception:
         metrics.evidence_chain_verify_total.labels(target_id, "error").inc()
