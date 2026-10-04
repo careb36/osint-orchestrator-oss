@@ -28,7 +28,7 @@ from orchestrator.collectors.spiderfoot import SpiderFootCollector
 from orchestrator.collectors.tavily import TavilyCollector
 from orchestrator.config import settings
 from orchestrator.database import get_session
-from orchestrator.evidence import build_manifest, sha256_file, write_manifest_file
+from orchestrator.evidence import build_manifest, canonical_json, sha256_file, write_manifest_file
 from orchestrator.models import (
     AlertDelivery,
     AlertDeliveryStatus,
@@ -36,6 +36,8 @@ from orchestrator.models import (
     AlertStatus,
     CollectorName,
     CollectorResult,
+    EvidenceItem,
+    EvidenceQualification,
     OpenCTIOutbox,
     OpenCTIOutboxStatus,
     Run,
@@ -55,6 +57,8 @@ from orchestrator.reports import (
 from orchestrator.sinks import OpenCTIIngestError, is_transient
 from orchestrator.sinks.opencti import OpenCTISink
 from orchestrator.synthesizer import synthesize
+from orchestrator.synthesizer.providers import get_client
+from orchestrator.synthesizer.qualify import persist_qualifications, qualify_evidence
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +104,52 @@ def _get_collectors(target: Target) -> list[BaseCollector]:
                 extra={"target_id": target.id, "collector": CollectorName.TAVILY.value},
             )
     return collectors
+
+
+async def _ollama_reachable() -> bool:
+    try:
+        timeout = max(1.0, min(float(settings.llm_timeout_seconds), 5.0))
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.get(f"{settings.llm_base_url}/api/tags")
+            response.raise_for_status()
+    except Exception:
+        return False
+    return True
+
+
+async def _should_qualify(target: Target, evidence_items: list[EvidenceItem]) -> bool:
+    if not settings.llm_qualify_enabled:
+        return False
+    if settings.llm_qualify_max_items <= 0:
+        return False
+    if not evidence_items:
+        return False
+    client = get_client(target)
+    if client is None:
+        return False
+    if client.provider == "ollama":
+        return await _ollama_reachable()
+    return client.provider in {"openai", "nebius", "anthropic"}
+
+
+def _qualification_payload(row: EvidenceQualification) -> dict[str, object]:
+    payload = row.model_dump()
+    if row.created_at.tzinfo is None:
+        payload["created_at"] = row.created_at.replace(tzinfo=UTC).isoformat()
+    else:
+        payload["created_at"] = row.created_at.astimezone(UTC).isoformat()
+    return payload
+
+
+def _write_qualified_evidence_file(report_path: str | None, rows: list[EvidenceQualification]) -> None:
+    if not report_path:
+        return
+    base = Path(report_path).parent
+    ordered = sorted(
+        (_qualification_payload(row) for row in rows),
+        key=lambda item: (str(item.get("url", "")), int(item.get("id") or 0)),
+    )
+    (base / "qualified_evidence.json").write_text(canonical_json(ordered), encoding="utf-8")
 
 
 async def get_run_delta(run_id: int) -> list[dict]:
@@ -621,6 +671,16 @@ async def _run_target_pipeline(target: Target, run_id: int, log_ctx: dict) -> Ru
         metrics.collector_runs_total.labels(name, target.id, outcome).inc()
         metrics.collector_duration_seconds.labels(name).observe(perf_counter() - collector_started)
 
+    evidence_items = [item for result in results for item in result.evidence]
+    qualifications: list[EvidenceQualification] = []
+    if await _should_qualify(target, evidence_items):
+        qualifications = await qualify_evidence(target, run_id, evidence_items)
+        await persist_qualifications(qualifications)
+        for row in qualifications:
+            metrics.evidence_qualified_total.labels(target.id, row.category).inc()
+
+    qualification_by_url = {row.url: row for row in qualifications if row.url}
+
     # Normalize all results to STIX bundles, computing is_new in memory
     # BEFORE any DB write (Issue #8: only persist SeenObservable after
     # successful ingestion so a second run re-reports un-ingested observables).
@@ -635,7 +695,7 @@ async def _run_target_pipeline(target: Target, run_id: int, log_ctx: dict) -> Ru
         for result in results:
             if not result.success:
                 continue
-            bundle = normalize(result)
+            bundle = normalize(result, qualification_by_url=qualification_by_url)
             bundle_observables: list[tuple[str, str, str, bool]] = []
 
             for stix_obj in bundle.get("objects", []):
@@ -785,6 +845,7 @@ async def _run_target_pipeline(target: Target, run_id: int, log_ctx: dict) -> Ru
         ],
         bundles=[b for b, _ in bundles],
         observables=report_observables,
+        evidence=[_qualification_payload(row) for row in qualifications],
         errors=errors,
         language=target.language,
     )
@@ -816,6 +877,7 @@ async def _run_target_pipeline(target: Target, run_id: int, log_ctx: dict) -> Ru
             if report_error:
                 run.error = f"{run.error}; {report_error}" if run.error else report_error
             if report_path is not None:
+                _write_qualified_evidence_file(report_path, qualifications)
                 # ADR-007: the manifest is the run's last file and its hash is
                 # stored in the same commit as the final status. A failure here
                 # leaves the run unsealed (counted, never read as tampering)

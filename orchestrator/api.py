@@ -43,7 +43,7 @@ from orchestrator.database import create_db_and_tables, get_session
 from orchestrator.evidence import load_manifest_file, manifest_path_for_report, verify_target_chain
 from orchestrator.i18n import console_i18n_catalogue, resolve_language, t
 from orchestrator.logging_config import configure_logging, request_id_var
-from orchestrator.models import AlertRecord, FindingRecord, Run, Target
+from orchestrator.models import AlertRecord, EvidenceQualification, FindingRecord, Run, Target
 from orchestrator.pipeline import (
     drain_opencti_outbox,
     get_run_delta,
@@ -583,6 +583,22 @@ async def get_run_finding(run_id: int) -> dict[str, Any]:
     if record is None:
         raise HTTPException(status_code=404, detail=t("finding_not_found", run_id=run_id))
     return record.to_api_dict()
+
+
+@router.get("/runs/{run_id}/evidence", response_model=list[dict[str, Any]], tags=["runs"])
+async def get_run_evidence(run_id: int) -> list[dict[str, Any]]:
+    """Return evidence qualifications persisted for one run."""
+    async with get_session() as session:
+        run = await session.get(Run, run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail=t("run_not_found", run_id=run_id))
+        result = await session.exec(
+            select(EvidenceQualification)
+            .where(EvidenceQualification.run_id == run_id)
+            .order_by(EvidenceQualification.url.asc(), EvidenceQualification.id.asc())
+        )
+        rows = result.all()
+    return [row.model_dump() for row in rows]
 
 
 @router.get("/runs/{run_id}/manifest", response_model=dict[str, Any], tags=["runs"])

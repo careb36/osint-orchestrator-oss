@@ -516,6 +516,8 @@ Two groups of variables live in the same `.env`:
 | `LLM_TIMEOUT_SECONDS` | `120` | End-to-end timeout for a synthesis request. |
 | `LLM_MAX_TOKENS` | `2048` | Upper bound on the model reply. |
 | `LLM_MAX_OBSERVABLES_IN_PROMPT` | `200` | Cap observables sent to the synthesizer prompt. |
+| `LLM_QUALIFY_ENABLED` | `true` | Enables the fast-route evidence-qualification step before synthesis. |
+| `LLM_QUALIFY_MAX_ITEMS` | `30` | Max evidence items qualified per run (0–100). Set `0` to disable qualification. |
 | `SYNTHESIS_HISTORY_RUNS` | `5` | Prior runs included as synthesis context. |
 | `SYNTHESIS_OPENCTI_CONTEXT` | `false` | If `true`, enrich synthesis with OpenCTI context. |
 | `OPENAI_API_KEY` | *(empty)* | Required when `LLM_PROVIDER=openai`. |
@@ -1020,6 +1022,7 @@ or a run id.
 | `llm_model_available` | `provider`, `model`, `route` (`reasoning`, `fast`) | Startup preflight gauge: `1` when the configured route model is listed by the provider `GET /models`, `0` when it is not served |
 | `alerts_total` | `channel`, `status` | Alert lifecycle events (`sent`, `failed`, `retried`, `dlq`) |
 | `evidence_chain_verify_total` | `target_id`, `outcome` | Evidence-chain verifications by outcome (`ok`, `broken`, `error`) |
+| `evidence_qualified_total` | `target_id`, `category` | Qualified evidence rows by category (`adverse_media`, `sanctions`, `litigation`, `regulatory_action`, `corporate_profile`, `unrelated`) |
 | `scheduled_jobs` | — | Cron jobs registered in the scheduler |
 | `build_info` | `version` | Build metadata |
 
@@ -1273,7 +1276,9 @@ MIT — see [LICENSE](LICENSE).
 
 Notes:
 - Nebius uses the same OpenAI-compatible provider path as `openai` (no duplicated integration code).
-- Synthesis requests use the reasoning route.
+- Fast-route calls (`LLM_MODEL_FAST`) are used for evidence qualification; reasoning-route calls (`LLM_MODEL_REASONING`) are used for final synthesis.
+- Qualification schema: `{"items":[{"index":int,"category":"adverse_media|sanctions|litigation|regulatory_action|corporate_profile|unrelated","relevance":"high|medium|low","confidence":0..1,"rationale":"<=280 chars"}]}`.
+- Invalid qualification rows (unknown index/category or out-of-range values) are ignored per item; a failed qualification call leaves that batch unqualified and appends `qualification: <error>` to the run error.
 - JSON-schema response format is requested first; a provider that rejects `response_format` (400/422) gets the same request once more without it, counted as `schema_downgrade` and not as a failed attempt, and the reply goes through the tolerant JSON parser.
 - Retries: up to 3 attempts on 408, 409, 429, any 5xx and transport errors, honouring `Retry-After`, all inside `LLM_TIMEOUT_SECONDS` — the budget bounds every attempt and backoff of one call.
 - The finding records the provider (`openai`, `nebius`, `anthropic`, `ollama` — the same value as the metrics' `provider` label) and the model that actually served the request (`/runs/{id}/finding`).
