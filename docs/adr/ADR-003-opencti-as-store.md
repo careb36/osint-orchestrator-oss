@@ -1,7 +1,5 @@
 # ADR-003: OpenCTI as the Single Source of Truth
 
-> 🇪🇸 [Español](ADR-003-opencti-as-store-es.md)
-
 **Date:** 2026-09-04  
 **Status:** Accepted
 

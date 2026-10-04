@@ -16,7 +16,7 @@ happened, which collectors ran, how many observables were new and where the
 report lives. Nothing today proves that the files on disk are the ones the run
 produced, or that no report in a target's history was altered or removed
 afterwards. For the audiences this project targets (compliance, AML, forensic
-readiness — see `docs/business/`) that gap is the difference between "a report"
+readiness) that gap is the difference between "a report"
 and "evidence".
 
 `ORCHESTRATOR_SECRET_KEY` exists in `orchestrator/config.py` (default

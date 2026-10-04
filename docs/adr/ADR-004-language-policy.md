@@ -1,7 +1,5 @@
 # ADR-004: Spanish for Operators, English for Code
 
-> 🇪🇸 [Español](ADR-004-language-policy-es.md)
-
 **Date:** 2026-09-04
 **Status:** Accepted
 
@@ -73,20 +71,10 @@ Supported languages are `es` and `en`. An unrecognised value is logged and skipp
 
 **English throughout, translate at the reader.** Rejected as the status quo that prompted this: it pushes recurring manual work onto the people the reports exist for.
 
-## Amendment (2026-09-17): bilingual companions
+## Documentation language
 
-Practice went further than the original rule: this README and these ADRs now
-ship Spanish companions (`README.es.md`, `*-es.md`) and the business runbooks
-under `docs/business/` are authored in Spanish. That is not a violation of
-"English for developers" but its consequence — the *audience* test decides:
-
-- The **English file is canonical** for READMEs and ADRs. A companion
-  (`README.es.md`, `-es.md`) is a translation for Spanish-reading operators,
-  stakeholders and reviewers, cross-linked from the canonical file's header.
-- **Business/operator manuals** (`docs/business/*`) may be authored in
-  Spanish first, with an English companion when the audience requires it.
-- Companions must be updated in the same PR that changes the canonical file
-  so both languages describe the same behavior.
-- Everything the original rule assigns to English — code, comments,
-  docstrings, logs, commits, persisted identifiers — stays English without
-  exception.
+Which documents are translated is decided in
+[ADR-009](ADR-009-documentation-language.md): documentation is English, and the
+README alone has a Spanish companion. Everything this ADR assigns to English —
+code, comments, docstrings, logs, commits, persisted identifiers — stays English
+without exception.

@@ -1,7 +1,7 @@
 """
 Shared request policy for the LLM providers: which HTTP statuses are
 transient, which ones mean "the provider refused ``response_format``", and
-how an exception maps to the ``status`` label values of the README.
+how an exception maps to the ``status`` label values documented in docs/operations.md.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ def status_label(
     timeout_types: tuple[type[BaseException], ...] = (),
     status_code: int | None = None,
 ) -> str:
-    """Bucket an exception into the ``status`` label values documented in the README.
+    """Bucket an exception into the ``status`` label values documented in docs/operations.md.
 
     *status_code* overrides the exception's own ``status_code`` attribute for
     SDKs that keep it on a nested response object (httpx).

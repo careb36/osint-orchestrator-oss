@@ -18,7 +18,8 @@ import pytest
 
 REPO_ROOT = pathlib.Path(__file__).parents[2]
 ENV_EXAMPLE = REPO_ROOT / ".env.example"
-README_FILES = (REPO_ROOT / "README.md", REPO_ROOT / "README.es.md")
+# Reference tables live under docs/ (ADR-009), not in the README.
+CONFIG_DOCS = (REPO_ROOT / "docs" / "configuration.md",)
 
 
 def _env_var_name(field_name: str) -> str:
@@ -38,9 +39,9 @@ def _settings_fields() -> list[str]:
     return list(Settings.model_fields.keys())
 
 
-def _readme_table_keys() -> set[str]:
+def _documented_table_keys() -> set[str]:
     keys: set[str] = set()
-    for path in README_FILES:
+    for path in CONFIG_DOCS:
         for line in path.read_text(encoding="utf-8").splitlines():
             if not line.lstrip().startswith("|"):
                 continue
@@ -77,10 +78,10 @@ def test_env_example_has_no_inline_comment_on_blank_value() -> None:
 
 
 @pytest.mark.parametrize("field_name", _settings_fields())
-def test_settings_field_in_readme_environment_tables(field_name: str) -> None:
-    """Each Settings field must be listed in a README environment table row."""
+def test_settings_field_in_documented_environment_tables(field_name: str) -> None:
+    """Each Settings field must be listed in an environment table of docs/configuration.md."""
     env_var = _env_var_name(field_name)
-    assert env_var in _readme_table_keys(), (
+    assert env_var in _documented_table_keys(), (
         f"Settings field '{field_name}' (env var '{env_var}') is missing from "
-        "README.md / README.es.md environment tables."
+        "docs/configuration.md environment tables."
     )

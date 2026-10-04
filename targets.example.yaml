@@ -98,7 +98,7 @@ targets:
     report_dir: "daily_reports"
 
     # Alertas: cuándo y cómo notificar hallazgos nuevos.
-    # Ver sección "Alerts" del README para el esquema JSON del webhook.
+    # Ver docs/operations.md (Alerts) para el contenido del webhook.
     alerts:
       enabled: true
       # Disparar cuando haya observables nuevos en este run.
@@ -107,7 +107,7 @@ targets:
       # no haya observables nuevos. Valores: low | medium | high | critical.
       min_risk_level: high
       # Si es false, el payload sólo contiene conteos y tipos, nunca valores
-      # de observables (p. ej. nombres de dominio, IPs). Ver privacidad en README.
+      # de observables (p. ej. nombres de dominio, IPs). Ver SECURITY.md.
       include_values: true
 
   # ─── Ejemplo con SocialOSINT habilitado ─────────────────────────────────────

@@ -178,7 +178,7 @@ app = FastAPI(
     description=(
         "Every endpoint except `GET /`, `GET /health` and `GET /metrics` requires an API key "
         "(`X-API-Key: <key>` or `Authorization: Bearer <key>`). Error `detail` strings are "
-        "localised per ADR-004. See the repository README for the full operator guide."
+        "localised per ADR-004. See docs/operations.md in the repository for the operator guide."
     ),
     openapi_tags=_OPENAPI_TAGS,
     contact={

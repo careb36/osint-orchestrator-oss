@@ -46,6 +46,13 @@ from [SECURITY.md](SECURITY.md).
 
 ### Changed
 
+- Documentation restructured ([ADR-009](docs/adr/ADR-009-documentation-language.md)):
+  the README is a short overview in English and Spanish; reference material
+  moved to `docs/architecture.md`, `docs/configuration.md` and
+  `docs/operations.md` (English). Removed: the Spanish companions of the ADRs,
+  `CONTRIBUTING` and `SECURITY`, the business presentations with their PDF
+  script, `docs/README.md` and `docs/socialosint.md`. The settings table
+  checked by `tests/unit/test_env_coverage.py` is now `docs/configuration.md`.
 - `TAVILY_MAX_RESULTS` (1–20) and `TAVILY_MAX_CALLS_PER_RUN` (0–20) are
   validated at startup; an out-of-range value that was previously clamped
   now stops the service with a configuration error. `0` calls skips the

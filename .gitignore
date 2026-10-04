@@ -91,5 +91,3 @@ amass/datasources.yaml
 docker-compose.local.yml
 docker-compose.*.local.yml
 
-# Generated formal PDFs (render via scripts/render_business_pdf.py)
-docs/business/*.pdf

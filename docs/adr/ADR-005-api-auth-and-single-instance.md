@@ -1,7 +1,5 @@
 # ADR-005: Static API Keys, Structured Observability and a Single-Instance Deployment
 
-> 🇪🇸 [Español](ADR-005-api-auth-and-single-instance-es.md)
-
 **Status:** Accepted
 **Date:** 2026-09-08
 **Phase:** 5
