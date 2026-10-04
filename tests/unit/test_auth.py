@@ -197,7 +197,11 @@ def test_derived_route_calls_include_core_protected_endpoints() -> None:
 def test_health_never_needs_a_key(one_key, client: TestClient) -> None:
     resp = client.get("/health")
     assert resp.status_code == 200
-    assert resp.json()["status"] == "ok"
+    payload = resp.json()
+    assert payload["status"] in {"ok", "degraded", "offline"}
+    assert payload["version"]
+    assert payload["checks"]["api"]["status"] == "ok"
+    assert set(payload["checks"]).issubset({"api", "database", "scheduler", "opencti"})
 
 
 def test_metrics_never_needs_a_key(one_key, client: TestClient) -> None:

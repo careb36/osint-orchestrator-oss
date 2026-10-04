@@ -30,6 +30,16 @@
         outline-offset: 2px;
       }
       .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+      .health-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+      .health-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+      .health-card { border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; background: #f8fafc; }
+      .health-card[data-status="ok"] { border-left: 5px solid #16a34a; }
+      .health-card[data-status="degraded"] { border-left: 5px solid #f59e0b; }
+      .health-card[data-status="offline"] { border-left: 5px solid #dc2626; }
+      .status-pill { display: inline-flex; border-radius: 999px; padding: 4px 8px; font-size: 12px; font-weight: 700; text-transform: uppercase; }
+      .status-pill[data-status="ok"] { background: #dcfce7; color: #166534; }
+      .status-pill[data-status="degraded"] { background: #fef3c7; color: #92400e; }
+      .status-pill[data-status="offline"] { background: #fee2e2; color: #991b1b; }
       table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #e2e8f0; }
       th, td { text-align: left; border-bottom: 1px solid #e2e8f0; padding: 8px; font-size: 14px; }
       caption { text-align: left; font-weight: 600; margin-bottom: 8px; }
@@ -77,6 +87,7 @@
         <div id="auth-help" class="auth-help hidden" role="status" aria-live="polite"></div>
         <div class="controls">
           <button id="nav-summary" class="active" type="button" aria-controls="summary-view"></button>
+          <button id="nav-health" type="button" aria-controls="health-view"></button>
           <button id="nav-risk" type="button" aria-controls="risk-view"></button>
           <button id="nav-runs" type="button" aria-controls="runs-view"></button>
           <button id="nav-detail" type="button" aria-controls="detail-view"></button>
@@ -84,6 +95,13 @@
       </section>
 
       <section id="summary-view" class="card" tabindex="-1"></section>
+      <section id="health-view" class="card hidden" tabindex="-1">
+        <div class="health-header">
+          <h2 id="health-title" style="margin:0;">System health</h2>
+          <div id="health-summary" class="status-pill" aria-live="polite"></div>
+        </div>
+        <div id="health-grid" class="health-grid" aria-live="polite"></div>
+      </section>
 
       <section id="risk-view" class="card hidden" tabindex="-1">
         <div id="risk-table-wrap"></div>
@@ -123,6 +141,7 @@
 
       const views = {
         summary: document.getElementById("summary-view"),
+        health: document.getElementById("health-view"),
         risk: document.getElementById("risk-view"),
         runs: document.getElementById("runs-view"),
         detail: document.getElementById("detail-view"),
@@ -155,6 +174,7 @@
         document.getElementById("remember-key-label").textContent = t("rememberKey");
         document.getElementById("api-key-note").textContent = t("keyNote");
         document.getElementById("nav-summary").textContent = t("summary");
+        document.getElementById("nav-health").textContent = t("health");
         document.getElementById("nav-risk").textContent = t("risk");
         document.getElementById("nav-runs").textContent = t("runs");
         document.getElementById("nav-detail").textContent = t("detail");
@@ -167,10 +187,13 @@
       function setActive(viewName) {
         Object.keys(views).forEach((key) => {
           views[key].classList.toggle("hidden", key !== viewName);
-          document.getElementById(`nav-${key}`).classList.toggle("active", key === viewName);
-          document.getElementById(`nav-${key}`).setAttribute("aria-current", key === viewName ? "page" : "false");
+          const nav = document.getElementById(`nav-${key}`);
+          if (nav) {
+            nav.classList.toggle("active", key === viewName);
+            nav.setAttribute("aria-current", key === viewName ? "page" : "false");
+          }
         });
-        views[viewName].focus();
+        if (views[viewName]) views[viewName].focus();
       }
 
       async function apiFetch(path) {
@@ -703,6 +726,29 @@
         }
       }
 
+      async function loadHealthStatus() {
+        try {
+          const payload = await apiGet("/health");
+          const summary = document.getElementById("health-summary");
+          const grid = document.getElementById("health-grid");
+          const overall = payload.status || "ok";
+          summary.textContent = overall.toUpperCase();
+          summary.dataset.status = overall;
+          const cards = Object.entries(payload.checks || {}).map(([name, check]) => `
+            <article class="health-card" data-status="${esc(check.status || "ok")}">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;">
+                <strong>${esc(name)}</strong>
+                <span class="status-pill" data-status="${esc(check.status || "ok")}">${esc(check.status || "ok")}</span>
+              </div>
+              <div class="muted">${esc(check.detail || "")}</div>
+            </article>
+          `);
+          grid.innerHTML = cards.join("") || "<p class=\"muted\">${t("empty")}</p>";
+        } catch (error) {
+          document.getElementById("health-grid").innerHTML = `<p class="error">${t("errorPrefix")}: ${esc(error.message)}</p>`;
+        }
+      }
+
       async function loadData() {
         views.summary.innerHTML = `<p class="muted">${t("loading")}</p>`;
         document.getElementById("risk-table-wrap").innerHTML = `<p class="muted">${t("loading")}</p>`;
@@ -722,6 +768,7 @@
           renderSummary();
           renderRiskTrends();
           renderRuns();
+          await loadHealthStatus();
         } catch (error) {
           if (error.name === "AuthRequiredError") {
             handleAuthError();
@@ -770,6 +817,7 @@
         setAuthHelp(t("keyCleared"));
       });
       document.getElementById("nav-summary").addEventListener("click", () => setActive("summary"));
+      document.getElementById("nav-health").addEventListener("click", () => setActive("health"));
       document.getElementById("nav-risk").addEventListener("click", () => setActive("risk"));
       document.getElementById("nav-runs").addEventListener("click", () => setActive("runs"));
       document.getElementById("nav-detail").addEventListener("click", () => setActive("detail"));
@@ -799,6 +847,11 @@
             document.getElementById("api-key-note").textContent = t("keyLoaded");
           }
           loadData();
+          setInterval(() => {
+            if (document.getElementById("nav-health") && document.getElementById("nav-health").classList.contains("active")) {
+              loadHealthStatus();
+            }
+          }, 15000);
         })
         .catch((error) => {
           if (error.name === "AuthRequiredError") {
