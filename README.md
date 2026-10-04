@@ -77,6 +77,7 @@ Requires Docker with Compose v2 and 16 GB of RAM (the stack includes OpenCTI).
 ```bash
 cp .env.example .env && cp targets.example.yaml targets.yaml   # fill in keys and an authorised target
 docker compose up -d --build
+KEY="$(grep '^ORCHESTRATOR_API_KEY=' .env | cut -d= -f2)"
 curl -X POST -H "X-API-Key: $KEY" http://localhost:8000/targets/example-domain/run
 ```
 
