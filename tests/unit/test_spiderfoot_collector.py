@@ -169,7 +169,7 @@ def test_parse_logs_rows_with_an_unrecognised_layout(caplog):
         )
 
     assert [o.value for o in result.observables] == ["example.com"]
-    assert "3 of 3 result rows had an unrecognised layout" in caplog.text
+    assert "3 of 3 result rows were unreadable" in caplog.text
 
 
 def test_dict_rows_map_and_malformed_ones_are_skipped(caplog):
@@ -204,7 +204,53 @@ def test_dict_rows_map_and_malformed_ones_are_skipped(caplog):
     assert not any(
         o.value in {"1.2.3.4", "False", "None", "0", "13335.0"} for o in result.observables
     )
-    assert "7 of 10 result rows had an unrecognised layout" in caplog.text
+    assert "7 of 10 result rows were unreadable" in caplog.text
+
+
+def test_row_values_are_validated_per_stix_type(caplog):
+    rows = [
+        # Netblocks are CIDR blocks, not AS numbers.
+        _row("104.16.0.0/13", "NETBLOCK_OWNER"),
+        _row("2606:4700::/32", "NETBLOCKV6_OWNER"),
+        _row("AS13335", "BGP_AS_MEMBER"),
+        _row("209242", "BGP_AS_OWNER"),
+        # Unusable values: never AS0, never an out-of-range AS, never a bad IP.
+        _row("0", "BGP_AS_OWNER"),
+        _row("n/a", "BGP_AS_OWNER"),
+        _row(str(2**32), "BGP_AS_OWNER"),
+        _row("0", "IP_ADDRESS"),
+        _row("2606:4700::1", "IP_ADDRESS"),
+        # Unicode digits pass str.isdigit() but int() rejects them.
+        _row("AS\u00b2", "BGP_AS_OWNER"),
+        # Netmask notation is canonicalised to a prefix.
+        _row("10.8.0.0/255.255.0.0", "NETBLOCK_OWNER"),
+    ]
+
+    with caplog.at_level(logging.WARNING, logger=spiderfoot_module.__name__):
+        result = _collector()._parse(rows, "example.com")
+
+    values = {(o.type, o.value) for o in result.observables}
+    assert ("ipv4-addr", "104.16.0.0/13") in values
+    assert ("ipv6-addr", "2606:4700::/32") in values
+    assert ("autonomous-system", "13335") in values
+    assert ("autonomous-system", "209242") in values
+    assert not any(o.type == "autonomous-system" and o.value == "0" for o in result.observables)
+    assert ("ipv4-addr", "10.8.0.0/16") in values
+    assert len(result.observables) == 6  # root domain + the five valid rows
+    assert "6 of 11 result rows were unreadable" in caplog.text
+
+
+def test_netblock_and_asn_observables_normalise_to_valid_stix():
+    from orchestrator.normalizer.stix import normalize  # noqa: PLC0415
+
+    result = _collector()._parse(
+        [_row("104.16.0.0/13", "NETBLOCK_OWNER"), _row("AS13335", "BGP_AS_MEMBER")],
+        "example.com",
+    )
+    objects = {o["type"]: o for o in normalize(result).objects if o["type"] != "identity"}
+
+    assert objects["ipv4-addr"]["value"] == "104.16.0.0/13"
+    assert objects["autonomous-system"]["number"] == 13335
 
 
 def test_mapped_type_wins_over_an_uppercase_trailing_column():

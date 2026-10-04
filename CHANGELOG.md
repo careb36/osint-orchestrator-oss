@@ -86,6 +86,12 @@ from [SECURITY.md](SECURITY.md).
   counted in one warning instead of silently mapping nothing. Default
   `SPIDERFOOT_MODULES` uses real module names
   (`sfp_dnsresolve,sfp_whois,sfp_sslcert`; `sfp_dns`/`sfp_ssl` do not exist).
+- SpiderFoot event mapping: `NETBLOCK_OWNER` carries a CIDR block and now
+  maps to `ipv4-addr` (`NETBLOCKV6_OWNER` to `ipv6-addr`) instead of
+  `autonomous-system`, where every netblock became AS0; `BGP_AS_MEMBER` is
+  mapped. One validation policy for both row layouts: AS numbers must be
+  1..2**32-1, IP values must parse as an address or CIDR of the right family,
+  and unusable values are counted as unreadable instead of ingested.
 - `pycti` pinned to `6.8.11`, the `opencti/platform` tag: the open `>=6.2.0`
   range resolved to pycti 7.x, whose `x_opencti_modified_at` input the 6.8
   platform rejects, so every STIX Note (Tavily pages) failed to ingest. The
