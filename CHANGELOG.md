@@ -11,6 +11,12 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- Evidence chain (ADR-007): every run writes a signed `manifest.json` (artefact
+  SHA-256s, HMAC-SHA256 with `ORCHESTRATOR_SECRET_KEY`) chained to the previous
+  sealed run of the target; `runs.manifest_sha256` (migration `0005`);
+  `GET /runs/{id}/manifest`, `GET /targets/{id}/chain/verify` and the metric
+  `evidence_chain_verify_total`. Retention-purged runs anchor the chain instead
+  of reading as tampering. An empty or default signing key logs a WARNING.
 - Tavily web-research collector (opt-in, `collectors.tavily`): three
   due-diligence queries per run that search the target's domain as a quoted
   term, `url` observables and one STIX Note per distinct page, wall-clock
@@ -90,6 +96,14 @@ from [SECURITY.md](SECURITY.md).
   counted in one warning instead of silently mapping nothing. Default
   `SPIDERFOOT_MODULES` uses real module names
   (`sfp_dnsresolve,sfp_whois,sfp_sslcert`; `sfp_dns`/`sfp_ssl` do not exist).
+- Each run writes its artefacts to its own directory,
+  `daily_reports/<date>/<target>/run-<run_id>/`. All runs of a target on the
+  same day shared one directory, so a later run overwrote `report.md`,
+  `bundle.stix.json` and `delta.json` of the earlier ones and
+  `GET /runs/{id}/report` returned the latest run's report for every run of
+  that day. The daily `index.md` links the target's latest run directory.
+  Existing directories are not migrated; their runs keep pointing at the
+  shared files.
 - SpiderFoot event mapping: `NETBLOCK_OWNER` carries a CIDR block and now
   maps to `ipv4-addr` (`NETBLOCKV6_OWNER` to `ipv6-addr`) instead of
   `autonomous-system`, where every netblock became AS0; `BGP_AS_MEMBER` is

@@ -121,3 +121,18 @@ def log_auth_status() -> None:
             "Every endpoint is open. Set a key before exposing the orchestrator "
             "beyond localhost."
         )
+
+
+def log_secret_key_status() -> None:
+    """Warn when the evidence-signing key (ADR-007) is the default or empty.
+
+    A copied .env.example leaves the key blank, which Compose passes as an
+    empty string: manifests would then be signed with an empty key.
+    """
+    if settings.orchestrator_secret_key in ("", "insecure-dev-key"):
+        logger.warning(
+            "ORCHESTRATOR_SECRET_KEY is empty or the default insecure-dev-key: evidence "
+            "manifests are signed with a public key. Generate one (openssl rand -hex 32) "
+            "before deployment.",
+            extra={"setting": "ORCHESTRATOR_SECRET_KEY"},
+        )
