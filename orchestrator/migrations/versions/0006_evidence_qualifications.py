@@ -50,6 +50,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index(op.f("ix_evidence_qualifications_target_id"), table_name="evidence_qualifications")
+    op.drop_index(
+        op.f("ix_evidence_qualifications_target_id"), table_name="evidence_qualifications"
+    )
     op.drop_index(op.f("ix_evidence_qualifications_run_id"), table_name="evidence_qualifications")
     op.drop_table("evidence_qualifications")

@@ -149,7 +149,18 @@ async def test_qualifier_uses_fast_route_and_batches_by_10(
         for i in range(21)
     ]
     client = _RouteCapturingClient(
-        {"items": [{"index": i, "category": "corporate_profile", "relevance": "low", "confidence": 0.5, "rationale": "ok"} for i in range(10)]}
+        {
+            "items": [
+                {
+                    "index": i,
+                    "category": "corporate_profile",
+                    "relevance": "low",
+                    "confidence": 0.5,
+                    "rationale": "ok",
+                }
+                for i in range(10)
+            ]
+        }
     )
     monkeypatch.setattr(qualify_module, "get_client", lambda _target: client)
     monkeypatch.setattr(settings, "llm_qualify_enabled", True)
@@ -164,7 +175,9 @@ async def test_qualifier_uses_fast_route_and_batches_by_10(
 
 
 @pytest.mark.asyncio
-async def test_invalid_enum_or_index_leaves_item_unqualified(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_invalid_enum_or_index_leaves_item_unqualified(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     items = [
         EvidenceItem(
             url="https://example.com/1",
@@ -318,7 +331,9 @@ def test_note_gets_labels_and_confidence_but_keeps_its_id() -> None:
         model="m",
     )
     plain = normalize(result).get("objects", [])
-    enriched = normalize(result, qualification_by_url={qualification.url: qualification}).get("objects", [])
+    enriched = normalize(result, qualification_by_url={qualification.url: qualification}).get(
+        "objects", []
+    )
     plain_note = next(obj for obj in plain if obj.get("type") == "note")
     enriched_note = next(obj for obj in enriched if obj.get("type") == "note")
 
@@ -338,7 +353,9 @@ def test_synthesis_prompt_includes_only_high_and_medium_evidence() -> None:
         run_status="success",
         run_started_at=datetime(2026, 9, 8, 12, 0, tzinfo=UTC),
         run_finished_at=datetime(2026, 9, 8, 12, 5, tzinfo=UTC),
-        collector_results=[CollectorReportResult(collector="tavily", success=True, observable_count=0)],
+        collector_results=[
+            CollectorReportResult(collector="tavily", success=True, observable_count=0)
+        ],
         bundles=[],
         observables=[],
         evidence=[
@@ -385,7 +402,9 @@ async def test_report_renders_qualified_evidence_section_in_es_and_en(tmp_path: 
         run_status="success",
         run_started_at=datetime(2026, 9, 8, 12, 0, tzinfo=UTC),
         run_finished_at=datetime(2026, 9, 8, 12, 5, tzinfo=UTC),
-        collector_results=[CollectorReportResult(collector="tavily", success=True, observable_count=0)],
+        collector_results=[
+            CollectorReportResult(collector="tavily", success=True, observable_count=0)
+        ],
         bundles=[],
         observables=[],
         evidence=[
@@ -400,7 +419,9 @@ async def test_report_renders_qualified_evidence_section_in_es_and_en(tmp_path: 
         ],
     )
     es_path = await generate_report(data, report_dir=str(tmp_path), language="es")
-    en_path = await generate_report(data.model_copy(update={"run_id": 2}), report_dir=str(tmp_path), language="en")
+    en_path = await generate_report(
+        data.model_copy(update={"run_id": 2}), report_dir=str(tmp_path), language="en"
+    )
     assert "## Evidencia calificada" in es_path.read_text(encoding="utf-8")
     assert "## Qualified evidence" in en_path.read_text(encoding="utf-8")
 
@@ -484,9 +505,11 @@ async def test_opencti_disabled_still_runs_qualification_and_synthesis(
         await conn.run_sync(SQLModel.metadata.create_all)
     session_ctx = _session_factory(engine)
     monkeypatch.setattr(pipeline_module, "get_session", session_ctx)
-    monkeypatch.setattr(pipeline_module, "_get_collectors", lambda _target: [_SimpleCollector(_target)])
+    monkeypatch.setattr(
+        pipeline_module, "_get_collectors", lambda _target: [_SimpleCollector(_target)]
+    )
     monkeypatch.setattr(settings, "opencti_enabled", False)
-    
+
     async def _always_qualify(*_args, **_kwargs) -> bool:
         return True
 
@@ -556,9 +579,11 @@ async def test_qualified_evidence_file_is_in_manifest_and_tampering_breaks_chain
         await conn.run_sync(SQLModel.metadata.create_all)
     session_ctx = _session_factory(engine)
     monkeypatch.setattr(pipeline_module, "get_session", session_ctx)
-    monkeypatch.setattr(pipeline_module, "_get_collectors", lambda _target: [_SimpleCollector(_target)])
+    monkeypatch.setattr(
+        pipeline_module, "_get_collectors", lambda _target: [_SimpleCollector(_target)]
+    )
     monkeypatch.setattr(settings, "orchestrator_secret_key", key)
-    
+
     async def _always_qualify(*_args, **_kwargs) -> bool:
         return True
 

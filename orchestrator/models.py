@@ -524,7 +524,7 @@ class EvidenceQualification(SQLModel, table=True):
     model: str = ""
     created_at: datetime = SQLField(
         default_factory=lambda: datetime.now(UTC),
-        sa_column=Column(DateTime(timezone=True)),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
     )
 
 

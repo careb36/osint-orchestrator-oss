@@ -141,7 +141,9 @@ def _qualification_payload(row: EvidenceQualification) -> dict[str, object]:
     return payload
 
 
-def _write_qualified_evidence_file(report_path: str | None, rows: list[EvidenceQualification]) -> None:
+def _write_qualified_evidence_file(
+    report_path: str | None, rows: list[EvidenceQualification]
+) -> None:
     if not report_path:
         return
     base = Path(report_path).parent
