@@ -6,7 +6,7 @@ All settings are documented in .env.example.
 
 from __future__ import annotations
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -119,6 +119,17 @@ class Settings(BaseSettings):
     # Wall-clock bound for a full Amass run (enum + subs), in seconds. Default
     # for collectors.amass.timeout_seconds in targets.yaml.
     amass_timeout_seconds: int = 1800
+
+    # ─── Tavily collector (opt-in) ───────────────────────────────────────────
+    # Tavily search API for web research on authorised targets. Disabled by
+    # default: the collector is only enabled when a target opts in.
+    tavily_api_key: str = ""
+    tavily_search_depth: str = "basic"  # basic | advanced
+    tavily_max_results: int = 5
+    tavily_timeout_seconds: int = 120
+    tavily_max_calls_per_run: int = 3
+    tavily_include_domains: list[str] = Field(default_factory=list)
+    tavily_exclude_domains: list[str] = Field(default_factory=list)
 
     # ─── Retention ───────────────────────────────────────────────────────────
     # Days to keep run rows and daily_reports directories (0 = disabled).

@@ -129,6 +129,14 @@ _IDENTITIES: dict[CollectorName, stix2.Identity] = {
         created=_COLLECTOR_CREATED,
         modified=_COLLECTOR_CREATED,
     ),
+    CollectorName.TAVILY: stix2.Identity(
+        id=f"identity--{_det_uuid('tavily')}",
+        name="Tavily",
+        identity_class="system",
+        description="OSINT Orchestrator — Tavily collector",
+        created=_COLLECTOR_CREATED,
+        modified=_COLLECTOR_CREATED,
+    ),
 }
 
 # STIX 2.1 SCO types supported by the stix2 library
@@ -160,6 +168,7 @@ _TOOL_CONFIDENCE: dict[CollectorName, int] = {
     CollectorName.SOCIALOSINT: 55,
     # DNS-resolved names straight from the asset database: high-confidence facts.
     CollectorName.AMASS: 70,
+    CollectorName.TAVILY: 60,
 }
 
 

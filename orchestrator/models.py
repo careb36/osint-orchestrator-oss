@@ -44,6 +44,7 @@ class CollectorName(StrEnum):
     SPIDERFOOT = "spiderfoot"
     SOCIALOSINT = "socialosint"
     AMASS = "amass"
+    TAVILY = "tavily"
 
 
 # ─── Collector contract ───────────────────────────────────────────────────────
@@ -152,6 +153,15 @@ class CollectorConfig(BaseModel):
     # bound for the whole collector run.
     progress_timeout_minutes: int = Field(default=10, ge=1)
 
+    # tavily: search query templates and request limits. Disabled by default.
+    max_results: int = 10
+    search_depth: str = "basic"
+    include_domains: list[str] = Field(default_factory=list)
+    exclude_domains: list[str] = Field(default_factory=list)
+    include_answer: bool = False
+    max_calls_per_run: int = 3
+    timeout_seconds: int = 120
+
 
 def _socialosint_default_timeout() -> int:
     """Return the global SocialOSINT timeout from settings (lazy import to avoid circulars)."""
@@ -167,12 +177,18 @@ def _amass_default_timeout() -> int:
     return settings.amass_timeout_seconds
 
 
-class CollectorSet(BaseModel):
-    """The four collector blocks of a target; socialosint and amass are opt-in.
+def _tavily_default_timeout() -> int:
+    """Return the global Tavily timeout from settings (lazy import to avoid circulars)."""
+    from orchestrator.config import settings  # noqa: PLC0415
 
-    Defaults: openosint and spiderfoot enabled, socialosint disabled with its
-    timeout taken from ``SOCIALOSINT_TIMEOUT_SECONDS``, amass disabled with
-    its timeout taken from ``AMASS_TIMEOUT_SECONDS``.
+    return settings.tavily_timeout_seconds
+
+
+class CollectorSet(BaseModel):
+    """The collector blocks of a target; optional collectors are opt-in.
+
+    Defaults: openosint and spiderfoot enabled, socialosint, amass and tavily
+    disabled with their timeout taken from the corresponding global settings.
     """
 
     openosint: CollectorConfig = Field(default_factory=CollectorConfig)
@@ -187,6 +203,18 @@ class CollectorSet(BaseModel):
         default_factory=lambda: CollectorConfig(
             enabled=False,
             timeout_seconds=_amass_default_timeout(),
+        )
+    )
+    tavily: CollectorConfig = Field(
+        default_factory=lambda: CollectorConfig(
+            enabled=False,
+            timeout_seconds=_tavily_default_timeout(),
+            max_results=10,
+            search_depth="basic",
+            include_domains=[],
+            exclude_domains=[],
+            include_answer=False,
+            max_calls_per_run=3,
         )
     )
 

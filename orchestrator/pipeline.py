@@ -24,6 +24,7 @@ from orchestrator.collectors.base import BaseCollector
 from orchestrator.collectors.openosint import OpenOSINTCollector
 from orchestrator.collectors.socialosint import SocialOSINTCollector
 from orchestrator.collectors.spiderfoot import SpiderFootCollector
+from orchestrator.collectors.tavily import TavilyCollector
 from orchestrator.config import settings
 from orchestrator.database import get_session
 from orchestrator.models import (
@@ -71,6 +72,8 @@ def _get_collectors(target: Target) -> list[BaseCollector]:
         collectors.append(SocialOSINTCollector(target))
     if target.collectors.amass.enabled:
         collectors.append(AmassCollector(target))
+    if target.collectors.tavily.enabled:
+        collectors.append(TavilyCollector(target))
     return collectors
 
 
