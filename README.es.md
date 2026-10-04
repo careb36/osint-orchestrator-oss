@@ -507,8 +507,8 @@ En el mismo `.env` conviven dos grupos de variables:
 | `SPIDERFOOT_URL` | `http://spiderfoot:5001` | URL del servicio SpiderFoot en la red interna. |
 | `SPIDERFOOT_TIMEOUT_SECONDS` | `600` | Tiempo máximo de una recolección de SpiderFoot. |
 | `LLM_PROVIDER` / `LLM_MODEL` / `LLM_BASE_URL` | `ollama` / `llama3.2` / `http://ollama:11434` | Backend de síntesis; `ollama` mantiene los datos on-prem. `none` desactiva la síntesis para todos los objetivos. `nebius` usa el endpoint compatible con OpenAI de Token Factory. |
-| `LLM_MODEL_REASONING` | *(vacío)* | Override opcional del modelo para síntesis y llamadas de razonamiento intensivo de relaciones; si está vacío usa `LLM_MODEL`. |
-| `LLM_MODEL_FAST` | *(vacío)* | Override opcional del modelo para llamadas rápidas de clasificación/extracción; si está vacío usa `LLM_MODEL`. |
+| `LLM_MODEL_REASONING` | *(vacío)* | Override opcional del modelo para síntesis y llamadas de razonamiento intensivo de relaciones en los proveedores cloud (`anthropic`, `openai`, `nebius`); si está vacío usa `LLM_MODEL`. Ollama siempre usa `OLLAMA_MODEL`. |
+| `LLM_MODEL_FAST` | *(vacío)* | Override opcional del modelo para llamadas rápidas de clasificación/extracción en los proveedores cloud; si está vacío usa `LLM_MODEL`. |
 | `OLLAMA_MODEL` | `llama3.2` | Modelo servido por Ollama para targets con `llm: local`. |
 | `LLM_TIMEOUT_SECONDS` | `120` | Tiempo máximo de una solicitud de síntesis. |
 | `LLM_MAX_TOKENS` | `2048` | Límite superior de la respuesta del modelo. |
@@ -954,8 +954,8 @@ valor de un observable ni un id de ejecución.
 | `alert_deliveries_pending` | — | Entregas de alertas a la espera de reintento |
 | `alert_deliveries_dead_letter` | — | Entregas de alertas aparcadas en la DLQ (requieren acción del operador) |
 | `synthesis_total` | `target_id`, `status` (`ok`, `skipped`, `failed`) | Intentos de síntesis LLM |
-| `llm_requests_total` | `model`, `status` | Solicitudes al API LLM por modelo y estado (`ok`, `http_429`, `http_5xx`, `timeout`, `error`) |
-| `llm_tokens_total` | `model`, `direction` (`input`, `output`) | Uso de tokens LLM separado por dirección (prompt vs completion) |
+| `llm_requests_total` | `provider`, `model`, `status` | Solicitudes al API LLM por proveedor (`anthropic`, `openai`, `nebius`, `ollama`), modelo y estado (`ok`, `http_429`, `http_5xx`, `timeout`, `error`, `schema_downgrade`) |
+| `llm_tokens_total` | `provider`, `model`, `direction` (`input`, `output`) | Uso de tokens LLM por proveedor y modelo, separado por dirección (prompt vs completion) |
 | `alerts_total` | `channel`, `status` | Eventos del ciclo de alertas (`sent`, `failed`, `retried`, `dlq`) |
 | `scheduled_jobs` | — | Jobs cron registrados en el scheduler |
 | `build_info` | `version` | Metadatos de la build |
@@ -1208,4 +1208,6 @@ MIT — véase [LICENSE](LICENSE).
 Notas:
 - Nebius usa el mismo camino proveedor compatible con OpenAI que `openai` (sin código de integración duplicado).
 - Las llamadas de síntesis usan la ruta de razonamiento.
-- Se solicita `response_format` con esquema JSON cuando el modelo lo soporta; si no, hay fallback automático al parseo tolerante.
+- Se solicita primero `response_format` con esquema JSON; si el proveedor lo rechaza (400/422) se repite la misma petición sin él, contada como `schema_downgrade` y no como intento fallido, y la respuesta pasa por el parser JSON tolerante.
+- Reintentos: hasta 3 intentos ante 408, 409, 429, cualquier 5xx y errores de transporte, respetando `Retry-After`, todo dentro de `LLM_TIMEOUT_SECONDS`: el presupuesto acota cada intento y cada espera de una llamada.
+- El hallazgo registra el proveedor y el modelo que realmente atendió la petición (`/runs/{id}/finding`).
