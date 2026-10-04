@@ -123,8 +123,10 @@ The review checklist both agents and reviewers follow is
    variables → Actions*). The key lives only there; `opencode.json` refers to
    it as `{env:DEEPSEEK_API_KEY}`.
 3. `main` is protected by a ruleset that requires the *Lint & Unit Tests*,
-   *Helm chart* and *Public-release guard* checks and forbids force pushes, so
-   nothing reaches `main` without a pull request and a green CI run.
+   *Helm chart*, *Public-release guard* and *PR is complete* checks and forbids
+   force pushes, so nothing reaches `main` without a pull request and a green
+   CI run. *PR is complete* (`.github/workflows/pr-guard.yml`) fails while a PR
+   is a draft, is titled `[WIP]` or changes no files.
 
 ### Delegating one task
 
