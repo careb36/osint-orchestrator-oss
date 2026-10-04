@@ -178,16 +178,17 @@ class SpiderFootCollector(BaseCollector):
     def _row_event_type(row: list) -> str | None:
         """Event type of a /scaneventresults row, or None for an unknown layout.
 
-        SpiderFoot 4 puts the type in the last column. Should a build add or
-        drop columns, fall back to any column (other than the data one) that
-        holds a mapped event type rather than silently mapping nothing.
+        A column (other than the data one) holding a mapped event type wins,
+        wherever it sits, so an extra trailing column cannot hide the type.
+        Otherwise SpiderFoot 4's last column is taken when it looks like an
+        event type (an unmapped one, which the caller skips as usual).
         """
-        last = row[-1]
-        if isinstance(last, str) and _SF_EVENT_TYPE_RE.fullmatch(last):
-            return last
         for index, value in enumerate(row):
             if index != 1 and isinstance(value, str) and value in _SF_EVENT_TO_STIX:
                 return value
+        last = row[-1]
+        if isinstance(last, str) and _SF_EVENT_TYPE_RE.fullmatch(last):
+            return last
         return None
 
     async def _fetch_results(self, client: httpx.AsyncClient, scan_id: str) -> list[dict]:
@@ -231,7 +232,10 @@ class SpiderFootCollector(BaseCollector):
                 event_type = row_type
                 data = html.unescape(str(event[1]))
             elif isinstance(event, dict):
-                event_type = event.get("type", "")
+                if not event.get("type"):
+                    unrecognised += 1
+                    continue
+                event_type = event["type"]
                 data = event.get("data", "")
             else:
                 unrecognised += 1

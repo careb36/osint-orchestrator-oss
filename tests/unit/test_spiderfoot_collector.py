@@ -164,10 +164,22 @@ def test_parse_logs_rows_with_an_unrecognised_layout(caplog):
     unknown = ["2026-10-04 13:26:05", "104.20.23.154", "example.com", 0]
 
     with caplog.at_level(logging.WARNING, logger=spiderfoot_module.__name__):
-        result = _collector()._parse([unknown, "not-a-row"], "example.com")
+        result = _collector()._parse(
+            [unknown, "not-a-row", {"data": "104.20.23.154"}], "example.com"
+        )
 
     assert [o.value for o in result.observables] == ["example.com"]
-    assert "2 of 2 result rows had an unrecognised layout" in caplog.text
+    assert "3 of 3 result rows had an unrecognised layout" in caplog.text
+
+
+def test_mapped_type_wins_over_an_uppercase_trailing_column():
+    # A trailing upper-case token that is not an event type (e.g. a risk label)
+    # must not hide the real type earlier in the row.
+    row = [*_row("104.20.23.154", "IP_ADDRESS"), "HIGH"]
+
+    result = _collector()._parse([row], "example.com")
+
+    assert ("ipv4-addr", "104.20.23.154") in {(o.type, o.value) for o in result.observables}
 
 
 def _env_example_value(key: str) -> str:
