@@ -18,7 +18,6 @@ from apscheduler.triggers.cron import CronTrigger
 
 from orchestrator import metrics
 from orchestrator.config import settings
-from orchestrator.demo import load_demo_targets
 from orchestrator.models import Target
 from orchestrator.pipeline import (
     drain_opencti_outbox,

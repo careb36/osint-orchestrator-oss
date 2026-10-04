@@ -726,7 +726,11 @@ async def public_demo_verify_target_chain(target_id: str) -> dict[str, Any]:
                 session=session,
             )
         if result.get("reason"):
-            result["message"] = t(f"chain.reason.{result['reason']}", name=result.get("detail"), run_id=result.get("first_broken_run_id"))
+            result["message"] = t(
+                f"chain.reason.{result['reason']}",
+                name=result.get("detail"),
+                run_id=result.get("first_broken_run_id"),
+            )
         return strip_demo_risk_fields(result)
     except Exception:
         raise

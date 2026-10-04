@@ -57,7 +57,9 @@ def test_demo_targets_file_loads_and_filters_valid_entries(demo_mode_env) -> Non
     assert invalid == []
 
 
-def test_demo_mode_validation_rejects_empty_or_invalid_config(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+def test_demo_mode_validation_rejects_empty_or_invalid_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
     monkeypatch.setattr(settings, "demo_mode", True)
     monkeypatch.setattr(settings, "demo_targets_file", "")
     with pytest.raises(RuntimeError, match="DEMO_TARGETS_FILE"):

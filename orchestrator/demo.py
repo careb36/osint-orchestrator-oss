@@ -84,11 +84,15 @@ async def record_demo_usage(
         row.llm_calls += max(0, int(llm_calls))
         row.updated_at = datetime.now(UTC)
 
-        ip_row = (await session.exec(select(DemoDailyUsage).where(
-            DemoDailyUsage.day == today,
-            DemoDailyUsage.scope == "ip",
-            DemoDailyUsage.client_ip_hash == ip_hash,
-        ))).first()
+        ip_row = (
+            await session.exec(
+                select(DemoDailyUsage).where(
+                    DemoDailyUsage.day == today,
+                    DemoDailyUsage.scope == "ip",
+                    DemoDailyUsage.client_ip_hash == ip_hash,
+                )
+            )
+        ).first()
         if ip_row is None:
             ip_row = DemoDailyUsage(
                 day=today,
@@ -114,7 +118,9 @@ async def record_demo_usage(
     }
 
 
-async def demo_usage_available(*, client_ip: str | None, increment_run: bool = False, tavily_calls: int = 0, llm_calls: int = 0) -> tuple[bool, str | None]:
+async def demo_usage_available(
+    *, client_ip: str | None, increment_run: bool = False, tavily_calls: int = 0, llm_calls: int = 0
+) -> tuple[bool, str | None]:
     """Return (allowed, reason) for a demo request based on the rolling daily budgets."""
     if not settings.demo_mode:
         return True, None
@@ -122,15 +128,23 @@ async def demo_usage_available(*, client_ip: str | None, increment_run: bool = F
     today = _today_key()
     ip_hash = hash_client_ip(client_ip)
     async with get_session() as session:
-        global_row = (await session.exec(select(DemoDailyUsage).where(
-            DemoDailyUsage.day == today,
-            DemoDailyUsage.scope == "global",
-        ))).first()
-        ip_row = (await session.exec(select(DemoDailyUsage).where(
-            DemoDailyUsage.day == today,
-            DemoDailyUsage.scope == "ip",
-            DemoDailyUsage.client_ip_hash == ip_hash,
-        ))).first()
+        global_row = (
+            await session.exec(
+                select(DemoDailyUsage).where(
+                    DemoDailyUsage.day == today,
+                    DemoDailyUsage.scope == "global",
+                )
+            )
+        ).first()
+        ip_row = (
+            await session.exec(
+                select(DemoDailyUsage).where(
+                    DemoDailyUsage.day == today,
+                    DemoDailyUsage.scope == "ip",
+                    DemoDailyUsage.client_ip_hash == ip_hash,
+                )
+            )
+        ).first()
 
     global_runs = int(getattr(global_row, "run_count", 0) or 0)
     ip_runs = int(getattr(ip_row, "run_count", 0) or 0)
@@ -194,14 +208,16 @@ def load_demo_targets(path: str) -> tuple[list[Target], list[str], bool]:
 
 
 def validate_demo_mode() -> None:
-    """Validate demo mode settings before the scheduler and API start.'""
+    """Validate demo mode settings before the scheduler and API start."""
     if not settings.demo_mode:
         return
-    if not settings.demo_targets_file:
+    if not settings.demo_targets_file or not settings.demo_targets_file.strip():
         raise RuntimeError("DEMO_TARGETS_FILE must be set when DEMO_MODE=true")
     targets, invalid, load_failed = load_demo_targets(settings.demo_targets_file)
     if load_failed:
-        raise RuntimeError(f"Demo mode targets file could not be loaded: {settings.demo_targets_file}")
+        raise RuntimeError(
+            f"Demo mode targets file could not be loaded: {settings.demo_targets_file}"
+        )
     if invalid:
         raise RuntimeError(f"Demo mode targets file contains invalid entries: {', '.join(invalid)}")
     if not targets:
