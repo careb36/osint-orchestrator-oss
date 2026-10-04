@@ -233,20 +233,26 @@ class SpiderFootCollector(BaseCollector):
                 data = html.unescape(str(event[1]))
             elif isinstance(event, dict):
                 # A non-string type would be an unhashable map key and fail
-                # the whole parse. Data must be a string or a number: missing
-                # data (e.g. a renamed key), a container or a bool is counted
-                # so a layout change does not pass for an empty scan.
+                # the whole parse. Data must be a string, or a positive integer
+                # for an AS number; anything else (missing, None, bool, float,
+                # 0, a container) is counted so a layout change does not pass
+                # for an empty scan, and never becomes a bogus "0" observable.
                 event_type = event.get("type")
                 raw_data = event.get("data")
+                is_asn_number = (
+                    isinstance(event_type, str)
+                    and _SF_EVENT_TO_STIX.get(event_type) == "autonomous-system"
+                    and type(raw_data) is int
+                    and raw_data > 0
+                )
                 if (
                     not isinstance(event_type, str)
                     or not event_type
-                    or isinstance(raw_data, bool)
-                    or not isinstance(raw_data, (str, int, float))
+                    or not (isinstance(raw_data, str) or is_asn_number)
                 ):
                     unrecognised += 1
                     continue
-                # Same as the row layout: coerced to a string, HTML-unescaped.
+                # Same as the row layout: a string, HTML-unescaped.
                 data = html.unescape(str(raw_data))
             else:
                 unrecognised += 1
