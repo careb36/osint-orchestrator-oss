@@ -121,3 +121,12 @@ def log_auth_status() -> None:
             "Every endpoint is open. Set a key before exposing the orchestrator "
             "beyond localhost."
         )
+
+
+def log_secret_key_status() -> None:
+    """Warn when the evidence-signing key is still the default dev placeholder."""
+    if settings.orchestrator_secret_key == "insecure-dev-key":
+        logger.warning(
+            "ORCHESTRATOR_SECRET_KEY is still the default insecure-dev-key value; rotate it before deployment.",
+            extra={"setting": "ORCHESTRATOR_SECRET_KEY"},
+        )
