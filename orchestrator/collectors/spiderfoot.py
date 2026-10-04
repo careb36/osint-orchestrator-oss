@@ -233,18 +233,21 @@ class SpiderFootCollector(BaseCollector):
                 data = html.unescape(str(event[1]))
             elif isinstance(event, dict):
                 # A non-string type would be an unhashable map key and fail
-                # the whole parse; a list or dict as data has no single value.
+                # the whole parse. Data must be a string or a number: missing
+                # data (e.g. a renamed key), a container or a bool is counted
+                # so a layout change does not pass for an empty scan.
                 event_type = event.get("type")
                 raw_data = event.get("data")
                 if (
                     not isinstance(event_type, str)
                     or not event_type
-                    or isinstance(raw_data, (list, dict))
+                    or isinstance(raw_data, bool)
+                    or not isinstance(raw_data, (str, int, float))
                 ):
                     unrecognised += 1
                     continue
-                # Same as the row layout: scalars coerced, value HTML-unescaped.
-                data = "" if raw_data is None else html.unescape(str(raw_data))
+                # Same as the row layout: coerced to a string, HTML-unescaped.
+                data = html.unescape(str(raw_data))
             else:
                 unrecognised += 1
                 continue

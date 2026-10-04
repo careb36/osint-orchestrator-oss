@@ -180,6 +180,10 @@ def test_dict_rows_map_and_malformed_ones_are_skipped(caplog):
         {"type": "BGP_AS_OWNER", "data": 13335},
         {"type": ["IP_ADDRESS"], "data": "1.2.3.4"},
         {"type": "IP_ADDRESS", "data": ["1.2.3.4"]},
+        # Missing data (e.g. a renamed key), None and a bool are counted too.
+        {"type": "IP_ADDRESS", "value": "1.2.3.4"},
+        {"type": "IP_ADDRESS", "data": None},
+        {"type": "BGP_AS_OWNER", "data": False},
     ]
 
     with caplog.at_level(logging.WARNING, logger=spiderfoot_module.__name__):
@@ -194,7 +198,8 @@ def test_dict_rows_map_and_malformed_ones_are_skipped(caplog):
     values = {(o.type, o.value) for o in result.observables}
     assert ("email-addr", "a&b@example.com") in values
     assert ("autonomous-system", "13335") in values
-    assert "2 of 5 result rows had an unrecognised layout" in caplog.text
+    assert not any(o.value in {"1.2.3.4", "False", "None"} for o in result.observables)
+    assert "5 of 8 result rows had an unrecognised layout" in caplog.text
 
 
 def test_mapped_type_wins_over_an_uppercase_trailing_column():
