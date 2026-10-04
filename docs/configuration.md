@@ -23,6 +23,13 @@ Defaults shown are the ones shipped in `.env.example` for Docker.
 | `ORCHESTRATOR_SECRET_KEY` | `insecure-dev-key` | HMAC key that signs the per-run evidence manifests. Empty or the default logs a WARNING at startup. Generate with `openssl rand -hex 32`. |
 | `ORCHESTRATOR_DATABASE_URL` | `sqlite+aiosqlite:////app/data/orchestrator.db` | Container path is the persistent volume; use `./orchestrator.db` bare-metal. |
 | `TARGETS_FILE` | `targets.yaml` | Re-read on every API and scheduler call. |
+| `DEMO_MODE` | `false` | Enable public demo-mode guards (allowlisted targets, budget limits, restricted API surface). |
+| `DEMO_TARGETS_FILE` | `demo/targets.demo.yaml` | Path to the allowlisted targets file used when `DEMO_MODE=true`. |
+| `DEMO_MAX_RUNS_PER_IP_PER_DAY` | `3` | Daily per-IP cap for accepted run requests in demo mode. |
+| `DEMO_MAX_RUNS_PER_DAY` | `50` | Global daily cap for accepted run requests in demo mode. |
+| `DEMO_TAVILY_CALLS_PER_DAY` | `150` | Daily Tavily-call budget across demo-mode runs. |
+| `DEMO_LLM_CALLS_PER_DAY` | `300` | Daily LLM-call budget across demo-mode runs. |
+| `DEMO_TRUSTED_PROXY_HOPS` | `1` | Number of trusted proxy hops used to resolve client IP in demo mode. |
 | `ORCHESTRATOR_RETENTION_DAYS` | `90` | Days to keep runs and report directories; `0` disables the purge. |
 | `ORCHESTRATOR_RETENTION_CRON` | `30 3 * * *` | UTC cron of the purge job. |
 | `ORCHESTRATOR_API_KEY` | *(empty)* | API keys, comma-separated while rotating. Empty leaves the API **open** (WARNING at startup). |

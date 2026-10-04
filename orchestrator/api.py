@@ -40,6 +40,7 @@ from orchestrator import metrics
 from orchestrator.auth import log_auth_status, log_secret_key_status, require_api_key
 from orchestrator.config import NEBIUS_DEFAULT_BASE_URL, settings
 from orchestrator.database import create_db_and_tables, get_session
+from orchestrator.demo import strip_demo_risk_fields
 from orchestrator.evidence import load_manifest_file, manifest_path_for_report, verify_target_chain
 from orchestrator.i18n import console_i18n_catalogue, resolve_language, t
 from orchestrator.logging_config import configure_logging, request_id_var
@@ -100,6 +101,11 @@ async def lifespan(app: FastAPI):
     configure_logging()
     log_auth_status()
     log_secret_key_status()
+    if settings.demo_mode:
+        from orchestrator.demo import validate_demo_mode
+
+        validate_demo_mode()
+        logger.info("Demo mode enabled; allowlisted targets only", extra={"status": "demo"})
     await _run_llm_model_preflight()
     metrics.set_build_info(VERSION)
     await create_db_and_tables()
@@ -641,6 +647,90 @@ async def verify_target_chain_endpoint(target_id: str) -> dict[str, Any]:
     except Exception:
         metrics.evidence_chain_verify_total.labels(target_id, "error").inc()
         raise
+
+
+@app.get("/demo/targets", tags=["public"])
+async def public_demo_targets() -> list[dict[str, Any]]:
+    """Return the allowlisted demo targets without exposing internal risk fields."""
+    if not settings.demo_mode:
+        raise HTTPException(status_code=404, detail="demo_mode_disabled")
+    from orchestrator.demo import load_demo_targets
+
+    targets, invalid, _ = load_demo_targets(settings.demo_targets_file)
+    if invalid:
+        raise HTTPException(status_code=500, detail="demo_targets_invalid")
+    return [strip_demo_risk_fields(target.model_dump()) for target in targets]
+
+
+@app.get("/demo/targets/{target_id}", tags=["public"])
+async def public_demo_target(target_id: str) -> dict[str, Any]:
+    """Return a single demo target without its risk fields."""
+    if not settings.demo_mode:
+        raise HTTPException(status_code=404, detail="demo_mode_disabled")
+    from orchestrator.demo import load_demo_targets
+
+    targets, invalid, _ = load_demo_targets(settings.demo_targets_file)
+    if invalid:
+        raise HTTPException(status_code=500, detail="demo_targets_invalid")
+    for target in targets:
+        if target.id == target_id:
+            return strip_demo_risk_fields(target.model_dump())
+    raise HTTPException(status_code=404, detail="demo_target_not_found")
+
+
+@app.get("/demo/runs/{run_id}/finding", tags=["public"])
+async def public_demo_finding(run_id: int) -> dict[str, Any]:
+    """Serve a sanitized copy of a finding for public demo consumers."""
+    if not settings.demo_mode:
+        raise HTTPException(status_code=404, detail="demo_mode_disabled")
+    async with get_session() as session:
+        result = await session.exec(select(FindingRecord).where(FindingRecord.run_id == run_id))
+        record = result.first()
+    if record is None:
+        raise HTTPException(status_code=404, detail="demo_finding_not_found")
+    payload = record.to_api_dict()
+    return strip_demo_risk_fields(payload)
+
+
+@app.get("/demo/runs/{run_id}/manifest", tags=["public"])
+async def public_demo_manifest(run_id: int) -> dict[str, Any]:
+    """Return a signed manifest without risky child content in demo mode."""
+    if not settings.demo_mode:
+        raise HTTPException(status_code=404, detail="demo_mode_disabled")
+    async with get_session() as session:
+        run = await session.get(Run, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run_not_found")
+    if run.manifest_sha256 is None:
+        raise HTTPException(status_code=404, detail="manifest.not_found")
+    manifest_path = manifest_path_for_report(run.report_path)
+    if manifest_path is None or not manifest_path.exists():
+        raise HTTPException(status_code=404, detail="manifest.not_found")
+    try:
+        payload = load_manifest_file(manifest_path)
+    except (OSError, TypeError, ValueError):
+        raise HTTPException(status_code=404, detail="manifest.not_found") from None
+    return strip_demo_risk_fields(payload)
+
+
+@app.get("/demo/targets/{target_id}/chain/verify", tags=["public"])
+async def public_demo_verify_target_chain(target_id: str) -> dict[str, Any]:
+    """Check the proof chain for a demo target with redacted risk data."""
+    if not settings.demo_mode:
+        raise HTTPException(status_code=404, detail="demo_mode_disabled")
+    async with get_session() as session:
+        result = await verify_target_chain(
+            target_id=target_id,
+            secret_key=settings.orchestrator_secret_key,
+            session=session,
+        )
+    if result.get("reason"):
+        result["message"] = t(
+            f"chain.reason.{result['reason']}",
+            name=result.get("detail"),
+            run_id=result.get("first_broken_run_id"),
+        )
+    return strip_demo_risk_fields(result)
 
 
 app.include_router(router)
