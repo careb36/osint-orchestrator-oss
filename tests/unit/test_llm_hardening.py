@@ -16,6 +16,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
+import httpx
 import pytest
 from pytest_httpx import HTTPXMock
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -294,6 +295,33 @@ async def test_ollama_is_told_the_reply_budget(
 
     payload = json.loads(httpx_mock.get_requests()[0].content)
     assert payload["options"]["num_predict"] == 77
+
+
+async def test_ollama_records_requests_and_tokens(
+    httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from orchestrator import metrics
+
+    monkeypatch.setattr(settings, "llm_base_url", "http://ollama.test")
+    monkeypatch.setattr(settings, "ollama_model", "llama3.2")
+    labels = {"provider": "ollama", "model": "llama3.2"}
+    req = "osint_orchestrator_llm_requests_total"
+    tok = "osint_orchestrator_llm_tokens_total"
+    before_ok = metrics.sample(req, {**labels, "status": "ok"}) or 0.0
+    before_5xx = metrics.sample(req, {**labels, "status": "http_5xx"}) or 0.0
+    before_in = metrics.sample(tok, {**labels, "direction": "input"}) or 0.0
+    httpx_mock.add_response(
+        json={"message": {"content": "{}"}, "prompt_eval_count": 11, "eval_count": 4}
+    )
+    httpx_mock.add_response(status_code=503)
+
+    await OllamaClient().complete("sys", "user", timeout=5)
+    with pytest.raises(httpx.HTTPStatusError):
+        await OllamaClient().complete("sys", "user", timeout=5)
+
+    assert (metrics.sample(req, {**labels, "status": "ok"}) or 0.0) - before_ok == 1
+    assert (metrics.sample(req, {**labels, "status": "http_5xx"}) or 0.0) - before_5xx == 1
+    assert (metrics.sample(tok, {**labels, "direction": "input"}) or 0.0) - before_in == 11
 
 
 # ── Target.id ─────────────────────────────────────────────────────────────────
