@@ -83,7 +83,8 @@ from [SECURITY.md](SECURITY.md).
   rows use the data in column 1 (HTML-unescaped) and the type from any column
   holding a mapped event type, else the last column (SpiderFoot 4's layout).
   Rows it cannot read, including dict rows without a string `type`, are
-  counted in one warning instead of silently mapping nothing. Default `SPIDERFOOT_MODULES` uses real module names
+  counted in one warning instead of silently mapping nothing. Default
+  `SPIDERFOOT_MODULES` uses real module names
   (`sfp_dnsresolve,sfp_whois,sfp_sslcert`; `sfp_dns`/`sfp_ssl` do not exist).
 - `pycti` pinned to `6.8.11`, the `opencti/platform` tag: the open `>=6.2.0`
   range resolved to pycti 7.x, whose `x_opencti_modified_at` input the 6.8

@@ -175,6 +175,9 @@ def test_parse_logs_rows_with_an_unrecognised_layout(caplog):
 def test_dict_rows_map_and_malformed_ones_are_skipped(caplog):
     rows = [
         {"type": "IP_ADDRESS", "data": "104.20.23.154"},
+        # Escaped like the row layout's data column, and a scalar to coerce.
+        {"type": "EMAILADDR", "data": "a&amp;b@example.com"},
+        {"type": "BGP_AS_OWNER", "data": 13335},
         {"type": ["IP_ADDRESS"], "data": "1.2.3.4"},
         {"type": "IP_ADDRESS", "data": ["1.2.3.4"]},
     ]
@@ -188,7 +191,10 @@ def test_dict_rows_map_and_malformed_ones_are_skipped(caplog):
     assert [(r.target_value, r.relationship_type) for r in result.relationships] == [
         ("104.20.23.154", "resolves-to")
     ]
-    assert "2 of 3 result rows had an unrecognised layout" in caplog.text
+    values = {(o.type, o.value) for o in result.observables}
+    assert ("email-addr", "a&b@example.com") in values
+    assert ("autonomous-system", "13335") in values
+    assert "2 of 5 result rows had an unrecognised layout" in caplog.text
 
 
 def test_mapped_type_wins_over_an_uppercase_trailing_column():
