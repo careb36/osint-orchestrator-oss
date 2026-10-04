@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     # directly from the process environment (default: ".env"), and an empty
     # value disables dotenv loading entirely.
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=None,
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -54,7 +54,6 @@ class Settings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        _ = dotenv_settings
         return (
             init_settings,
             env_settings,
