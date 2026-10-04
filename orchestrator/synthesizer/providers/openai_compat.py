@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import re
 import time
 from typing import Any, Literal
 
@@ -54,6 +55,18 @@ _MAX_ATTEMPTS = 3
 # follows OPENAI_BASE_URL (blank = SDK default); any other preset without a
 # URL is a configuration error rather than a silent call to api.openai.com.
 _PRESET_BASE_URLS: dict[str, str] = {"nebius": NEBIUS_DEFAULT_BASE_URL}
+# Message heuristic for servers that return no ``error.param``: the schema
+# field must be named next to a rejection verb, in either order, within one
+# sentence. "Unrecognized request argument supplied: json_schema",
+# "response_format is not supported by this model" and "Invalid value for
+# 'response_format'" match; an unrelated error that merely echoes the request
+# body does not.
+_SCHEMA_FIELD = r"(?:response_format|json_schema|json schema)"
+_REJECTION = r"(?:unrecognized|unsupported|not supported|does not support|unknown|invalid|cannot|can't|not allowed|unexpected)"
+_SCHEMA_REJECTION_RE = re.compile(
+    rf"{_REJECTION}[^.\n]{{0,80}}{_SCHEMA_FIELD}|{_SCHEMA_FIELD}[^.\n]{{0,80}}{_REJECTION}",
+    re.IGNORECASE,
+)
 _BACKOFF_BASE_SECONDS = 1.0
 _BACKOFF_CAP_SECONDS = 30.0
 _BACKOFF_JITTER_RATIO = 0.25
@@ -100,9 +113,8 @@ def _rejects_json_schema(exc: Exception) -> bool:
     """True when the provider refused the request because of ``response_format``.
 
     The structured ``error.param`` is authoritative when present. Without it
-    (gateways, older servers) the message is inspected: servers word the
-    rejection differently ("Unrecognized request argument supplied:
-    json_schema", "response_format is not supported", ...) and some answer 422
+    (gateways, older servers) the message must name the schema field next to
+    a rejection verb (``_SCHEMA_REJECTION_RE``); some servers answer 422
     instead of 400. The probe runs once per call (the key is popped), so a
     misread costs one tolerant-parsing request, never schema enforcement on
     the retries of an unrelated error.
@@ -112,8 +124,7 @@ def _rejects_json_schema(exc: Exception) -> bool:
     param = _error_param(exc)
     if param is not None:
         return param.startswith("response_format")
-    message = str(exc).lower()
-    return "response_format" in message or "json_schema" in message or "json schema" in message
+    return _SCHEMA_REJECTION_RE.search(str(exc)) is not None
 
 
 def _retry_after_seconds(exc: Exception) -> float | None:

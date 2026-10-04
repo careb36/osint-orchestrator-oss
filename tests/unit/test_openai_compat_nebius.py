@@ -270,12 +270,21 @@ async def test_schema_rejections_are_detected_across_wordings(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "message",
+    [
+        "messages[0].content is required",
+        # echoes the request body (mentions response_format) but complains about something else
+        'max_tokens is too large for this model. request: {"response_format": {"type": "json_schema"}}',
+        "model not found. supported parameters: messages, response_format, temperature",
+    ],
+)
 async def test_unrelated_400_is_not_a_downgrade_and_not_retried(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, message: str
 ) -> None:
     actions: list[object] = []
     fake_sdk, state = _install_fake_openai(monkeypatch, actions)
-    actions.append(fake_sdk.APIStatusError(400, "messages[0].content is required"))
+    actions.append(fake_sdk.APIStatusError(400, message))
 
     with pytest.raises(fake_sdk.APIStatusError):
         await _client().complete("sys", "user", timeout=5, response_schema={"type": "object"})
