@@ -110,7 +110,7 @@ jobs:
               docker logs "${cid}" || true
               exit 1
             fi
-            if response="$(curl -fS http://127.0.0.1:18080/health)"; then
+            if response="$(curl -fsS http://127.0.0.1:18080/health 2>/dev/null)"; then
               if printf '%s' "${response}" | python3 -c "import json, sys; payload=json.load(sys.stdin); sys.exit(0 if payload.get('status') == 'ok' else 1)"; then
                 echo "${response}"
                 health_ok=1
