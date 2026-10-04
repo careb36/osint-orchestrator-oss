@@ -26,8 +26,12 @@ ganan — y un PR que corrija la diferencia es bienvenido.
 ## Preparación del entorno
 
 ```bash
-# Python 3.11+; se requiere git (openosint es una dependencia git fijada)
+# Python 3.11+; se requiere git (openosint es una dependencia git fijada).
+# pycti carga libmagic al importarse: instálela antes
+# (macOS: brew install libmagic; Debian/Ubuntu: apt install libmagic1).
 pip install -e ".[dev]"
+# Opcional: los SDK de LLM en la nube (síntesis con openai/nebius/anthropic)
+pip install -e ".[dev,llm]"
 
 # Gates de calidad — los mismos comandos que corre CI
 ruff check orchestrator/ tests/unit/
