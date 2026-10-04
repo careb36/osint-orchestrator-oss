@@ -88,7 +88,7 @@ targets:
       misfire_grace_time_seconds: 3600
 
     # LLM: usar modelo local para este objetivo (los datos no salen de casa).
-    llm: local    # local | anthropic | openai — anula el LLM_PROVIDER global
+    llm: local    # local | anthropic | openai | nebius — anula el LLM_PROVIDER global
 
     # Idioma de los informes y de la síntesis de este objetivo.
     # es | en. Omítelo para usar ORCHESTRATOR_LANGUAGE del .env.

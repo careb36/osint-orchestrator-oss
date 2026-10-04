@@ -648,7 +648,7 @@ targets:
 | `authorization` | *required* | Who approved this target and when |
 | `purpose` | *required* | Why it is monitored |
 | `enabled` | `true` | `false` skips the cron job; a manual run returns `400` |
-| `llm` | `local` | `local` \| `anthropic` \| `openai` — overrides `LLM_PROVIDER` |
+| `llm` | `local` | `local` \| `anthropic` \| `openai` \| `nebius` — overrides `LLM_PROVIDER` |
 | `language` | *(inherit)* | `es` \| `en` — overrides `ORCHESTRATOR_LANGUAGE` |
 | `report_dir` | `daily_reports` | Root directory for this target's artifacts |
 

@@ -18,7 +18,7 @@ services:
     ports:
       - "${KEYCLOAK_PORT:-8085}:8080"
     healthcheck:
-      test: ["CMD-SHELL", "curl -fs http://127.0.0.1:8080/health/ready >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/8080'"]
       interval: 10s
       timeout: 5s
       retries: 15
@@ -36,6 +36,12 @@ services:
     environment:
       OAUTH2_PROXY_PROVIDER: oidc
       OAUTH2_PROXY_OIDC_ISSUER_URL: "${OIDC_ISSUER_URL:?set OIDC_ISSUER_URL in .env}"
+      OAUTH2_PROXY_SKIP_OIDC_DISCOVERY: "true"
+      OAUTH2_PROXY_INSECURE_OIDC_SKIP_ISSUER_VERIFICATION: "true"
+      OAUTH2_PROXY_LOGIN_URL: "${OIDC_BROWSER_LOGIN_URL:-http://localhost:8085/realms/orchestrator/protocol/openid-connect/auth}"
+      OAUTH2_PROXY_REDEEM_URL: "${OIDC_INTERNAL_REDEEM_URL:-http://keycloak:8080/realms/orchestrator/protocol/openid-connect/token}"
+      OAUTH2_PROXY_PROFILE_URL: "${OIDC_INTERNAL_PROFILE_URL:-http://keycloak:8080/realms/orchestrator/protocol/openid-connect/userinfo}"
+      OAUTH2_PROXY_OIDC_JWKS_URL: "${OIDC_INTERNAL_JWKS_URL:-http://keycloak:8080/realms/orchestrator/protocol/openid-connect/certs}"
       OAUTH2_PROXY_CLIENT_ID: "${AUTH_CLIENT_ID:-oauth2-proxy}"
       OAUTH2_PROXY_CLIENT_SECRET: "${AUTH_CLIENT_SECRET:?set AUTH_CLIENT_SECRET in .env}"
       OAUTH2_PROXY_COOKIE_SECRET: "${AUTH_PROXY_COOKIE_SECRET:?set AUTH_PROXY_COOKIE_SECRET in .env}"

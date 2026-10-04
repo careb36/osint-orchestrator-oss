@@ -817,12 +817,27 @@ async def test_no_provider_synthesize_returns_skipped_status(
 
 
 def test_target_llm_is_validated() -> None:
-    """targets.yaml documents `llm` as local | anthropic | openai; a typo must not
+    """targets.yaml documents `llm` as local | anthropic | openai | nebius; a typo must not
     silently fall through to the global provider."""
     import pydantic
 
     with pytest.raises(pydantic.ValidationError):
         _target(llm="antrophic")
+
+
+@pytest.mark.asyncio
+async def test_target_llm_nebius_overrides_a_global_openai_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "llm_provider", "openai")
+    monkeypatch.setattr(settings, "nebius_api_key", "test-token")
+    monkeypatch.setattr(settings, "nebius_base_url", "https://api.tokenfactory.nebius.com/v1")
+    from orchestrator.synthesizer.providers import get_client
+    from orchestrator.synthesizer.providers.openai_compat import OpenAICompatClient
+
+    client = get_client(_target(llm="nebius"))
+    assert isinstance(client, OpenAICompatClient)
+    assert client.provider == "nebius"
 
 
 @pytest.mark.asyncio

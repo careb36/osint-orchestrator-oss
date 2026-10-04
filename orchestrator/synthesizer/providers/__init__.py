@@ -19,6 +19,7 @@ Rules
 - target.llm == "anthropic"             → Anthropic provider.
 - target.llm == "openai"                → OpenAI-compatible family; if LLM_PROVIDER=nebius,
                                           routes to Nebius, else to OpenAI.
+- target.llm == "nebius"                → Nebius OpenAI-compatible provider.
 - otherwise settings.llm_provider decides: "anthropic" / "openai" / "nebius"
                                           (require an API key) or Ollama as the default.
 - Returns None and logs a warning if the chosen remote provider has no API key.
@@ -84,6 +85,8 @@ def get_client(target: Target) -> LLMClient | None:
         provider = "anthropic"
     elif target.llm == "openai":
         provider = "nebius" if settings.llm_provider == "nebius" else "openai"
+    elif target.llm == "nebius":
+        provider = "nebius"
     else:
         provider = settings.llm_provider
     if provider == "anthropic":

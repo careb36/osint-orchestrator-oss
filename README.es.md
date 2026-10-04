@@ -669,7 +669,7 @@ targets:
 | `authorization` | *obligatorio* | Quién aprobó este objetivo y cuándo |
 | `purpose` | *obligatorio* | Por qué se monitoriza |
 | `enabled` | `true` | `false` omite el job cron; una ejecución manual devuelve `400` |
-| `llm` | `local` | `local` \| `anthropic` \| `openai` — anula `LLM_PROVIDER` |
+| `llm` | `local` | `local` \| `anthropic` \| `openai` \| `nebius` — anula `LLM_PROVIDER` |
 | `language` | *(heredado)* | `es` \| `en` — anula `ORCHESTRATOR_LANGUAGE` |
 | `report_dir` | `daily_reports` | Directorio raíz de los artefactos de este objetivo |
 

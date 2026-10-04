@@ -303,7 +303,7 @@ class Target(BaseModel):
     purpose: str
     collectors: CollectorSet = Field(default_factory=CollectorSet)
     schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
-    llm: Literal["local", "anthropic", "openai"] = "local"
+    llm: Literal["local", "anthropic", "openai", "nebius"] = "local"
     # Override the global ORCHESTRATOR_LANGUAGE for this target's reports and
     # synthesis. None = use the global setting.
     language: str | None = None
