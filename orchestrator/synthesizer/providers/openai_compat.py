@@ -151,7 +151,9 @@ async def preflight_configured_models(
         raise
     except Exception as exc:  # noqa: BLE001 - preflight must not stop startup
         logger.warning(
-            "LLM model preflight failed; continuing startup",
+            "LLM model preflight failed; continuing startup provider=%s error=%s",
+            provider_name,
+            exc,
             extra={"provider": provider_name, "error": str(exc)},
         )
         return
@@ -162,15 +164,28 @@ async def preflight_configured_models(
         metrics.llm_model_available.labels(provider_name, model, route).set(1 if available else 0)
         log_extra = {"provider": provider_name, "model": model, "route": route}
         if available:
-            logger.info("LLM model available", extra=log_extra)
+            logger.info(
+                "LLM model available provider=%s model=%s route=%s",
+                provider_name,
+                model,
+                route,
+                extra=log_extra,
+            )
             continue
         prefix = _prefix_before_slash(model)
         suggestions = [
             model_id for model_id in served_model_ids if _prefix_before_slash(model_id) == prefix
         ][:10]
         log_extra["suggestions"] = suggestions
+        # The fields are in the message too: the text log format prints only
+        # the message, and this line exists to tell the operator what to fix.
         logger.error(
-            "LLM model not served by provider",
+            "LLM model not served by provider provider=%s model=%s route=%s "
+            "served_with_same_prefix=%s",
+            provider_name,
+            model,
+            route,
+            ", ".join(suggestions) or "none",
             extra=log_extra,
         )
 

@@ -149,7 +149,9 @@ async def _run_llm_model_preflight() -> None:
         )
     except TimeoutError:
         logger.warning(
-            "LLM model preflight timed out; continuing startup", extra={"provider": provider}
+            "LLM model preflight timed out; continuing startup provider=%s",
+            provider,
+            extra={"provider": provider},
         )
 
 

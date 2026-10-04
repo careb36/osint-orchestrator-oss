@@ -40,7 +40,11 @@ async def test_listed_models_log_info_and_set_gauge_1(
             base_url="https://api.tokenfactory.nebius.com/v1",
         )
 
-    logs = [r for r in caplog.records if r.name == LOGGER and r.getMessage() == "LLM model available"]
+    logs = [
+        r
+        for r in caplog.records
+        if r.name == LOGGER and r.getMessage().startswith("LLM model available")
+    ]
     assert len(logs) == 2
     assert (
         _metric_value(provider="nebius", model="nvidia/reasoning-model", route="reasoning") == 1.0
@@ -75,6 +79,10 @@ async def test_unlisted_model_logs_error_with_suggestions_and_gauge_0(
     errors = [r for r in caplog.records if "LLM model not served by provider" in r.getMessage()]
     assert len(errors) == 1
     assert "nvidia/Nemotron-3_5-Lightning" in errors[0].suggestions
+    # The text log format prints only the message: it must name what to fix.
+    message = errors[0].getMessage()
+    assert "model=nvidia/nemotron-4-340b-instruct" in message
+    assert "nvidia/Nemotron-3_5-Lightning" in message
     assert (
         _metric_value(provider="nebius", model="nvidia/nemotron-4-340b-instruct", route="reasoning")
         == 0.0
@@ -118,7 +126,10 @@ async def test_listing_error_logs_warning_and_does_not_raise(
 
     warnings = [r for r in caplog.records if "LLM model preflight failed" in r.getMessage()]
     assert len(warnings) == 1
-    assert metrics.sample(METRIC, {"provider": "openai", "model": reasoning, "route": "reasoning"}) is None
+    assert (
+        metrics.sample(METRIC, {"provider": "openai", "model": reasoning, "route": "reasoning"})
+        is None
+    )
     assert metrics.sample(METRIC, {"provider": "openai", "model": fast, "route": "fast"}) is None
 
 
