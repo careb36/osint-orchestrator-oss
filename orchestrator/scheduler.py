@@ -82,12 +82,9 @@ def _target_schedule_signature(trigger: CronTrigger, grace: int) -> tuple[str, i
 def _load_targets() -> tuple[list[Target], list[str], bool]:
     """Load targets centrally and report whether the targets file itself failed."""
     if settings.demo_mode:
-        from orchestrator.demo import load_demo_targets
-
-        loaded_targets, invalid_targets, load_failed = load_demo_targets(settings.demo_targets_file)
-        if load_failed:
-            return [], ["<targets-file>"], True
-        return loaded_targets, invalid_targets, False
+        # Public demo: runs start only from POST /demo/targets/{id}/run, within
+        # the daily limits. Nothing runs on a cron.
+        return [], [], False
 
     loaded_targets, invalid_targets = load_targets(settings.targets_file)
     load_failed = "<targets-file>" in invalid_targets
@@ -403,20 +400,13 @@ def start_scheduler() -> None:
         logger.info("Scheduler already running; reusing existing instance")
         return
 
-    if settings.demo_mode:
-        from orchestrator.demo import validate_demo_mode
-
-        validate_demo_mode()
-        logger.info("Demo mode active; scheduler restricted to demo allowlist")
-
     targets, invalid_targets, _ = _load_targets()
     if invalid_targets:
         logger.warning("Skipped invalid targets at startup: %s", ", ".join(invalid_targets))
     register_targets(targets)
-    if not settings.demo_mode:
-        register_retention_job()
-        register_alert_retry_job()
-        register_opencti_outbox_job()
+    register_retention_job()
+    register_alert_retry_job()
+    register_opencti_outbox_job()
     scheduler.start()
     logger.info("Scheduler started with %d target(s)", len(targets))
 

@@ -36,11 +36,10 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import func
 from sqlmodel import select
 
-from orchestrator import metrics
+from orchestrator import demo, metrics
 from orchestrator.auth import log_auth_status, log_secret_key_status, require_api_key
 from orchestrator.config import NEBIUS_DEFAULT_BASE_URL, settings
 from orchestrator.database import create_db_and_tables, get_session
-from orchestrator.demo import strip_demo_risk_fields
 from orchestrator.evidence import load_manifest_file, manifest_path_for_report, verify_target_chain
 from orchestrator.i18n import console_i18n_catalogue, resolve_language, t
 from orchestrator.logging_config import configure_logging, request_id_var
@@ -101,14 +100,13 @@ async def lifespan(app: FastAPI):
     configure_logging()
     log_auth_status()
     log_secret_key_status()
-    if settings.demo_mode:
-        from orchestrator.demo import validate_demo_mode
-
-        validate_demo_mode()
-        logger.info("Demo mode enabled; allowlisted targets only", extra={"status": "demo"})
+    # Before anything is served: an unsafe demo deployment must not start.
+    demo.validate_demo_mode()
     await _run_llm_model_preflight()
     metrics.set_build_info(VERSION)
     await create_db_and_tables()
+    if settings.demo_mode:
+        await demo.import_seed_if_empty()
     interrupted = await mark_interrupted_runs()
     if interrupted:
         logger.warning(
@@ -175,6 +173,11 @@ _OPENAPI_TAGS = [
     {"name": "alerts", "description": "Alert delivery operations (DLQ replay)."},
     {"name": "analytics", "description": "Aggregated views for the operator console."},
     {"name": "console", "description": "Minimal read-only operator web console."},
+    {
+        "name": "demo",
+        "description": "Public demo (DEMO_MODE=true): allowlisted targets, daily limits, "
+        "views without the risk assessment.",
+    },
 ]
 
 app = FastAPI(
@@ -649,88 +652,174 @@ async def verify_target_chain_endpoint(target_id: str) -> dict[str, Any]:
         raise
 
 
-@app.get("/demo/targets", tags=["public"])
-async def public_demo_targets() -> list[dict[str, Any]]:
-    """Return the allowlisted demo targets without exposing internal risk fields."""
+# ─── Public demo (DEMO_MODE=true only) ───────────────────────────────────────
+# No API key: visitors get the allowlist, a rate-limited run trigger and
+# read-only views of demo runs without the risk assessment. Every route answers
+# 404 when demo mode is off, and only for allowlisted targets when it is on.
+
+
+def _require_demo() -> None:
     if not settings.demo_mode:
-        raise HTTPException(status_code=404, detail="demo_mode_disabled")
-    from orchestrator.demo import load_demo_targets
-
-    targets, invalid, _ = load_demo_targets(settings.demo_targets_file)
-    if invalid:
-        raise HTTPException(status_code=500, detail="demo_targets_invalid")
-    return [strip_demo_risk_fields(target.model_dump()) for target in targets]
+        raise HTTPException(status_code=404, detail=t("demo.disabled"))
 
 
-@app.get("/demo/targets/{target_id}", tags=["public"])
-async def public_demo_target(target_id: str) -> dict[str, Any]:
-    """Return a single demo target without its risk fields."""
-    if not settings.demo_mode:
-        raise HTTPException(status_code=404, detail="demo_mode_disabled")
-    from orchestrator.demo import load_demo_targets
-
-    targets, invalid, _ = load_demo_targets(settings.demo_targets_file)
-    if invalid:
-        raise HTTPException(status_code=500, detail="demo_targets_invalid")
-    for target in targets:
-        if target.id == target_id:
-            return strip_demo_risk_fields(target.model_dump())
-    raise HTTPException(status_code=404, detail="demo_target_not_found")
+def _demo_target_or_404(target_id: str) -> Target:
+    _require_demo()
+    target = demo.demo_target(target_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail=t("demo.target_not_found", target_id=target_id))
+    return target
 
 
-@app.get("/demo/runs/{run_id}/finding", tags=["public"])
-async def public_demo_finding(run_id: int) -> dict[str, Any]:
-    """Serve a sanitized copy of a finding for public demo consumers."""
-    if not settings.demo_mode:
-        raise HTTPException(status_code=404, detail="demo_mode_disabled")
+async def _demo_run_or_404(run_id: int) -> tuple[Run, Target]:
+    """The run and its target, only when the target is on the allowlist."""
+    _require_demo()
+    async with get_session() as session:
+        run = await session.get(Run, run_id)
+    target = demo.demo_target(run.target_id) if run is not None else None
+    if run is None or target is None:
+        raise HTTPException(status_code=404, detail=t("run_not_found", run_id=run_id))
+    return run, target
+
+
+@app.get("/demo", response_class=HTMLResponse, include_in_schema=False)
+async def demo_page(request: Request) -> HTMLResponse:
+    """The public demo page (static shell; it calls the /demo/* routes)."""
+    _require_demo()
+    language = resolve_language(None)
+    return templates.TemplateResponse(
+        request=request,
+        name="demo.html",
+        context={"language": language, "disclaimer": t("demo.disclaimer", language=language)},
+    )
+
+
+@app.get("/demo/targets", tags=["demo"])
+async def demo_targets() -> list[dict[str, Any]]:
+    """The allowlist of entities a visitor may investigate."""
+    _require_demo()
+    return [demo.public_target(target) for target in demo.load_demo_targets()]
+
+
+@app.post("/demo/targets/{target_id}/run", status_code=202, tags=["demo"])
+async def demo_trigger_run(
+    target_id: str, request: Request, background_tasks: BackgroundTasks
+) -> dict[str, Any]:
+    """Start a run on an allowlisted target, within the per-IP and global daily limits."""
+    target = _demo_target_or_404(target_id)
+    visitor = demo.client_ip(request)
+    limit_hit = await demo.claim_run(visitor)
+    if limit_hit is not None:
+        retry_after = demo.seconds_until_reset()
+        logger.info(
+            "Demo run refused target=%s reason=%s retry_after=%ds",
+            target_id,
+            limit_hit,
+            retry_after,
+            extra={"target_id": target_id, "status": limit_hit},
+        )
+        raise HTTPException(
+            status_code=429,
+            detail=t(limit_hit, language=target.language),
+            headers={"Retry-After": str(retry_after)},
+        )
+    run_id = await create_pending_run(target_id)
+    if run_id is None:
+        # Nothing started: the visitor keeps the slot.
+        await demo.release_run(visitor)
+        raise HTTPException(
+            status_code=409,
+            detail=t("run_already_in_progress", language=target.language, target_id=target_id),
+        )
+    logger.info(
+        "Demo run accepted target=%s run_id=%d",
+        target_id,
+        run_id,
+        extra={"target_id": target_id, "run_id": run_id, "trigger": "demo"},
+    )
+    background_tasks.add_task(run_target_pipeline, target, run_id)
+    return {"run_id": run_id, "status": "accepted", "target_id": target_id}
+
+
+@app.get("/demo/targets/{target_id}/runs", tags=["demo"])
+async def demo_target_runs(target_id: str) -> list[dict[str, Any]]:
+    """The 20 most recent runs of an allowlisted target, newest first."""
+    _demo_target_or_404(target_id)
+    async with get_session() as session:
+        result = await session.exec(
+            select(Run).where(Run.target_id == target_id).order_by(Run.id.desc()).limit(20)
+        )
+        return [demo.public_run(run) for run in result.all()]
+
+
+@app.get("/demo/runs/{run_id}", tags=["demo"])
+async def demo_run(run_id: int) -> dict[str, Any]:
+    """Status of a demo run."""
+    run, _target = await _demo_run_or_404(run_id)
+    return demo.public_run(run)
+
+
+@app.get("/demo/runs/{run_id}/evidence", tags=["demo"])
+async def demo_run_evidence(run_id: int) -> list[dict[str, Any]]:
+    """Each web result of the run with its category, relevance, confidence and rationale."""
+    await _demo_run_or_404(run_id)
+    rows = await load_run_qualifications(run_id)
+    return [row.model_dump(mode="json") for row in rows]
+
+
+@app.get("/demo/runs/{run_id}/finding", tags=["demo"])
+async def demo_run_finding(run_id: int) -> dict[str, Any]:
+    """The synthesised finding without its risk level and justification."""
+    await _demo_run_or_404(run_id)
     async with get_session() as session:
         result = await session.exec(select(FindingRecord).where(FindingRecord.run_id == run_id))
         record = result.first()
     if record is None:
-        raise HTTPException(status_code=404, detail="demo_finding_not_found")
-    payload = record.to_api_dict()
-    return strip_demo_risk_fields(payload)
+        raise HTTPException(status_code=404, detail=t("finding_not_found", run_id=run_id))
+    return demo.public_finding(record)
 
 
-@app.get("/demo/runs/{run_id}/manifest", tags=["public"])
-async def public_demo_manifest(run_id: int) -> dict[str, Any]:
-    """Return a signed manifest without risky child content in demo mode."""
-    if not settings.demo_mode:
-        raise HTTPException(status_code=404, detail="demo_mode_disabled")
-    async with get_session() as session:
-        run = await session.get(Run, run_id)
-    if run is None:
-        raise HTTPException(status_code=404, detail="run_not_found")
-    if run.manifest_sha256 is None:
-        raise HTTPException(status_code=404, detail="manifest.not_found")
+@app.get("/demo/runs/{run_id}/report", response_class=PlainTextResponse, tags=["demo"])
+async def demo_run_report(run_id: int) -> str:
+    """The run's Markdown report with a disclaimer and without the risk line."""
+    run, target = await _demo_run_or_404(run_id)
+    path = Path(run.report_path) if run.report_path else None
+    if path is None or not path.is_file():
+        raise HTTPException(status_code=404, detail=t("report_not_found", run_id=run_id))
+    return demo.public_report(path.read_text(encoding="utf-8"), target.language)
+
+
+@app.get("/demo/runs/{run_id}/manifest", tags=["demo"])
+async def demo_run_manifest(run_id: int) -> dict[str, Any]:
+    """The signed evidence manifest of a demo run."""
+    run, _target = await _demo_run_or_404(run_id)
     manifest_path = manifest_path_for_report(run.report_path)
-    if manifest_path is None or not manifest_path.exists():
-        raise HTTPException(status_code=404, detail="manifest.not_found")
+    if run.manifest_sha256 is None or manifest_path is None or not manifest_path.exists():
+        raise HTTPException(status_code=404, detail=t("manifest.not_found", run_id=run_id))
     try:
-        payload = load_manifest_file(manifest_path)
+        return load_manifest_file(manifest_path)
     except (OSError, TypeError, ValueError):
-        raise HTTPException(status_code=404, detail="manifest.not_found") from None
-    return strip_demo_risk_fields(payload)
+        raise HTTPException(
+            status_code=404, detail=t("manifest.not_found", run_id=run_id)
+        ) from None
 
 
-@app.get("/demo/targets/{target_id}/chain/verify", tags=["public"])
-async def public_demo_verify_target_chain(target_id: str) -> dict[str, Any]:
-    """Check the proof chain for a demo target with redacted risk data."""
-    if not settings.demo_mode:
-        raise HTTPException(status_code=404, detail="demo_mode_disabled")
+@app.get("/demo/targets/{target_id}/chain/verify", tags=["demo"])
+async def demo_verify_chain(target_id: str) -> dict[str, Any]:
+    """Verify the evidence chain of an allowlisted target."""
+    target = _demo_target_or_404(target_id)
     async with get_session() as session:
         result = await verify_target_chain(
-            target_id=target_id,
-            secret_key=settings.orchestrator_secret_key,
-            session=session,
+            target_id=target_id, secret_key=settings.orchestrator_secret_key, session=session
         )
-    if result.get("reason"):
+    if result["reason"]:
         result["message"] = t(
             f"chain.reason.{result['reason']}",
-            name=result.get("detail"),
-            run_id=result.get("first_broken_run_id"),
+            language=target.language,
+            name=result["detail"],
+            run_id=result["first_broken_run_id"],
         )
-    return strip_demo_risk_fields(result)
+    return result
 
 
 app.include_router(router)

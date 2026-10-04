@@ -47,6 +47,49 @@ Without OpenCTI: set `OPENCTI_ENABLED=false`. Reports, findings, the delta and
 alerts keep working; nothing is pushed to a knowledge graph, and those runs are
 never backfilled later ([ADR-008](adr/ADR-008-optional-opencti-sink.md)).
 
+### Demo mode
+
+A lightweight, public-facing deployment of the same code: the API and a demo
+page, SQLite, Tavily and the configured LLM. No OpenCTI, SpiderFoot or Amass.
+
+```bash
+cp .env.example .env    # NEBIUS_API_KEY, TAVILY_API_KEY, LLM_PROVIDER=nebius, the two LLM_MODEL_* ids,
+                        # ORCHESTRATOR_API_KEY, ORCHESTRATOR_SECRET_KEY
+docker compose -f docker-compose.demo.yml up -d --build
+open http://localhost:7860/demo
+```
+
+What a visitor can do, without an API key:
+
+| Route | Purpose |
+| --- | --- |
+| `GET /demo` | The demo page |
+| `GET /demo/targets` | The allowlist ([`demo/targets.demo.yaml`](../demo/targets.demo.yaml)); there is no free-text target |
+| `POST /demo/targets/{id}/run` | Start a run; `429` with `Retry-After` over the daily limits |
+| `GET /demo/targets/{id}/runs`, `GET /demo/runs/{id}` | Run list and status |
+| `GET /demo/runs/{id}/evidence` | Each web result with its category, relevance, confidence and rationale |
+| `GET /demo/runs/{id}/finding`, `/report` | Summary and report **without** the risk level and its justification, with a disclaimer |
+| `GET /demo/runs/{id}/manifest`, `GET /demo/targets/{id}/chain/verify` | The signed manifest and the chain check |
+
+Guards:
+
+- **Allowlist only.** Runs of any other target are invisible to the `/demo`
+  routes; every other route still needs the API key.
+- **Daily limits** per visitor (`DEMO_MAX_RUNS_PER_IP_PER_DAY`) and overall
+  (`DEMO_MAX_RUNS_PER_DAY`), reset at 00:00 UTC. Visitors are counted by an
+  HMAC of their address, kept for two days; the address is never stored. Set
+  `DEMO_TRUSTED_PROXY_HOPS` to the number of proxies in front of the service.
+- **Call budgets** for Tavily (`DEMO_TAVILY_CALLS_PER_DAY`) and the LLM
+  (`DEMO_LLM_CALLS_PER_DAY`). When one is spent the call is not made, the run
+  still finishes and its error field says why.
+- **Startup check.** With `DEMO_MODE=true` the service refuses to start unless
+  `OPENCTI_ENABLED=false`, the API key and the signing key are set, and every
+  allowlisted target enables the Tavily collector and nothing else. Nothing
+  runs on a schedule.
+
+Runs shown before any visitor starts one are loaded from `demo/seed/` (see its
+[README](../demo/seed/README.md)); deployment: [deploy.md](deploy.md).
+
 ### Kubernetes
 
 The Helm chart in [`deploy/helm/osint-orchestrator`](../deploy/helm/osint-orchestrator/)

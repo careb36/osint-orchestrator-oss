@@ -13,6 +13,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from orchestrator.config import settings
 from orchestrator.database import get_session
+from orchestrator.demo import consume_budget
 from orchestrator.i18n import resolve_language
 from orchestrator.models import (
     EvidenceCategory,
@@ -30,7 +31,8 @@ logger = logging.getLogger(__name__)
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
 _QUALIFY_SYSTEM_PROMPT = (_PROMPTS_DIR / "qualify_system.txt").read_text(encoding="utf-8")
 
-_BATCH_SIZE = 10
+# Small batches: a long structured answer is the one a model truncates.
+_BATCH_SIZE = 5
 _MAX_RATIONALE_LEN = 280
 _VALID_CATEGORIES = frozenset(item.value for item in EvidenceCategory)
 _VALID_RELEVANCE = frozenset(item.value for item in EvidenceRelevance)
@@ -200,17 +202,38 @@ async def qualify_evidence(
     model = client.model_for_route("fast")
     rows: list[EvidenceQualification] = []
     failures: list[str] = []
-    for start in range(0, len(limited), _BATCH_SIZE):
-        batch = limited[start : start + _BATCH_SIZE]
-        user_prompt = _build_user_prompt(target, batch)
-        try:
-            raw = await client.complete(
-                _QUALIFY_SYSTEM_PROMPT,
-                user_prompt,
-                timeout=settings.llm_timeout_seconds,
-                model_route="fast",
-                response_schema=_RESPONSE_SCHEMA,
-            )
+    pending = [limited[i : i + _BATCH_SIZE] for i in range(0, len(limited), _BATCH_SIZE)]
+    # Two passes at most: items a batch left unqualified (a truncated or
+    # unparseable answer, a skipped index) are asked for once more.
+    for attempt in (1, 2):
+        retry: list[EvidenceItem] = []
+        stop = False
+        for batch in pending:
+            if not await consume_budget("llm"):
+                # Public demo only: the remaining items stay unqualified and
+                # the run goes on.
+                failures.append("the demo's daily LLM budget is exhausted")
+                stop = True
+                break
+            try:
+                raw = await client.complete(
+                    _QUALIFY_SYSTEM_PROMPT,
+                    _build_user_prompt(target, batch),
+                    timeout=settings.llm_timeout_seconds,
+                    model_route="fast",
+                    response_schema=_RESPONSE_SCHEMA,
+                )
+            except Exception as exc:  # noqa: BLE001
+                # The provider client already retried transient errors.
+                failures.append(str(exc))
+                logger.exception(
+                    "Evidence qualification failed target=%s run_id=%d attempt=%d",
+                    target.id,
+                    run_id,
+                    attempt,
+                    extra={"target_id": target.id, "run_id": run_id, "error_detail": str(exc)},
+                )
+                continue
             payload = _extract_json(raw)
             batch_rows = (
                 _validated_rows(
@@ -225,15 +248,17 @@ async def qualify_evidence(
                 else []
             )
             rows.extend(batch_rows)
-            if len(batch_rows) < len(batch):
+            qualified_urls = {row.url for row in batch_rows}
+            missing = [item for item in batch if item.url not in qualified_urls]
+            if missing:
                 # Unqualified items never reach the synthesis; make the gap
                 # visible instead of dropping it silently.
                 logger.warning(
-                    "Evidence qualification incomplete target=%s run_id=%d batch_start=%d "
+                    "Evidence qualification incomplete target=%s run_id=%d attempt=%d "
                     "qualified=%d of %d parseable=%s",
                     target.id,
                     run_id,
-                    start,
+                    attempt,
                     len(batch_rows),
                     len(batch),
                     payload is not None,
@@ -244,19 +269,10 @@ async def qualify_evidence(
                         "batch_size": len(batch),
                     },
                 )
-        except Exception as exc:  # noqa: BLE001
-            failures.append(str(exc))
-            logger.exception(
-                "Evidence qualification failed target=%s run_id=%d batch_start=%d",
-                target.id,
-                run_id,
-                start,
-                extra={
-                    "target_id": target.id,
-                    "run_id": run_id,
-                    "error_detail": str(exc),
-                },
-            )
+                retry.extend(missing)
+        if stop or not retry or attempt == 2:
+            break
+        pending = [retry[i : i + _BATCH_SIZE] for i in range(0, len(retry), _BATCH_SIZE)]
     logger.info(
         "Evidence qualified target=%s run_id=%d qualified=%d of %d model=%s",
         target.id,
