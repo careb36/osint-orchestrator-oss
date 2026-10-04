@@ -70,7 +70,48 @@ jobs:
         with:
           context: .
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
+          load: ${{ github.event_name == 'pull_request' }}
+          tags: ${{ github.event_name == 'pull_request' && 'osint-orchestrator:smoke' || steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Smoke-test the image
+        if: github.event_name == 'pull_request'
+        run: |
+          docker run --rm osint-orchestrator:smoke \
+            python -c "import orchestrator.api, pycti, magic, openai, anthropic; print('ok')"
+          docker run --rm osint-orchestrator:smoke \
+            python -c "from orchestrator.config import settings; print(settings.llm_provider)"
+
+      - name: Smoke-test /health
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          cid="$(docker run -d --rm \
+            --name osint-orchestrator-smoke \
+            -e ORCHESTRATOR_API_KEY=ci-smoke \
+            -p 18080:8000 \
+            osint-orchestrator:smoke)"
+          cleanup() {
+            docker stop "${cid}" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          health_ok=0
+          for _ in $(seq 1 30); do
+            if response="$(curl -fsS http://127.0.0.1:18080/health)"; then
+              if python -c "import json, sys; payload=json.loads(sys.argv[1]); sys.exit(0 if payload.get('status') == 'ok' else 1)" "${response}"; then
+                echo "${response}"
+                health_ok=1
+                break
+              fi
+            fi
+            sleep 2
+          done
+
+          if [ "${health_ok}" -ne 1 ]; then
+            echo "Timed out waiting for /health to report status=ok"
+            docker logs "${cid}" || true
+            exit 1
+          fi
