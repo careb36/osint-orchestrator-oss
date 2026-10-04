@@ -187,7 +187,7 @@ curl -H "X-API-Key: $KEY" http://localhost:8000/runs/1/report
 ### 5. Opcional: perfil MISP
 
 ```bash
-docker compose --profile misp up -d
+docker compose -f docker-compose.yml -f docker-compose.misp.yml --profile misp up -d
 ```
 
 > ⚠ **MISP tarda 5–10 minutos en inicializarse la primera vez.** Espere a que
@@ -234,7 +234,7 @@ loopback para acceso directo desde el host.
 
 ## MISP
 
-MISP corre como perfil opcional de Docker (`--profile misp`) con su propia
+MISP corre desde el overlay opcional `docker-compose.misp.yml` (`--profile misp`) con su propia
 **MariaDB** y su propio **Redis** (no comparte la infraestructura de OpenCTI).
 La sincronización OpenCTI ↔ MISP la hace el conector oficial
 [`opencti/connector-misp`](https://github.com/OpenCTI-Platform/connectors/tree/master/external-import/misp)
@@ -244,11 +244,11 @@ La sincronización OpenCTI ↔ MISP la hace el conector oficial
 
 ```bash
 # 1. Arrancar el stack MISP y esperar la inicialización (5–10 min la primera vez)
-docker compose --profile misp up -d misp-db misp-redis misp-modules misp
-docker compose --profile misp logs -f misp   # esperar hasta "MISP is ready"
+docker compose -f docker-compose.yml -f docker-compose.misp.yml --profile misp up -d misp-db misp-redis misp-modules misp
+docker compose -f docker-compose.yml -f docker-compose.misp.yml --profile misp logs -f misp   # esperar hasta "MISP is ready"
 
 # 2. Con MISP healthy, arrancar el conector de OpenCTI
-docker compose --profile misp up -d connector-misp
+docker compose -f docker-compose.yml -f docker-compose.misp.yml --profile misp up -d connector-misp
 ```
 
 ### Obtener la clave de API de MISP
@@ -257,7 +257,7 @@ docker compose --profile misp up -d connector-misp
 2. Inicie sesión con `MISP_ADMIN_EMAIL` / `MISP_ADMIN_PASSWORD` del `.env`.
 3. Vaya a **Administration → List Auth Keys → Add Authentication Key**.
 4. Copie la clave hexadecimal de 40 caracteres en `MISP_KEY` del `.env`.
-5. Reinicie el conector: `docker compose --profile misp restart connector-misp`.
+5. Reinicie el conector: `docker compose -f docker-compose.yml -f docker-compose.misp.yml --profile misp restart connector-misp`.
 
 ### Verificar el registro del conector
 
@@ -516,7 +516,7 @@ En el mismo `.env` conviven dos grupos de variables:
 | `ORCHESTRATOR_DATABASE_URL` | `sqlite+aiosqlite:////app/data/orchestrator.db` | Dentro del contenedor esa ruta es el volumen persistente; fuera de Docker use `./orchestrator.db`. |
 | `TARGETS_FILE` | `targets.yaml` | Se relee en cada llamada de la API y del scheduler. |
 | `OPENCTI_SSL_VERIFY` | `true` | Use `false` solo en dev con TLS local/autofirmado. |
-| `SPIDERFOOT_MODULES` | `sfp_dns,sfp_whois,sfp_ssl` | Valor de respaldo cuando un objetivo no lista módulos. |
+| `SPIDERFOOT_MODULES` | `sfp_dnsresolve,sfp_whois,sfp_sslcert` | Valor de respaldo cuando un objetivo no lista módulos. |
 | `SPIDERFOOT_URL` | `http://spiderfoot:5001` | URL del servicio SpiderFoot en la red interna. |
 | `SPIDERFOOT_TIMEOUT_SECONDS` | `600` | Tiempo máximo de una recolección de SpiderFoot. |
 | `LLM_PROVIDER` / `LLM_MODEL` / `LLM_BASE_URL` | `ollama` / `llama3.2` / `http://ollama:11434` | Backend de síntesis; `ollama` mantiene los datos on-prem. `none` desactiva la síntesis para todos los objetivos. `nebius` usa el endpoint compatible con OpenAI de Token Factory. |
@@ -1213,10 +1213,11 @@ MIT — véase [LICENSE](LICENSE).
 2. Cargue su clave en `NEBIUS_API_KEY`.
 3. Mantenga `NEBIUS_BASE_URL=https://api.tokenfactory.nebius.com/v1` salvo que su equipo de cuenta indique otro endpoint.
 4. Elija modelos:
-   - `LLM_MODEL_REASONING` para síntesis y razonamiento intensivo de relaciones (por ejemplo Nemotron Super/Ultra).
-   - `LLM_MODEL_FAST` para clasificación/extracción rápida (por ejemplo Nemotron Nano/Lightning).
+   - `LLM_MODEL_REASONING` para síntesis y razonamiento intensivo de relaciones, por ejemplo `nvidia/nemotron-3-super-120b-a12b` (o `nvidia/Nemotron-3-Ultra-550b-a55b`).
+   - `LLM_MODEL_FAST` para clasificación/extracción rápida, por ejemplo `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` (o `nvidia/Nemotron-3_5-Lightning`).
+   - Los ids distinguen mayúsculas y el catálogo cambia; liste los que admite su clave con `curl -H "Authorization: Bearer $NEBIUS_API_KEY" https://api.tokenfactory.nebius.com/v1/models`. Un id que no figure ahí hace fallar toda síntesis.
    - Si alguna queda vacía, se usa `LLM_MODEL`.
-5. Ejecute la stack habitual (`docker compose up -d`) y valide el pipeline de siempre (`POST /targets/{id}/run`, luego `/runs/{id}/finding`).
+5. Ejecute la stack habitual (`docker compose up -d --build`; la imagen instala el extra `llm`, que trae el SDK `openai` que necesita este proveedor — una instalación local con `pip` necesita `pip install -e ".[llm]"`) y valide el pipeline de siempre (`POST /targets/{id}/run`, luego `/runs/{id}/finding`).
 
 Notas:
 - Nebius usa el mismo camino proveedor compatible con OpenAI que `openai` (sin código de integración duplicado).

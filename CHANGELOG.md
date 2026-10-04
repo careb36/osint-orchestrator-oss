@@ -51,9 +51,31 @@ from [SECURITY.md](SECURITY.md).
   provenance, missing LLM/Ollama caveat, `GET /` endpoint, SocialOSINT field
   reference.
 
+- MISP services moved to the `docker-compose.misp.yml` overlay
+  (`-f docker-compose.yml -f docker-compose.misp.yml --profile misp`): Compose
+  interpolates every service of the files it loads, so the required MISP
+  variables blocked `docker compose up` on installs without MISP.
+
 ### Removed
 
 - Dead `SPIDERFOOT_CORRELATION` key from `.env.example` (read by nothing).
+
+### Fixed
+
+- `.env.example`: blank values no longer carry an inline comment. Compose's
+  env_file parser took the comment as the value, so a copied template set
+  e.g. `TAVILY_INCLUDE_DOMAINS` to the comment text (every Tavily query
+  failed), `LLM_MODEL_REASONING`/`LLM_MODEL_FAST` to a non-existent model and
+  the MISP passwords to a public string. A unit test now rejects the pattern.
+- Docker image installs the new `llm` extra (`openai`, `anthropic`): the
+  cloud synthesis providers (`openai`, `nebius`, `anthropic`) failed every
+  call with "package is not installed".
+- SpiderFoot collector speaks the SpiderFoot 4 API: `/startscan` is asked for
+  JSON (it answered 303 before), the scan id is read from
+  `["SUCCESS", id]`, the status from column 5 of `/scanstatus`, and event
+  rows use the data in column 1 (HTML-unescaped) and the type in the last
+  column. Default `SPIDERFOOT_MODULES` uses real module names
+  (`sfp_dnsresolve,sfp_whois,sfp_sslcert`; `sfp_dns`/`sfp_ssl` do not exist).
 
 ## 2026-09-14
 

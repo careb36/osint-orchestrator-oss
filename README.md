@@ -183,7 +183,7 @@ curl -H "X-API-Key: $KEY" http://localhost:8000/runs/1/report
 ### 5. Optional: MISP profile
 
 ```bash
-docker compose --profile misp up -d
+docker compose -f docker-compose.yml -f docker-compose.misp.yml --profile misp up -d
 ```
 
 > ⚠️ **MISP takes 5–10 minutes to initialise on first run.** Wait for the
@@ -223,7 +223,7 @@ operators the `8002` URL. The full decision record is
 
 ## MISP
 
-MISP runs as an optional Docker profile (`--profile misp`) with its own
+MISP runs from the optional overlay `docker-compose.misp.yml` (`--profile misp`) with its own
 **MariaDB** and **Redis** (not shared with OpenCTI's infrastructure).
 OpenCTI ↔ MISP synchronisation is handled by the official
 [`opencti/connector-misp`](https://github.com/OpenCTI-Platform/connectors/tree/master/external-import/misp)
@@ -233,11 +233,11 @@ connector (version **6.8.11**, pinned to match the platform).
 
 ```bash
 # 1. Start MISP stack and wait for initialisation (5–10 min on first run)
-docker compose --profile misp up -d misp-db misp-redis misp-modules misp
-docker compose --profile misp logs -f misp   # wait until "MISP is ready"
+docker compose -f docker-compose.yml -f docker-compose.misp.yml --profile misp up -d misp-db misp-redis misp-modules misp
+docker compose -f docker-compose.yml -f docker-compose.misp.yml --profile misp logs -f misp   # wait until "MISP is ready"
 
 # 2. Once MISP is healthy, start the OpenCTI connector
-docker compose --profile misp up -d connector-misp
+docker compose -f docker-compose.yml -f docker-compose.misp.yml --profile misp up -d connector-misp
 ```
 
 ### Obtaining the MISP API key
@@ -246,7 +246,7 @@ docker compose --profile misp up -d connector-misp
 2. Log in with `MISP_ADMIN_EMAIL` / `MISP_ADMIN_PASSWORD` from `.env`.
 3. Go to **Administration → List Auth Keys → Add Authentication Key**.
 4. Copy the 40-character hex key into `MISP_KEY` in `.env`.
-5. Restart the connector: `docker compose --profile misp restart connector-misp`.
+5. Restart the connector: `docker compose -f docker-compose.yml -f docker-compose.misp.yml --profile misp restart connector-misp`.
 
 ### Verifying connector registration
 
@@ -496,7 +496,7 @@ Two groups of variables live in the same `.env`:
 | `ORCHESTRATOR_DATABASE_URL` | `sqlite+aiosqlite:////app/data/orchestrator.db` | Container path is the persistent volume; use `./orchestrator.db` bare-metal. |
 | `TARGETS_FILE` | `targets.yaml` | Re-read on every API and scheduler call. |
 | `OPENCTI_SSL_VERIFY` | `true` | Set `false` only for local/self-signed TLS in dev. |
-| `SPIDERFOOT_MODULES` | `sfp_dns,sfp_whois,sfp_ssl` | Fallback when a target lists no modules. |
+| `SPIDERFOOT_MODULES` | `sfp_dnsresolve,sfp_whois,sfp_sslcert` | Fallback when a target lists no modules. |
 | `SPIDERFOOT_URL` | `http://spiderfoot:5001` | SpiderFoot service URL on the internal network. |
 | `SPIDERFOOT_TIMEOUT_SECONDS` | `600` | Timeout for one SpiderFoot collection run. |
 | `LLM_PROVIDER` / `LLM_MODEL` / `LLM_BASE_URL` | `ollama` / `llama3.2` / `http://ollama:11434` | Synthesis backend; `ollama` keeps data on-prem. `none` switches synthesis off for every target. `nebius` uses the Token Factory OpenAI-compatible endpoint. |
@@ -1190,10 +1190,11 @@ MIT — see [LICENSE](LICENSE).
 2. Add your API key in `NEBIUS_API_KEY`.
 3. Keep `NEBIUS_BASE_URL=https://api.tokenfactory.nebius.com/v1` unless your account team provides a different endpoint.
 4. Choose models:
-   - `LLM_MODEL_REASONING` for synthesis and relationship-heavy reasoning (for example Nemotron Super/Ultra).
-   - `LLM_MODEL_FAST` for lightweight classification/extraction (for example Nemotron Nano/Lightning).
+   - `LLM_MODEL_REASONING` for synthesis and relationship-heavy reasoning, for example `nvidia/nemotron-3-super-120b-a12b` (or `nvidia/Nemotron-3-Ultra-550b-a55b`).
+   - `LLM_MODEL_FAST` for lightweight classification/extraction, for example `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` (or `nvidia/Nemotron-3_5-Lightning`).
+   - Model ids are case-sensitive and the catalogue changes; list what your key can use with `curl -H "Authorization: Bearer $NEBIUS_API_KEY" https://api.tokenfactory.nebius.com/v1/models`. An id that is not in that list fails every synthesis.
    - If either is empty, it falls back to `LLM_MODEL`.
-5. Run with your normal stack (`docker compose up -d`) and verify the pipeline as usual (`POST /targets/{id}/run`, then inspect `/runs/{id}/finding`).
+5. Run with your normal stack (`docker compose up -d --build`; the image installs the `llm` extra, which brings the `openai` SDK this provider needs — a local `pip install` needs `pip install -e ".[llm]"`) and verify the pipeline as usual (`POST /targets/{id}/run`, then inspect `/runs/{id}/finding`).
 
 Notes:
 - Nebius uses the same OpenAI-compatible provider path as `openai` (no duplicated integration code).
