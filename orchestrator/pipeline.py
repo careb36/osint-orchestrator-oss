@@ -57,7 +57,7 @@ from orchestrator.reports import (
 from orchestrator.sinks import OpenCTIIngestError, is_transient
 from orchestrator.sinks.opencti import OpenCTISink
 from orchestrator.synthesizer import synthesize
-from orchestrator.synthesizer.providers import get_client
+from orchestrator.synthesizer.providers import LLMClient, get_client
 from orchestrator.synthesizer.qualify import persist_qualifications, qualify_evidence
 
 logger = logging.getLogger(__name__)
@@ -117,34 +117,33 @@ async def _ollama_reachable() -> bool:
     return True
 
 
-async def _should_qualify(target: Target, evidence_items: list[EvidenceItem]) -> bool:
+async def _qualification_client(
+    target: Target, evidence_items: list[EvidenceItem]
+) -> LLMClient | None:
     if not settings.llm_qualify_enabled:
-        return False
+        return None
     if settings.llm_qualify_max_items <= 0:
-        return False
+        return None
     if not evidence_items:
-        return False
+        return None
     client = get_client(target)
     if client is None:
-        return False
-    if client.provider == "ollama":
-        return await _ollama_reachable()
-    return client.provider in {"openai", "nebius", "anthropic"}
+        return None
+    if client.provider == "ollama" and not await _ollama_reachable():
+        return None
+    return client
 
 
 def _qualification_payload(row: EvidenceQualification) -> dict[str, object]:
-    payload = row.model_dump()
-    if row.created_at.tzinfo is None:
-        payload["created_at"] = row.created_at.replace(tzinfo=UTC).isoformat()
-    else:
-        payload["created_at"] = row.created_at.astimezone(UTC).isoformat()
-    return payload
+    return row.model_dump(mode="json")
 
 
 def _write_qualified_evidence_file(
-    report_path: str | None, rows: list[EvidenceQualification]
+    report_path: str | None, rows: list[EvidenceQualification], *, attempted: bool
 ) -> None:
     if not report_path:
+        return
+    if not rows and not attempted:
         return
     base = Path(report_path).parent
     ordered = sorted(
@@ -152,6 +151,27 @@ def _write_qualified_evidence_file(
         key=lambda item: (str(item.get("url", "")), int(item.get("id") or 0)),
     )
     (base / "qualified_evidence.json").write_text(canonical_json(ordered), encoding="utf-8")
+
+
+def _select_best_qualifications(
+    rows: list[EvidenceQualification], *, run_id: int, target_id: str
+) -> dict[str, EvidenceQualification]:
+    best: dict[str, EvidenceQualification] = {}
+    for row in rows:
+        existing = best.get(row.url)
+        if existing is None or row.confidence > existing.confidence:
+            if existing is not None:
+                logger.info(
+                    "Evidence qualification duplicate URL resolved by confidence target=%s run_id=%d url=%s old=%.3f new=%.3f",
+                    target_id,
+                    run_id,
+                    row.url,
+                    existing.confidence,
+                    row.confidence,
+                    extra={"target_id": target_id, "run_id": run_id},
+                )
+            best[row.url] = row
+    return best
 
 
 async def get_run_delta(run_id: int) -> list[dict]:
@@ -675,13 +695,20 @@ async def _run_target_pipeline(target: Target, run_id: int, log_ctx: dict) -> Ru
 
     evidence_items = [item for result in results for item in result.evidence]
     qualifications: list[EvidenceQualification] = []
-    if await _should_qualify(target, evidence_items):
-        qualifications = await qualify_evidence(target, run_id, evidence_items)
+    qualification_client = await _qualification_client(target, evidence_items)
+    qualification_attempted = qualification_client is not None
+    if qualification_attempted:
+        qualifications = await qualify_evidence(
+            target, run_id, evidence_items, client=qualification_client
+        )
+        qualifications = [row for row in qualifications if row.url]
         await persist_qualifications(qualifications)
         for row in qualifications:
             metrics.evidence_qualified_total.labels(target.id, row.category).inc()
 
-    qualification_by_url = {row.url: row for row in qualifications if row.url}
+    qualification_by_url = _select_best_qualifications(
+        qualifications, run_id=run_id, target_id=target.id
+    )
 
     # Normalize all results to STIX bundles, computing is_new in memory
     # BEFORE any DB write (Issue #8: only persist SeenObservable after
@@ -879,7 +906,9 @@ async def _run_target_pipeline(target: Target, run_id: int, log_ctx: dict) -> Ru
             if report_error:
                 run.error = f"{run.error}; {report_error}" if run.error else report_error
             if report_path is not None:
-                _write_qualified_evidence_file(report_path, qualifications)
+                _write_qualified_evidence_file(
+                    report_path, qualifications, attempted=qualification_attempted
+                )
                 # ADR-007: the manifest is the run's last file and its hash is
                 # stored in the same commit as the final status. A failure here
                 # leaves the run unsealed (counted, never read as tampering)

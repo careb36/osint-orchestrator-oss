@@ -170,7 +170,7 @@ _TOOL_CONFIDENCE: dict[CollectorName, int] = {
     CollectorName.AMASS: 70,
     CollectorName.TAVILY: 60,
 }
-_TAVILY_URL_IN_NOTE = re.compile(r"(?:^|\s)\|\s*url=([^|]+)")
+_TAVILY_URL_IN_NOTE = re.compile(r"\|\s*url=([^|]+)")
 
 
 # ── Observable → STIX SCO ─────────────────────────────────────────────────────

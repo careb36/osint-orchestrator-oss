@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -510,10 +512,11 @@ async def test_opencti_disabled_still_runs_qualification_and_synthesis(
     )
     monkeypatch.setattr(settings, "opencti_enabled", False)
 
-    async def _always_qualify(*_args, **_kwargs) -> bool:
-        return True
-
-    monkeypatch.setattr(pipeline_module, "_should_qualify", _always_qualify)
+    monkeypatch.setattr(
+        pipeline_module,
+        "_qualification_client",
+        lambda *_args, **_kwargs: asyncio.sleep(0, result=SimpleNamespace(provider="openai")),
+    )
 
     qualified = EvidenceQualification(
         run_id=1,
@@ -584,10 +587,11 @@ async def test_qualified_evidence_file_is_in_manifest_and_tampering_breaks_chain
     )
     monkeypatch.setattr(settings, "orchestrator_secret_key", key)
 
-    async def _always_qualify(*_args, **_kwargs) -> bool:
-        return True
-
-    monkeypatch.setattr(pipeline_module, "_should_qualify", _always_qualify)
+    monkeypatch.setattr(
+        pipeline_module,
+        "_qualification_client",
+        lambda *_args, **_kwargs: asyncio.sleep(0, result=SimpleNamespace(provider="openai")),
+    )
 
     async def _qualify(*_args, **_kwargs):
         return [

@@ -61,6 +61,7 @@ from orchestrator.scheduler import (
     start_scheduler,
 )
 from orchestrator.synthesizer.providers.openai_compat import preflight_configured_models
+from orchestrator.synthesizer.qualify import load_run_qualifications
 from orchestrator.targets import load_targets
 
 logger = logging.getLogger(__name__)
@@ -585,20 +586,15 @@ async def get_run_finding(run_id: int) -> dict[str, Any]:
     return record.to_api_dict()
 
 
-@router.get("/runs/{run_id}/evidence", response_model=list[dict[str, Any]], tags=["runs"])
-async def get_run_evidence(run_id: int) -> list[dict[str, Any]]:
+@router.get("/runs/{run_id}/evidence", response_model=list[EvidenceQualification], tags=["runs"])
+async def get_run_evidence(run_id: int) -> list[EvidenceQualification]:
     """Return evidence qualifications persisted for one run."""
     async with get_session() as session:
         run = await session.get(Run, run_id)
         if run is None:
             raise HTTPException(status_code=404, detail=t("run_not_found", run_id=run_id))
-        result = await session.exec(
-            select(EvidenceQualification)
-            .where(EvidenceQualification.run_id == run_id)
-            .order_by(EvidenceQualification.url.asc(), EvidenceQualification.id.asc())
-        )
-        rows = result.all()
-    return [row.model_dump() for row in rows]
+        rows = await load_run_qualifications(run_id, session=session)
+    return rows
 
 
 @router.get("/runs/{run_id}/manifest", response_model=dict[str, Any], tags=["runs"])

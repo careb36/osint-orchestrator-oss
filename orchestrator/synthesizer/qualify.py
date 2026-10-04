@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from orchestrator.config import settings
 from orchestrator.database import get_session
@@ -20,7 +21,7 @@ from orchestrator.models import (
     Run,
     Target,
 )
-from orchestrator.synthesizer.providers import get_client
+from orchestrator.synthesizer.providers import LLMClient, get_client
 from orchestrator.textsafe import flatten_untrusted
 
 logger = logging.getLogger(__name__)
@@ -87,7 +88,7 @@ def _build_user_prompt(target: Target, batch: list[EvidenceItem]) -> str:
 
 def _extract_json(raw: str) -> dict[str, Any] | None:
     try:
-        block = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
+        block = re.search(r"```(?:json)?\s*(\{.*\})\s*```", raw, re.DOTALL)
         if block:
             data = json.loads(block.group(1))
         else:
@@ -98,6 +99,14 @@ def _extract_json(raw: str) -> dict[str, Any] | None:
     except json.JSONDecodeError:
         return None
     return data if isinstance(data, dict) else None
+
+
+def _run_qualifications_query(run_id: int):
+    return (
+        select(EvidenceQualification)
+        .where(EvidenceQualification.run_id == run_id)
+        .order_by(EvidenceQualification.url.asc(), EvidenceQualification.id.asc())
+    )
 
 
 def _validated_rows(
@@ -148,7 +157,8 @@ def _validated_rows(
 
 
 async def _annotate_run_error(run_id: int, message: str) -> None:
-    async with get_session() as session:
+    session_factory = get_session
+    async with session_factory() as session:
         run = await session.get(Run, run_id)
         if run:
             run.error = f"{run.error}; {message}" if run.error else message
@@ -160,6 +170,8 @@ async def qualify_evidence(
     target: Target,
     run_id: int,
     items: list[EvidenceItem],
+    *,
+    client: LLMClient | None = None,
 ) -> list[EvidenceQualification]:
     """Classify web evidence in bounded batches; invalid rows are ignored."""
     if not settings.llm_qualify_enabled:
@@ -170,12 +182,13 @@ async def qualify_evidence(
     limited = items[:max_items]
     if not limited:
         return []
-    client = get_client(target)
+    client = client or get_client(target)
     if client is None:
         return []
     provider = client.provider
     model = client.model_for_route("fast")
     rows: list[EvidenceQualification] = []
+    failures: list[str] = []
     for start in range(0, len(limited), _BATCH_SIZE):
         batch = limited[start : start + _BATCH_SIZE]
         user_prompt = _build_user_prompt(target, batch)
@@ -201,15 +214,24 @@ async def qualify_evidence(
                 )
             )
         except Exception as exc:  # noqa: BLE001
+            failures.append(str(exc))
             logger.exception(
-                "Evidence qualification failed target=%s run_id=%d batch_start=%d error=%s",
+                "Evidence qualification failed target=%s run_id=%d batch_start=%d",
                 target.id,
                 run_id,
                 start,
-                exc,
-                extra={"target_id": target.id, "run_id": run_id},
+                extra={
+                    "target_id": target.id,
+                    "run_id": run_id,
+                    "error_detail": str(exc),
+                },
             )
-            await _annotate_run_error(run_id, f"qualification: {exc}")
+    if failures:
+        unique_failures = list(dict.fromkeys(failures))
+        message = unique_failures[0]
+        if len(unique_failures) > 1:
+            message = f"{message}; +{len(unique_failures) - 1} more"
+        await _annotate_run_error(run_id, f"qualification: {message}")
     return rows
 
 
@@ -222,12 +244,13 @@ async def persist_qualifications(rows: list[EvidenceQualification]) -> None:
         await session.commit()
 
 
-async def load_run_qualifications(run_id: int) -> list[EvidenceQualification]:
+async def load_run_qualifications(
+    run_id: int, *, session: AsyncSession | None = None
+) -> list[EvidenceQualification]:
     """Read persisted qualifications for one run."""
-    async with get_session() as session:
-        result = await session.exec(
-            select(EvidenceQualification)
-            .where(EvidenceQualification.run_id == run_id)
-            .order_by(EvidenceQualification.url.asc(), EvidenceQualification.id.asc())
-        )
-        return result.all()
+    if session is None:
+        async with get_session() as own_session:
+            result = await own_session.exec(_run_qualifications_query(run_id))
+            return result.all()
+    result = await session.exec(_run_qualifications_query(run_id))
+    return result.all()
