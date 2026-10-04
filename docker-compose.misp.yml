@@ -8,7 +8,9 @@
 #
 # The MISP_* passwords, MISP_KEY and CONNECTOR_MISP_ID are required (`:?`):
 # Compose stops with "required variable ... is missing a value" until they
-# are set in .env.
+# are set in .env. The checks carry no custom message on purpose: a
+# "set ... in .env" text next to a PASSWORD key reads as a hardcoded secret to
+# secret scanners.
 #
 # Usage:
 #   docker compose -f docker-compose.yml -f docker-compose.misp.yml --profile misp up -d
@@ -118,7 +120,7 @@ services:
       # Same as x-connector-env in docker-compose.yml (anchors do not cross files).
       OPENCTI_URL: "${OPENCTI_URL:-http://opencti:8080}"
       OPENCTI_TOKEN: "${OPENCTI_ADMIN_TOKEN}"
-      CONNECTOR_ID: "${CONNECTOR_MISP_ID:?set CONNECTOR_MISP_ID in .env}"  # fixed UUID per install
+      CONNECTOR_ID: "${CONNECTOR_MISP_ID:?}"  # fixed UUID per install
       CONNECTOR_NAME: "MISP"
       CONNECTOR_SCOPE: "misp"
       CONNECTOR_LOG_LEVEL: "error"
@@ -129,10 +131,10 @@ services:
       # MISP_SSL=true.
       MISP_URL: "${MISP_URL:-https://misp}"
       MISP_REFERENCE_URL: "${MISP_URL:-https://misp}"
-      MISP_KEY: "${MISP_KEY:?set MISP_KEY in .env}"   # API key from MISP admin UI
-      MISP_SSL_VERIFY: "false"
-      MISP_IMPORT_ONLY_PUBLISHED: "false"
-      MISP_IMPORT_TO_IDS_NO_SCORE: 40
+      MISP_KEY: "${MISP_KEY:?}"   # API key from MISP admin UI
+      MISP_SSL_VERIFY: "${MISP_SSL_VERIFY:-false}"
+      MISP_IMPORT_ONLY_PUBLISHED: "${MISP_IMPORT_ONLY_PUBLISHED:-false}"
+      MISP_IMPORT_TO_IDS_NO_SCORE: "${MISP_IMPORT_TO_IDS_NO_SCORE:-40}"
       MISP_SSL: "false"                                 # dev: skip TLS verify
       MISP_DATETIME_ATTRIBUTE: "timestamp"
       MISP_CREATE_REPORTS: "true"

@@ -55,6 +55,12 @@ from [SECURITY.md](SECURITY.md).
   (`-f docker-compose.yml -f docker-compose.misp.yml --profile misp`): Compose
   interpolates every service of the files it loads, so the required MISP
   variables blocked `docker compose up` on installs without MISP.
+  `MISP_SSL_VERIFY`, `MISP_IMPORT_ONLY_PUBLISHED` and
+  `MISP_IMPORT_TO_IDS_NO_SCORE` from `.env` now reach the connector; they were
+  hardcoded before.
+- `OPENCTI_ADMIN_PASSWORD` and `OPENCTI_ADMIN_TOKEN` are required (`:?`):
+  with the template comments no longer leaking into the values, a blank one
+  would otherwise boot OpenCTI with empty admin credentials.
 
 ### Removed
 
