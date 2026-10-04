@@ -954,7 +954,7 @@ valor de un observable ni un id de ejecución.
 | `alert_deliveries_pending` | — | Entregas de alertas a la espera de reintento |
 | `alert_deliveries_dead_letter` | — | Entregas de alertas aparcadas en la DLQ (requieren acción del operador) |
 | `synthesis_total` | `target_id`, `status` (`ok`, `skipped`, `failed`) | Intentos de síntesis LLM |
-| `llm_requests_total` | `provider`, `model`, `status` | Solicitudes al API LLM por proveedor (`anthropic`, `openai`, `nebius`, `ollama`), modelo y estado (`ok`, `http_429`, `http_5xx`, `timeout`, `error`, `schema_downgrade`) |
+| `llm_requests_total` | `provider`, `model`, `status` | Solicitudes al API LLM por proveedor (`anthropic`, `openai`, `nebius`, `ollama`), modelo y estado (`ok`, `http_429`, `http_5xx`, `timeout`, `error`, `schema_downgrade`). Una muestra por llamada al SDK: el único reintento interno del SDK de Anthropic no se muestrea. |
 | `llm_tokens_total` | `provider`, `model`, `direction` (`input`, `output`) | Uso de tokens LLM por proveedor y modelo, separado por dirección (prompt vs completion) |
 | `alerts_total` | `channel`, `status` | Eventos del ciclo de alertas (`sent`, `failed`, `retried`, `dlq`) |
 | `scheduled_jobs` | — | Jobs cron registrados en el scheduler |
@@ -1210,4 +1210,4 @@ Notas:
 - Las llamadas de síntesis usan la ruta de razonamiento.
 - Se solicita primero `response_format` con esquema JSON; si el proveedor lo rechaza (400/422) se repite la misma petición sin él, contada como `schema_downgrade` y no como intento fallido, y la respuesta pasa por el parser JSON tolerante.
 - Reintentos: hasta 3 intentos ante 408, 409, 429, cualquier 5xx y errores de transporte, respetando `Retry-After`, todo dentro de `LLM_TIMEOUT_SECONDS`: el presupuesto acota cada intento y cada espera de una llamada.
-- El hallazgo registra el proveedor y el modelo que realmente atendió la petición (`/runs/{id}/finding`).
+- El hallazgo registra el proveedor (`openai`, `nebius`, `anthropic`, `ollama`, el mismo valor que la etiqueta `provider` de las métricas) y el modelo que realmente atendió la petición (`/runs/{id}/finding`).

@@ -935,7 +935,7 @@ or a run id.
 | `alert_deliveries_pending` | — | Alert deliveries waiting for a retry |
 | `alert_deliveries_dead_letter` | — | Alert deliveries parked in the dead-letter queue (need operator action) |
 | `synthesis_total` | `target_id`, `status` (`ok`, `skipped`, `failed`) | LLM synthesis attempts |
-| `llm_requests_total` | `provider`, `model`, `status` | LLM API requests by provider (`anthropic`, `openai`, `nebius`, `ollama`), model and status (`ok`, `http_429`, `http_5xx`, `timeout`, `error`, `schema_downgrade`) |
+| `llm_requests_total` | `provider`, `model`, `status` | LLM API requests by provider (`anthropic`, `openai`, `nebius`, `ollama`), model and status (`ok`, `http_429`, `http_5xx`, `timeout`, `error`, `schema_downgrade`). One sample per SDK completion call: the Anthropic SDK's single internal retry is not sampled. |
 | `llm_tokens_total` | `provider`, `model`, `direction` (`input`, `output`) | LLM token usage by provider and model, split by prompt vs completion direction |
 | `alerts_total` | `channel`, `status` | Alert lifecycle events (`sent`, `failed`, `retried`, `dlq`) |
 | `scheduled_jobs` | — | Cron jobs registered in the scheduler |
@@ -1189,4 +1189,4 @@ Notes:
 - Synthesis requests use the reasoning route.
 - JSON-schema response format is requested first; a provider that rejects `response_format` (400/422) gets the same request once more without it, counted as `schema_downgrade` and not as a failed attempt, and the reply goes through the tolerant JSON parser.
 - Retries: up to 3 attempts on 408, 409, 429, any 5xx and transport errors, honouring `Retry-After`, all inside `LLM_TIMEOUT_SECONDS` — the budget bounds every attempt and backoff of one call.
-- The finding records the provider and the model that actually served the request (`/runs/{id}/finding`).
+- The finding records the provider (`openai`, `nebius`, `anthropic`, `ollama` — the same value as the metrics' `provider` label) and the model that actually served the request (`/runs/{id}/finding`).
