@@ -581,6 +581,9 @@ Every other endpoint requires an API key; see
 | `GET` | `/runs/{id}/report` | Markdown report for a completed run (`text/plain`) |
 | `GET` | `/runs/{id}/finding` | LLM-synthesized finding for a completed run |
 
+`GET /runs/{id}/finding` returns `new_since_last_run` and
+`suggested_pivots` as JSON arrays of strings (not JSON-encoded strings).
+
 Interactive docs are at `/docs` (OpenAPI at `/openapi.json`).
 
 **Run status** — `pending` → `running` → one of:

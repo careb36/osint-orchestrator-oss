@@ -50,6 +50,10 @@ from [SECURITY.md](SECURITY.md).
 - READMEs EN/ES re-synced: quick-start services list, SpiderFoot build
   provenance, missing LLM/Ollama caveat, `GET /` endpoint, SocialOSINT field
   reference.
+- `GET /runs/{id}/finding` now returns `new_since_last_run` and
+  `suggested_pivots` as JSON arrays (`list[str]`) instead of JSON-encoded
+  strings. Clients that were calling `json.loads` on those fields must stop
+  doing so.
 
 - MISP services moved to the `docker-compose.misp.yml` overlay
   (`-f docker-compose.yml -f docker-compose.misp.yml --profile misp`): Compose
