@@ -83,7 +83,7 @@ Fuente: [OpenCTI-Platform/docker](https://github.com/OpenCTI-Platform/docker):
 | SpiderFoot | ~512 MB |
 | Orchestrator | ~256 MB |
 | **Total (núcleo)** | **≥ 16 GB** (32 GB recomendado) |
-| Stack MISP (`--profile misp`) | +1,6 GB adicionales |
+| Stack MISP (`-f docker-compose.misp.yml --profile misp`) | +1,6 GB adicionales |
 | Servicio SocialOSINT (`--profile socialosint`) | +512 MB adicionales |
 | Engine de Amass (`--profile amass`) | +256 MB adicionales (más con fuerza bruta) |
 

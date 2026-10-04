@@ -63,7 +63,7 @@ def test_misp_connector_registered_in_opencti():
     The connector-misp service must appear as a registered connector in OpenCTI.
 
     Prerequisites:
-      - docker compose --profile misp up -d
+      - docker compose -f docker-compose.yml -f docker-compose.misp.yml --profile misp up -d
       - MISP fully initialised (first start can take 5-10 min)
       - MISP_KEY set in .env (API key from MISP admin UI)
       - connector-misp container running and connected to OpenCTI
