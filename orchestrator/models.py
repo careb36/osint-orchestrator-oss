@@ -450,7 +450,6 @@ class FindingRecord(SQLModel, table=True):
             )
 
         if value is None:
-            _log_invalid()
             return []
         try:
             decoded = json.loads(value)
