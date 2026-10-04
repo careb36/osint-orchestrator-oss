@@ -76,6 +76,10 @@ from [SECURITY.md](SECURITY.md).
   rows use the data in column 1 (HTML-unescaped) and the type in the last
   column. Default `SPIDERFOOT_MODULES` uses real module names
   (`sfp_dnsresolve,sfp_whois,sfp_sslcert`; `sfp_dns`/`sfp_ssl` do not exist).
+- `pycti` pinned to `6.8.11`, the `opencti/platform` tag: the open `>=6.2.0`
+  range resolved to pycti 7.x, whose `x_opencti_modified_at` input the 6.8
+  platform rejects, so every STIX Note (Tavily pages) failed to ingest. The
+  image now installs `libmagic1`, which pycti 6.x needs at import time.
 
 ## 2026-09-14
 
