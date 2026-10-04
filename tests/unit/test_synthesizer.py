@@ -395,6 +395,24 @@ async def test_timeout_annotates_run_error_and_returns_none(
     assert "synthesis" in run_db.error
 
 
+@pytest.mark.asyncio
+async def test_client_without_provider_member_is_a_failed_synthesis(
+    mem_db, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """synthesize() never raises: a client missing ``provider`` returns ``failed``."""
+
+    class LegacyClient:
+        async def complete(self, system, user, *, timeout, **_):
+            return json.dumps(_CANONICAL_FINDING)
+
+    import orchestrator.synthesizer.providers as prov_module
+
+    monkeypatch.setattr(prov_module, "get_client", lambda t: LegacyClient())
+    finding, status = await synthesize(_target(), 1, _make_report_data())
+    assert finding is None
+    assert status == "failed"
+
+
 # ─── Test 4: target.llm="local" always uses OllamaClient ─────────────────────
 
 

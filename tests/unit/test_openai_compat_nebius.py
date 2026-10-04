@@ -492,3 +492,30 @@ async def test_retry_log_carries_attempt_in_extra(
         await _client().complete("sys", "user", timeout=5)
     failed = next(r for r in caplog.records if "LLM request failed" in r.getMessage())
     assert failed.attempt == 1 and failed.max_attempts == 3 and failed.provider == "nebius"
+
+
+@pytest.mark.asyncio
+async def test_slow_schema_probe_exhausting_the_budget_is_a_timeout(
+    monkeypatch: pytest.MonkeyPatch, _sleeps: list[float]
+) -> None:
+    actions: list[object] = []
+    fake_sdk, state = _install_fake_openai(monkeypatch, actions)
+    clock = {"now": 100.0}
+    monkeypatch.setattr(openai_compat_module.time, "monotonic", lambda: clock["now"])
+
+    async def _slow_rejection(**payload):
+        state["payloads"].append(payload)
+        clock["now"] += 10.0
+        raise fake_sdk.APIStatusError(400, "response_format is not supported")
+
+    monkeypatch.setattr(
+        fake_sdk.AsyncOpenAI, "_create", lambda self, **payload: _slow_rejection(**payload)
+    )
+    labels = {"provider": "nebius", "model": settings.llm_model}
+    before_timeout = _metric_value(REQ_METRIC, status="timeout", **labels)
+
+    with pytest.raises(TimeoutError, match="budget"):
+        await _client().complete("sys", "user", timeout=5, response_schema={"type": "object"})
+
+    assert len(state["payloads"]) == 1  # the probe; no downgraded retry without budget
+    assert _metric_value(REQ_METRIC, status="timeout", **labels) - before_timeout == 1

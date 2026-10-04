@@ -24,7 +24,7 @@ _PROVIDER = "ollama"
 def _count(value: Any) -> int:
     try:
         return max(0, int(value or 0))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):  # OverflowError: json "Infinity"
         return 0
 
 

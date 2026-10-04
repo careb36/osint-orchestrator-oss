@@ -427,11 +427,12 @@ async def synthesize(
     if client is None:
         return None, "skipped"
 
-    # The same name the client puts in the metrics' ``provider`` label, so a
-    # finding joins with llm_requests_total (nebius and openai share a module).
-    provider_name = client.provider
-
     try:
+        # The same name the client puts in the metrics' ``provider`` label, so
+        # a finding joins with llm_requests_total (nebius and openai share a
+        # module). Inside the try: a client missing the protocol member is a
+        # synthesis failure, not an unhandled exception.
+        provider_name = client.provider
         history = await _fetch_history(target.id, run_id)
         user_prompt = _build_user_prompt(target, report_data, history)
 

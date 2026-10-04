@@ -217,15 +217,24 @@ class OpenAICompatClient:
             started = time.monotonic()
             remaining = deadline - started
             if remaining <= 0:
-                # Budget gone (a slow failure or a slow schema probe): never
-                # start a doomed request that would mask the real error.
+                # Budget gone before this attempt could start: never send a
+                # doomed request whose timeout would mask the real outcome.
                 if last_exc is not None:
                     raise last_exc
+                # Only a slow schema probe gets here (an ordinary failure
+                # raises inside its except block); report it as the timeout
+                # it is, not as the 400 that was deliberately not a failure.
+                record_request(self._provider_name, model, "timeout")
+                logger.warning(
+                    "LLM request budget exhausted after the schema probe: provider=%s model=%s",
+                    self._provider_name,
+                    model,
+                    extra={**log_extra, "status": "timeout"},
+                )
                 raise TimeoutError(f"LLM request budget of {timeout:.0f}s exhausted")
             try:
                 response = await client.chat.completions.create(**payload, timeout=remaining)
             except Exception as exc:  # noqa: BLE001
-                last_exc = exc
                 if "response_format" in payload and _rejects_json_schema(exc):
                     # Capability probe, not a failure: the request is repeated
                     # without the schema and the attempt counter is untouched.
@@ -240,6 +249,7 @@ class OpenAICompatClient:
                     )
                     continue
 
+                last_exc = exc
                 attempt += 1
                 duration_ms = int((time.monotonic() - started) * 1000)
                 status = _error_status_label(exc)
