@@ -106,7 +106,7 @@ services:
 
   # OpenCTI ↔ MISP synchronisation via the official connector.
   # https://github.com/OpenCTI-Platform/connectors/tree/master/external-import/misp
-  # Version MUST match the opencti/platform version above (6.8.11).
+  # Version MUST match the opencti/platform tag in docker-compose.yml (6.8.11).
   connector-misp:
     image: opencti/connector-misp:6.8.11
     profiles: ["misp"]
