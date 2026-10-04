@@ -68,11 +68,16 @@ What a visitor can do, without an API key:
 | `POST /demo/targets/{id}/run` | Start a run; `429` with `Retry-After` over the daily limits |
 | `GET /demo/targets/{id}/runs`, `GET /demo/runs/{id}` | Run list and status |
 | `GET /demo/runs/{id}/evidence` | Each web result with its category, relevance, confidence and rationale |
-| `GET /demo/runs/{id}/finding`, `/report` | Summary and report **without** the risk level and its justification, with a disclaimer |
+| `GET /demo/runs/{id}/finding` | Which model synthesised the run and how long it took; the synthesis text is not public |
+| `GET /demo/runs/{id}/report` | The report with a disclaimer and **without** its synthesis section |
 | `GET /demo/runs/{id}/manifest`, `GET /demo/targets/{id}/chain/verify` | The signed manifest and the chain check |
 
 Guards:
 
+- **No model verdict in public.** The synthesis (summary, risk level,
+  justification, pivots) is free model prose about a named entity: it is
+  available to the operator with the API key and never served by `/demo`. The
+  public page shows the qualified evidence, where every row links its source.
 - **Allowlist only.** Runs of any other target are invisible to the `/demo`
   routes; every other route still needs the API key.
 - **Daily limits** per visitor (`DEMO_MAX_RUNS_PER_IP_PER_DAY`) and overall

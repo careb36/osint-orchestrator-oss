@@ -39,7 +39,7 @@
       <tbody id="evidence"></tbody>
     </table>
 
-    <h2>Summary</h2>
+    <h2>Synthesis</h2>
     <p id="summary" class="muted"></p>
 
     <h2>Report</h2>
@@ -74,7 +74,10 @@
           tr.append(cell(row.category), cell(row.relevance), cell(Number(row.confidence).toFixed(2)), source, cell(row.rationale));
           el("evidence").appendChild(tr);
         }
-        try { el("summary").textContent = (await api(`/demo/runs/${runId}/finding`)).summary; } catch (e) { el("summary").textContent = "—"; }
+        try {
+          const finding = await api(`/demo/runs/${runId}/finding`);
+          el("summary").textContent = `Written by ${finding.model} (${finding.provider}) in ${(finding.duration_ms / 1000).toFixed(1)} s. The synthesis and its risk assessment are shown to the operator only; this page shows the evidence it was built on.`;
+        } catch (e) { el("summary").textContent = "No synthesis for this run."; }
         try { el("report").textContent = await api(`/demo/runs/${runId}/report`); } catch (e) { el("report").textContent = "—"; }
       }
       async function loadRuns(selectId) {

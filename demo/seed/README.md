@@ -4,10 +4,10 @@ Runs shown by the public demo before any visitor starts one. This folder ships
 empty: seed files are produced by the maintainer from real runs.
 
 - One JSON file per run, written by `scripts/export_demo_seed.py`. A seed holds
-  the run's metadata, the finding **without** `risk_level` and
-  `risk_justification`, the evidence qualifications, and the run's Markdown and
-  JSON files with the report's risk line removed. It holds no signature, no
-  key and no raw model response.
+  the run's metadata, the evidence qualifications, the run's Markdown and JSON
+  files with the report's synthesis section removed, and which model
+  synthesised the run. It holds no synthesis text, no risk assessment, no
+  signature, no key and no raw model response.
 - On startup with `DEMO_MODE=true`, the files are imported once, when no
   allowlisted target has a run yet. Each run gets a new id and directory and is
   sealed again with this deployment's `ORCHESTRATOR_SECRET_KEY`, so it verifies

@@ -451,23 +451,44 @@ def test_demo_outputs_never_include_risk_level_or_justification(
             (run_id, json.dumps(["pivot"])),
         )
     report = Path(report_path)
+    head = report.read_text(encoding="utf-8").split("## Synthesis")[0]
     report.write_text(
-        report.read_text(encoding="utf-8") + "\n**Risk**: `critical` — SECRET-JUSTIFICATION\n",
+        head
+        + "## Synthesis\nSECRET-SUMMARY about the entity.\n\n"
+        + "**Risk**: `critical` — SECRET-JUSTIFICATION\n\n**Suggested pivots**:\n- SECRET-PIVOT\n",
         encoding="utf-8",
     )
 
     finding = client.get(f"/demo/runs/{run_id}/finding")
     assert finding.status_code == 200
-    assert finding.json()["summary"] == "Neutral summary."
-    assert finding.json()["suggested_pivots"] == ["pivot"]
+    # Only that a synthesis exists, by which model, and how long it took.
+    assert set(finding.json()) == {
+        "run_id",
+        "target_id",
+        "provider",
+        "model",
+        "duration_ms",
+        "generated_at",
+    }
+    assert finding.json()["provider"] == "nebius"
     public_report = client.get(f"/demo/runs/{run_id}/report")
     assert public_report.status_code == 200
     assert public_report.text.startswith("> Demonstration on public information.")
+    assert "## Synthesis\n_The model's synthesis is not published" in public_report.text
+    assert "## Collector status" in public_report.text or "example.com" in public_report.text
 
     for response in (finding, public_report, client.get(f"/demo/runs/{run_id}")):
-        for forbidden in ("risk_level", "risk_justification", "SECRET-JUSTIFICATION", "critical"):
+        for forbidden in (
+            "risk_level",
+            "risk_justification",
+            "summary",
+            "suggested_pivots",
+            "Neutral summary",
+            "SECRET-",
+            "critical",
+            "RAW-MODEL-OUTPUT",
+        ):
             assert forbidden not in response.text
-    assert "RAW-MODEL-OUTPUT" not in finding.text
     # The operator, with the API key, still gets the full finding.
     full = client.get(f"/runs/{run_id}/finding", headers={"X-API-Key": API_KEY}).json()
     assert full["risk_level"] == "critical"
@@ -521,7 +542,16 @@ async def test_seed_import_is_idempotent(
         run_dir=source_dir,
     )
     # The seed carries no risk assessment, signature, raw output or error text.
-    for forbidden in ("risk_level", "because", "hmac-sha256", "RAW", "internal detail", "**Risk**"):
+    for forbidden in (
+        "risk_level",
+        "because",
+        "hmac-sha256",
+        "RAW",
+        "internal detail",
+        "**Risk**",
+        "Summary.",
+        "suggested_pivots",
+    ):
         assert forbidden not in seed_text
     seed_dir = tmp_path / "seed"
     seed_dir.mkdir()
@@ -540,7 +570,8 @@ async def test_seed_import_is_idempotent(
     assert len(runs) == 1
     assert runs[0].manifest_sha256 is not None
     assert Path(runs[0].report_path).parent.name == f"run-{runs[0].id}"
-    assert (finding.risk_level, finding.risk_justification) == ("unknown", "")
+    assert (finding.summary, finding.risk_level, finding.risk_justification) == ("", "unknown", "")
+    assert (finding.provider, finding.model) == ("nebius", "m")
     assert (verdict["ok"], verdict["checked"]) == (True, 1)
 
 

@@ -172,6 +172,10 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "es": "La demo alcanzó su límite diario de investigaciones; vuelva a intentar mañana",
         "en": "The demo reached its daily limit of investigations; try again tomorrow",
     },
+    "demo.synthesis_withheld": {
+        "es": "_La síntesis del modelo no se publica en la demo; está disponible para el operador._",
+        "en": "_The model's synthesis is not published in the demo; it is available to the operator._",
+    },
     "demo.disclaimer": {
         "es": (
             "Demostración con información pública. Los resultados se generan automáticamente, "

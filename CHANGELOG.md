@@ -14,8 +14,8 @@ from [SECURITY.md](SECURITY.md).
 - Demo mode (`DEMO_MODE=true`, `Dockerfile.demo`, `docker-compose.demo.yml`):
   public `/demo` page and routes restricted to an allowlist
   (`demo/targets.demo.yaml`), per-visitor and global daily run limits, daily
-  Tavily and LLM call budgets, views without `risk_level` /
-  `risk_justification`, startup check, seed import (`demo/seed/`) and
+  Tavily and LLM call budgets, views without the model synthesis (no summary,
+  risk level or justification), startup check, seed import (`demo/seed/`) and
   `scripts/export_demo_seed.py`. Deployment notes in `docs/deploy.md`.
 - Evidence qualification on the fast LLM route (`LLM_QUALIFY_ENABLED`,
   `LLM_QUALIFY_MAX_ITEMS`): each Tavily result is classified (category,

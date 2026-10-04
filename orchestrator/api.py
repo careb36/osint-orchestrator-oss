@@ -176,7 +176,7 @@ _OPENAPI_TAGS = [
     {
         "name": "demo",
         "description": "Public demo (DEMO_MODE=true): allowlisted targets, daily limits, "
-        "views without the risk assessment.",
+        "views without the model's synthesis.",
     },
 ]
 
@@ -654,7 +654,7 @@ async def verify_target_chain_endpoint(target_id: str) -> dict[str, Any]:
 
 # ─── Public demo (DEMO_MODE=true only) ───────────────────────────────────────
 # No API key: visitors get the allowlist, a rate-limited run trigger and
-# read-only views of demo runs without the risk assessment. Every route answers
+# read-only views of demo runs without the model's synthesis. Every route answers
 # 404 when demo mode is off, and only for allowlisted targets when it is on.
 
 
@@ -769,7 +769,7 @@ async def demo_run_evidence(run_id: int) -> list[dict[str, Any]]:
 
 @app.get("/demo/runs/{run_id}/finding", tags=["demo"])
 async def demo_run_finding(run_id: int) -> dict[str, Any]:
-    """The synthesised finding without its risk level and justification."""
+    """Which model synthesised the run and how long it took; the text is not public."""
     await _demo_run_or_404(run_id)
     async with get_session() as session:
         result = await session.exec(select(FindingRecord).where(FindingRecord.run_id == run_id))
@@ -781,7 +781,7 @@ async def demo_run_finding(run_id: int) -> dict[str, Any]:
 
 @app.get("/demo/runs/{run_id}/report", response_class=PlainTextResponse, tags=["demo"])
 async def demo_run_report(run_id: int) -> str:
-    """The run's Markdown report with a disclaimer and without the risk line."""
+    """The run's Markdown report with a disclaimer and without the synthesis section."""
     run, target = await _demo_run_or_404(run_id)
     path = Path(run.report_path) if run.report_path else None
     if path is None or not path.is_file():

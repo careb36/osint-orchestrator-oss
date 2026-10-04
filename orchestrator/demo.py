@@ -3,8 +3,8 @@
 Everything here is inert unless ``DEMO_MODE=true``. In demo mode an anonymous
 visitor can only start runs on the operator's allowlist of targets, within a
 per-IP and a global daily limit, and every Tavily and LLM call is drawn from a
-daily budget. Public views never carry ``risk_level`` or
-``risk_justification``.
+daily budget. Public views never carry the model's synthesis: no summary, no
+``risk_level``, no ``risk_justification``.
 """
 
 from __future__ import annotations
@@ -38,7 +38,6 @@ from orchestrator.targets import load_targets
 logger = logging.getLogger(__name__)
 
 _DEFAULT_SECRET_KEY = "insecure-dev-key"
-_RISK_FIELDS = frozenset({"risk_level", "risk_justification"})
 _GLOBAL = "global"
 _COUNTER_RETENTION_DAYS = 2
 BudgetKind = Literal["tavily", "llm"]
@@ -258,15 +257,6 @@ async def consume_budget(kind: BudgetKind) -> bool:
 # ─── Public views (never carry the risk assessment) ───────────────────────────
 
 
-def strip_risk_fields(value: Any) -> Any:
-    """Recursively drop ``risk_level`` / ``risk_justification`` from a payload."""
-    if isinstance(value, dict):
-        return {k: strip_risk_fields(v) for k, v in value.items() if k not in _RISK_FIELDS}
-    if isinstance(value, list):
-        return [strip_risk_fields(item) for item in value]
-    return value
-
-
 def public_target(target: Target) -> dict[str, Any]:
     """What a visitor may know about an allowlisted target."""
     return {
@@ -289,19 +279,43 @@ def public_run(run: Run) -> dict[str, Any]:
     }
 
 
+_PUBLIC_FINDING_FIELDS = ("run_id", "target_id", "provider", "model", "duration_ms", "generated_at")
+_SYNTHESIS_HEADINGS = ("## Síntesis", "## Synthesis")
+
+
 def public_finding(record: FindingRecord) -> dict[str, Any]:
-    """The finding without its risk fields and without the raw model response."""
-    payload = strip_risk_fields(record.to_api_dict())
-    payload.pop("raw_response", None)
-    return payload
+    """That a synthesis exists, which model wrote it and how long it took.
+
+    The synthesis itself (summary, risk level, justification, pivots) is free
+    model prose about a named entity; it is for the operator, never public.
+    The public page shows the qualified evidence instead, where every row is
+    tied to its source.
+    """
+    payload = record.to_api_dict()
+    return {key: payload.get(key) for key in _PUBLIC_FINDING_FIELDS}
+
+
+def _without_synthesis(markdown: str, notice: str) -> str:
+    """The report with its synthesis section replaced by *notice*."""
+    kept: list[str] = []
+    skipping = False
+    for line in markdown.splitlines():
+        if line.startswith(_SYNTHESIS_HEADINGS):
+            skipping = True
+            kept.extend([line, notice])
+            continue
+        if skipping and line.startswith("## "):
+            skipping = False
+        if not skipping:
+            kept.append(line)
+    return "\n".join(kept) + "\n"
 
 
 def public_report(markdown: str, language: str | None) -> str:
-    """The report as served publicly: disclaimer first, risk lines removed."""
-    risk_prefixes = ("**Riesgo**", "**Risk**")
-    kept = [line for line in markdown.splitlines() if not line.startswith(risk_prefixes)]
-    disclaimer = t("demo.disclaimer", language=resolve_language(language))
-    return f"> {disclaimer}\n\n" + "\n".join(kept) + "\n"
+    """The report as served publicly: disclaimer first, no synthesis section."""
+    lang = resolve_language(language)
+    body = _without_synthesis(markdown, t("demo.synthesis_withheld", language=lang))
+    return f"> {t('demo.disclaimer', language=lang)}\n\n{body}"
 
 
 # ─── Seed data ────────────────────────────────────────────────────────────────
@@ -383,10 +397,9 @@ async def _import_seed_run(seed: dict[str, Any], target: Target) -> None:
                 FindingRecord(
                     run_id=run_id,
                     target_id=target.id,
-                    summary=finding.get("summary", ""),
-                    new_since_last_run=json.dumps(finding.get("new_since_last_run") or []),
-                    suggested_pivots=json.dumps(finding.get("suggested_pivots") or []),
-                    # Seeds never carry a risk assessment (public data set).
+                    # Seeds carry no synthesis text and no risk assessment
+                    # (public data set): only which model ran and for how long.
+                    summary="",
                     risk_level="unknown",
                     risk_justification="",
                     provider=finding.get("provider", ""),
@@ -458,16 +471,13 @@ def export_seed(
             continue
         text = item.read_text(encoding="utf-8")
         if item.name == "report.md":
-            text = "\n".join(
-                line
-                for line in text.splitlines()
-                if not line.startswith(("**Riesgo**", "**Risk**"))
-            )
+            text = _without_synthesis(text, "_Synthesis not included in the public data set._")
         files[item.name] = text
     clean_finding = None
     if finding:
-        clean_finding = strip_risk_fields(dict(finding))
-        clean_finding.pop("raw_response", None)
+        clean_finding = {
+            key: finding.get(key) for key in ("provider", "model", "duration_ms", "generated_at")
+        }
     seed = {
         "seed_version": SEED_VERSION,
         "run": {
