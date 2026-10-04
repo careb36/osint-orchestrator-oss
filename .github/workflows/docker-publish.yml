@@ -101,18 +101,19 @@ jobs:
 
           health_ok=0
           attempt=1
+          # Retry for up to 60s (30 attempts, 2s apart).
           while [ "${attempt}" -le 30 ]; do
+            if [ "$(docker inspect -f '{{.State.Running}}' "${cid}" 2>/dev/null || echo false)" != "true" ]; then
+              echo "Smoke container exited before /health reported status=ok"
+              docker logs "${cid}" || true
+              exit 1
+            fi
             if response="$(curl -fsS http://127.0.0.1:18080/health)"; then
               if python -c "import json, sys; payload=json.loads(sys.argv[1]); sys.exit(0 if payload.get('status') == 'ok' else 1)" "${response}"; then
                 echo "${response}"
                 health_ok=1
                 break
               fi
-            fi
-            if [ "$(docker inspect -f '{{.State.Running}}' "${cid}" 2>/dev/null || echo false)" != "true" ]; then
-              echo "Smoke container exited before /health reported status=ok"
-              docker logs "${cid}" || true
-              exit 1
             fi
             sleep 2
             attempt=$((attempt + 1))
