@@ -18,7 +18,6 @@ html,
 body,
 #root {
   margin: 0;
-  min-height: 100%;
   min-height: 100vh;
   background: linear-gradient(180deg, #07131f 0%, #10253c 100%);
 }
@@ -204,72 +203,3 @@ a {
     justify-content: space-between;
   }
 }
-
-## Accessibility and responsiveness
-
-- [ ] Content structure uses semantic headings and navigation landmarks.
-- [ ] Key actions and labels remain legible on narrow screens.
-- [ ] Error and warning states are visible and understandable without context.
-
-## Ready for follow-on slices
-
-- [ ] New views can be added without changing the entire application shell.
-- [ ] Query patterns are consistent and support future stale/error handling.
-- [ ] Product decisions are documented so design and engineering stay aligned.
-EOF
-cat > ui/README.md <<'EOF'
-# Frontend scaffold
-
-This directory contains the React + TypeScript baseline for the OSINT Orchestrator UI.
-
-## Local development
-
-```bash
-cd ui
-npm install
-npm run dev
-```
-
-## Quality gates
-
-```bash
-cd ui
-npm run lint
-npm run test:run
-npm run build
-```
-
-The app expects the backend API at `/api` by default, which can be overridden with `VITE_API_BASE_URL`.
-EOF
-cat > .github/pull_request_template.md <<'EOF'
-# Summary
-
-<!-- What changed and why? -->
-
-This PR adds the initial UI scaffold for the OSINT Orchestrator: a React + TypeScript app shell, router, typed API client and a shared query foundation. It also adds a UX baseline document set and CI jobs for lint, unit tests and production builds.
-
-## Validation
-
-<!-- Commands executed and key output -->
-
-### UI checks
-
-```bash
-cd ui
-npm install
-npm run lint
-npm run test:run
-npm run build
-```
-
-## Documentation impact (required)
-
-- [x] docs were updated.
-- [x] API or operator-facing changes were reflected in `docs/` (and in both READMEs when the overview changes).
-- [ ] New/changed settings were reflected in `.env.example`.
-
-### Documentation notes
-
-- Added `ui/PRODUCT_BRIEF.md` and `ui/UX_CHECKLIST.md` to document the UI phase goals and acceptance criteria.
-- Updated the CI workflow to run frontend lint, test and build checks.
-EOF

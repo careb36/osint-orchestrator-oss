@@ -1,7 +1,6 @@
 import type { HealthStatus, RunSummary, TargetSummary } from '../types';
 
-const API_BASE_URL = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env
-  ?.VITE_API_BASE_URL ?? '/api';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api';
 
 class ApiError extends Error {
   constructor(
@@ -20,12 +19,12 @@ async function request<T>(path: string): Promise<T> {
     },
   });
 
-  if (!response.ok) {
-    throw new ApiError(`Request failed with status ${response.status}`, response.status);
-  }
-
   if (response.status === 204) {
     return undefined as T;
+  }
+
+  if (!response.ok) {
+    throw new ApiError(`Request failed with status ${response.status}`, response.status);
   }
 
   return (await response.json()) as T;

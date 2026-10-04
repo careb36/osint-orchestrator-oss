@@ -18,7 +18,7 @@ function AppShell() {
         </div>
 
         <nav className="nav" aria-label="Main navigation">
-          <NavLink to="/">Overview</NavLink>
+          <NavLink to="/" end>Overview</NavLink>
           <NavLink to="/targets">Targets</NavLink>
           <NavLink to="/runs">Runs</NavLink>
         </nav>
