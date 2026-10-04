@@ -86,10 +86,12 @@ jobs:
 
       - name: Smoke-test /health
         if: github.event_name == 'pull_request'
+        env:
+          ORCHESTRATOR_API_KEY: test-token
         run: |
           set -euo pipefail
           cid="$(docker run -d \
-            -e ORCHESTRATOR_API_KEY=test-token \
+            -e ORCHESTRATOR_API_KEY \
             -p 18080:8000 \
             osint-orchestrator:smoke)"
           cleanup() {
@@ -98,7 +100,7 @@ jobs:
           trap cleanup EXIT
 
           health_ok=0
-          for _ in $(seq 1 30); do
+          for i in $(seq 1 30); do
             if response="$(curl -fsS http://127.0.0.1:18080/health)"; then
               if python -c "import json, sys; payload=json.loads(sys.argv[1]); sys.exit(0 if payload.get('status') == 'ok' else 1)" "${response}"; then
                 echo "${response}"
