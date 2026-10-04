@@ -73,7 +73,16 @@ def _get_collectors(target: Target) -> list[BaseCollector]:
     if target.collectors.amass.enabled:
         collectors.append(AmassCollector(target))
     if target.collectors.tavily.enabled:
-        collectors.append(TavilyCollector(target))
+        if settings.tavily_max_calls_per_run > 0:
+            collectors.append(TavilyCollector(target))
+        else:
+            # TAVILY_MAX_CALLS_PER_RUN=0 is the operator's off switch: skip the
+            # collector instead of recording a failure on every run.
+            logger.info(
+                "Tavily skipped: TAVILY_MAX_CALLS_PER_RUN=0 target=%s",
+                target.id,
+                extra={"target_id": target.id, "collector": CollectorName.TAVILY.value},
+            )
     return collectors
 
 
