@@ -6,6 +6,10 @@
 # below would otherwise block `docker compose up` for every install that does
 # not use MISP.
 #
+# The MISP_* passwords, MISP_KEY and CONNECTOR_MISP_ID are required (`:?`):
+# Compose stops with "required variable ... is missing a value" until they
+# are set in .env.
+#
 # Usage:
 #   docker compose -f docker-compose.yml -f docker-compose.misp.yml --profile misp up -d
 #
@@ -26,8 +30,8 @@ services:
     environment:
       MYSQL_DATABASE: misp
       MYSQL_USER: misp
-      MYSQL_PASSWORD: "${MISP_MYSQL_PASSWORD:?set MISP_MYSQL_PASSWORD in .env}"
-      MYSQL_ROOT_PASSWORD: "${MISP_MYSQL_ROOT_PASSWORD:?set MISP_MYSQL_ROOT_PASSWORD in .env}"
+      MYSQL_PASSWORD: "${MISP_MYSQL_PASSWORD:?}"
+      MYSQL_ROOT_PASSWORD: "${MISP_MYSQL_ROOT_PASSWORD:?}"
     volumes:
       - misp-db-data:/var/lib/mysql
     healthcheck:
@@ -79,13 +83,13 @@ services:
       MISP_BASE_URL: "${MISP_BASE_URL:-https://localhost:${MISP_PORT:-8443}}"
       ADMIN_EMAIL: "${MISP_ADMIN_EMAIL:-admin@example.com}"
       MISP_ADMIN_EMAIL: "${MISP_ADMIN_EMAIL:-admin@example.com}"
-      ADMIN_PASSWORD: "${MISP_ADMIN_PASSWORD:?set MISP_ADMIN_PASSWORD in .env}"
-      MISP_ADMIN_PASSPHRASE: "${MISP_ADMIN_PASSWORD:?set MISP_ADMIN_PASSWORD in .env}"
+      ADMIN_PASSWORD: "${MISP_ADMIN_PASSWORD:?}"
+      MISP_ADMIN_PASSPHRASE: "${MISP_ADMIN_PASSWORD:?}"
       # Database (MariaDB, not MySQL)
       MYSQL_HOST: misp-db
       MYSQL_DATABASE: misp
       MYSQL_USER: misp
-      MYSQL_PASSWORD: "${MISP_MYSQL_PASSWORD:?set MISP_MYSQL_PASSWORD in .env}"
+      MYSQL_PASSWORD: "${MISP_MYSQL_PASSWORD:?}"
       # Redis (dedicated — not shared with OpenCTI). Explicitly set the host so
       # the container entrypoint does not fall back to the shared OpenCTI Redis.
       # The derived image prevents an empty password from falling back to
