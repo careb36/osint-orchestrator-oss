@@ -290,7 +290,7 @@ class AlertsConfig(BaseModel):
 
 
 # Target.id names files and directories under report_dir
-# (daily_reports/<date>/<id>/report.md), so it must be a plain slug: no path
+# (daily_reports/<date>/<id>/run-<run_id>/report.md), so it must be a plain slug: no path
 # separators, no whitespace, nothing a shell or a renderer would interpret.
 _TARGET_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
@@ -357,6 +357,7 @@ class Run(SQLModel, table=True):
     new_observables: int = 0  # count of net-new observables vs prior run
     error: str | None = None
     report_path: str | None = None
+    manifest_sha256: str | None = SQLField(default=None, index=True, nullable=True)
 
 
 class SeenObservable(SQLModel, table=True):
