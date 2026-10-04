@@ -6,11 +6,24 @@ All settings are documented in .env.example.
 
 from __future__ import annotations
 
+import os
+
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    DotEnvSettingsSource,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
 
 # Nebius Token Factory OpenAI-compatible endpoint (default for NEBIUS_BASE_URL).
 NEBIUS_DEFAULT_BASE_URL = "https://api.tokenfactory.nebius.com/v1"
+
+
+def _bootstrap_env_file() -> str | None:
+    """Resolve the dotenv path from ORCHESTRATOR_ENV_FILE (empty disables dotenv)."""
+    env_file = os.getenv("ORCHESTRATOR_ENV_FILE", ".env")
+    return env_file or None
 
 
 class Settings(BaseSettings):
@@ -23,11 +36,34 @@ class Settings(BaseSettings):
     stack overrides them with container-network values via ``.env``.
     """
 
+    # Bootstrap dotenv path for settings loading. ORCHESTRATOR_ENV_FILE is read
+    # directly from the process environment (default: ".env"), and an empty
+    # value disables dotenv loading entirely.
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=None,
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        return (
+            init_settings,
+            env_settings,
+            DotEnvSettingsSource(
+                settings_cls,
+                env_file=_bootstrap_env_file(),
+                env_file_encoding=settings_cls.model_config.get("env_file_encoding"),
+            ),
+            file_secret_settings,
+        )
 
     # OpenCTI
     opencti_url: str = "http://localhost:8080"

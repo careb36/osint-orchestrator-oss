@@ -24,6 +24,10 @@ from it in the same breath.
    disabled and only hold because no `.env` exists in the working directory;
    a developer with a real `.env` in the repo root would see spurious 401s.
    Tests that exercise auth set the key explicitly.
+
+3. `ORCHESTRATOR_ENV_FILE` pinned empty. Unit tests must never read a
+   developer's local `.env`; this keeps outcomes identical across machines
+   even when local files set optional LLM provider/model keys.
 """
 
 from __future__ import annotations
@@ -36,6 +40,7 @@ import tempfile
 _TEST_DB_DIR = tempfile.mkdtemp(prefix="osint-orchestrator-tests-")
 os.environ["ORCHESTRATOR_DATABASE_URL"] = f"sqlite+aiosqlite:///{_TEST_DB_DIR}/orchestrator-test.db"
 os.environ.setdefault("ORCHESTRATOR_API_KEY", "")
+os.environ["ORCHESTRATOR_ENV_FILE"] = ""
 
 import pytest  # noqa: E402
 import sqlalchemy.ext.asyncio as _sa_asyncio  # noqa: E402
