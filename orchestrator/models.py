@@ -107,13 +107,17 @@ class CollectorResult(BaseModel):
 class CollectorConfig(BaseModel):
     """Per-collector block under ``collectors:`` in targets.yaml.
 
-    One flat schema shared by all four collectors; each reads only its own
+    One flat schema shared by all five collectors; each reads only its own
     keys (openosint: ``investigation_type`` + budget keys, spiderfoot:
     ``modules`` + ``timeout_seconds``, socialosint: ``usernames``,
     ``platforms`` + ``timeout_seconds``, amass: ``active``, ``brute``,
     ``include``, ``exclude``, ``progress_timeout_minutes`` +
-    ``timeout_seconds``). The full field contract is documented in the README
-    "Target Configuration" section.
+    ``timeout_seconds``, tavily: ``search_depth``, ``max_results``,
+    ``include_domains``, ``exclude_domains``, ``include_answer``,
+    ``max_calls_per_run`` + ``timeout_seconds``). A field must be declared
+    once: a repeated name silently replaces the earlier default for every
+    collector. The full field contract is documented in the README "Target
+    Configuration" section.
     """
 
     enabled: bool = True
@@ -153,14 +157,15 @@ class CollectorConfig(BaseModel):
     # bound for the whole collector run.
     progress_timeout_minutes: int = Field(default=10, ge=1)
 
-    # tavily: search query templates and request limits. Disabled by default.
-    max_results: int = 10
+    # tavily: request limits. ``timeout_seconds`` (declared above) is the
+    # wall-clock budget of the whole collector run. Both caps are also clamped
+    # by the global TAVILY_MAX_RESULTS / TAVILY_MAX_CALLS_PER_RUN settings.
+    max_results: int = Field(default=5, ge=1, le=20)
     search_depth: str = "basic"
     include_domains: list[str] = Field(default_factory=list)
     exclude_domains: list[str] = Field(default_factory=list)
     include_answer: bool = False
-    max_calls_per_run: int = 3
-    timeout_seconds: int = 120
+    max_calls_per_run: int = Field(default=3, ge=1, le=20)
 
 
 def _socialosint_default_timeout() -> int:
@@ -209,12 +214,6 @@ class CollectorSet(BaseModel):
         default_factory=lambda: CollectorConfig(
             enabled=False,
             timeout_seconds=_tavily_default_timeout(),
-            max_results=10,
-            search_depth="basic",
-            include_domains=[],
-            exclude_domains=[],
-            include_answer=False,
-            max_calls_per_run=3,
         )
     )
 

@@ -1,41 +1,83 @@
-"""Tavily collector — OPT-IN web research for authorised targets.
+"""
+Tavily collector — opt-in web research for authorised targets.
 
-This collector uses the Tavily Search API to ask brief, accountable research
-questions against a monitored target. It never raises: every failure is mapped to
-``CollectorResult(success=False, error=...)`` so a bad API key or a transient 429
-leaves the run partial instead of crashing the entire pipeline.
+The collector asks a small, fixed set of due-diligence questions about the
+target's domain through the Tavily Search API and turns the answers into
+``url`` observables plus one note per result. It is off unless a target sets
+``collectors.tavily.enabled: true`` and ``TAVILY_API_KEY`` is configured.
+
+Bounds, all enforced here rather than trusted to the provider:
+
+- ``max_calls_per_run`` (per target, clamped by ``TAVILY_MAX_CALLS_PER_RUN``)
+  caps the number of search requests.
+- ``max_results`` (per target, clamped by ``TAVILY_MAX_RESULTS``) caps the
+  results requested and kept per query.
+- ``timeout_seconds`` is the wall-clock budget for the whole collector run,
+  retries and backoff included; each request gets the remaining budget.
+- Retries happen only on 429, 5xx and transport errors, with exponential
+  backoff. Any other 4xx (bad key, bad payload) fails the query at once.
+
+Failure policy (collector contract): never raises. Every failure is returned
+as ``CollectorResult(success=False, error=...)``.
 """
 
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
-from collections.abc import Iterable
+import re
+from collections.abc import Awaitable, Callable, Iterable
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
 from orchestrator.collectors import BaseCollector
 from orchestrator.config import settings
+from orchestrator.i18n import resolve_language
 from orchestrator.models import CollectorName, CollectorResult, Observable
+from orchestrator.textsafe import flatten_untrusted
 
 logger = logging.getLogger(__name__)
 
-_QUERY_TEMPLATES = {
+TAVILY_SEARCH_URL = "https://api.tavily.com/search"
+
+# Three templates per language so the default ``max_calls_per_run`` (3) covers
+# the whole set; raising the cap does not change coverage.
+_QUERY_TEMPLATES: dict[str, list[str]] = {
     "en": [
         "site:{target} adverse news OR sanctions OR litigation OR regulatory action",
-        "site:{target} corporate structure ownership beneficial owners published shareholders",
+        "site:{target} ownership structure shareholders ultimate beneficial owner",
         "site:{target} legal proceedings court case settlement investigation",
-        "site:{target} final beneficiary owner ultimate beneficial owner published ownership hierarchy",
     ],
     "es": [
         "site:{target} noticias adversas OR sanciones OR litigios OR acciones regulatorias",
-        "site:{target} estructura societaria propiedad beneficiarios finales accionistas publicados",
+        "site:{target} estructura societaria accionistas beneficiario final",
         "site:{target} procesos judiciales demanda acuerdo investigación",
-        "site:{target} beneficiario final propietario real estructura societaria publicada",
     ],
 }
+
+_RETRIES = 3
+_ALLOWED_SCHEMES = frozenset({"http", "https"})
+_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+
+
+def split_csv(value: str | Iterable[str]) -> list[str]:
+    """Normalise a comma-separated setting (or an already-split list) to a clean list."""
+    parts = value.split(",") if isinstance(value, str) else list(value)
+    return [part.strip() for part in parts if part and part.strip()]
+
+
+def is_hostname(name: str) -> bool:
+    """True for a plausible DNS name: dotted labels, letters/digits/hyphens only."""
+    name = name.lower().rstrip(".")
+    if not name or "." not in name or len(name) > 253:
+        return False
+    return all(_LABEL_RE.match(label) for label in name.split("."))
+
+
+def _is_retryable_status(status_code: int) -> bool:
+    return status_code == 429 or status_code >= 500
 
 
 class TavilyCollector(BaseCollector):
@@ -45,180 +87,174 @@ class TavilyCollector(BaseCollector):
 
     async def collect(self) -> CollectorResult:
         cfg = self.target.collectors.tavily
-        target = self.target.fqdn.strip()
-
-        if not settings.tavily_api_key:
-            error = "Tavily: API key not configured"
-            logger.warning("%s target=%s", error, target)
-            return self._failure(target, error)
-
-        if not self.target.authorization or not self.target.purpose:
-            error = "Tavily: target authorization and purpose are required"
-            logger.warning("%s target=%s", error, target)
-            return self._failure(target, error)
-
-        if not target or not self._is_target_allowed(target):
-            error = "Tavily: target must be a domain or explicitly allowed entity"
-            logger.warning("%s target=%s", error, target)
-            return self._failure(target, error)
+        fqdn = self.target.fqdn.strip()
+        log_extra = {"target_id": self.target.id, "collector": self.name.value}
 
         if not cfg.enabled:
-            return CollectorResult(
-                collector=self.name,
-                target_fqdn=target,
-                success=False,
-                error="Tavily: collector disabled",
+            return self._failure(fqdn, "Tavily: collector disabled", log_extra)
+        if not settings.tavily_api_key:
+            return self._failure(fqdn, "Tavily: API key not configured", log_extra)
+        if not self.target.authorization or not self.target.purpose:
+            return self._failure(
+                fqdn, "Tavily: target authorization and purpose are required", log_extra
             )
+        if not is_hostname(fqdn):
+            return self._failure(fqdn, "Tavily: target must be a domain name", log_extra)
 
-        queries = self._build_queries(target)
-        max_calls = max(1, cfg.max_calls_per_run)
+        queries = self.build_queries(fqdn)
+        max_calls = max(1, min(cfg.max_calls_per_run, settings.tavily_max_calls_per_run))
+        max_results = max(1, min(cfg.max_results, settings.tavily_max_results))
+        budget = float(cfg.timeout_seconds)
+        deadline = asyncio.get_running_loop().time() + budget
+
         results: list[dict[str, Any]] = []
         notes: list[str] = []
-
-        for _idx, query in enumerate(queries[:max_calls]):
-            query_result = await self._search(query, cfg)
-            results.extend(query_result)
-            if not query_result:
-                continue
-            for item in query_result[: cfg.max_results]:
-                note = self._note_from_result(item)
-                if note:
-                    notes.append(note)
+        try:
+            async with asyncio.timeout(budget):
+                for query in queries[:max_calls]:
+                    data = await self._search(query, cfg, max_results, deadline)
+                    items = data.get("results") if isinstance(data, dict) else None
+                    items = [item for item in items or [] if isinstance(item, dict)]
+                    results.extend(items[:max_results])
+                    notes.extend(
+                        note for note in map(self._note_from_result, items[:max_results]) if note
+                    )
+                    if cfg.include_answer and isinstance(data, dict) and data.get("answer"):
+                        answer = flatten_untrusted(str(data["answer"]))[:500]
+                        notes.append(
+                            f"tavily | answer | query={flatten_untrusted(query)} | {answer}"
+                        )
+        except TimeoutError:
+            logger.warning(
+                "Tavily timed out after %ss for %s", cfg.timeout_seconds, fqdn, extra=log_extra
+            )
+            return CollectorResult(
+                collector=self.name,
+                target_fqdn=fqdn,
+                success=False,
+                error=f"Tavily: timed out after {cfg.timeout_seconds}s",
+                observables=self._to_observables(results),
+                notes=notes,
+            )
 
         if not results:
             notes.append("tavily: no public results matched the query set")
 
-        observables = self._to_observables(results)
         return CollectorResult(
             collector=self.name,
-            target_fqdn=target,
-            observables=observables,
+            target_fqdn=fqdn,
+            observables=self._to_observables(results),
             notes=notes,
             success=True,
         )
 
-    @staticmethod
-    def _is_target_allowed(target: str) -> bool:
-        """Reject obvious person-centric searches unless the operator explicitly opts in."""
-        return "." in target
+    # ─── Queries ──────────────────────────────────────────────────────────────
 
-    def _build_queries(self, target: str) -> list[str]:
-        language = "en" if self.target.language in {"en", None} else "es"
+    def build_queries(self, fqdn: str) -> list[str]:
+        """Query set in the target's language (per-target override, then global)."""
+        language = resolve_language(self.target.language)
         templates = _QUERY_TEMPLATES.get(language, _QUERY_TEMPLATES["en"])
-        return [template.format(target=target) for template in templates]
+        return [template.format(target=fqdn) for template in templates]
 
-    async def _search(self, query: str, cfg) -> list[dict[str, Any]]:
+    # ─── HTTP ─────────────────────────────────────────────────────────────────
+
+    async def _search(
+        self, query: str, cfg, max_results: int, deadline: float
+    ) -> dict[str, Any] | None:
         payload = {
             "query": query,
             "search_depth": cfg.search_depth or settings.tavily_search_depth,
-            "max_results": max(1, min(cfg.max_results, settings.tavily_max_results)),
-            "include_domains": list(cfg.include_domains or settings.tavily_include_domains),
-            "exclude_domains": list(cfg.exclude_domains or settings.tavily_exclude_domains),
+            "max_results": max_results,
+            "include_domains": split_csv(cfg.include_domains)
+            or split_csv(settings.tavily_include_domains),
+            "exclude_domains": split_csv(cfg.exclude_domains)
+            or split_csv(settings.tavily_exclude_domains),
             "include_answer": bool(cfg.include_answer),
-            "include_raw_content": True,
+            "include_raw_content": False,
         }
+        headers = {"Authorization": f"Bearer {settings.tavily_api_key}"}
 
         async def _request() -> dict[str, Any]:
-            headers = {"Authorization": "Bearer " + settings.tavily_api_key}
-            async with httpx.AsyncClient(
-                timeout=float(cfg.timeout_seconds or settings.tavily_timeout_seconds)
-            ) as client:
-                response = await client.post(
-                    "https://api.tavily.com/search",
-                    headers=headers,
-                    json=payload,
-                )
-                if response.status_code == 429:
-                    raise httpx.HTTPStatusError(
-                        "rate limited",
-                        request=response.request,
-                        response=response,
-                    )
+            remaining = max(1.0, deadline - asyncio.get_running_loop().time())
+            async with httpx.AsyncClient(timeout=remaining) as client:
+                response = await client.post(TAVILY_SEARCH_URL, headers=headers, json=payload)
                 response.raise_for_status()
-                return response.json()
+                data = response.json()
+                return data if isinstance(data, dict) else {}
 
         try:
-            data = await self._with_retry(_request)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Tavily search failed for %s query=%r: %s", self.target.fqdn, query, exc)
-            return []
-        results = data.get("results") if isinstance(data, dict) else []
-        return [item for item in results if isinstance(item, dict)]
+            return await self._with_retry(_request)
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning(
+                "Tavily search failed for %s: %s",
+                self.target.fqdn,
+                exc,
+                extra={"target_id": self.target.id, "collector": self.name.value},
+            )
+            return None
 
-    async def _with_retry(self, request_callable, *, retries: int = 3):
-        last_exc: Exception | None = None
-        for attempt in range(retries + 1):
+    async def _with_retry(self, request: Callable[[], Awaitable[dict[str, Any]]]) -> dict[str, Any]:
+        """Retry on 429, 5xx and transport errors only; other errors propagate at once."""
+        for attempt in range(_RETRIES + 1):
             try:
-                return await request_callable()
+                return await request()
             except httpx.HTTPStatusError as exc:
-                if (
-                    exc.response is not None
-                    and exc.response.status_code == 429
-                    and attempt < retries
-                ):
-                    delay = (2**attempt) * 1.0
-                    logger.warning(
-                        "Tavily 429, retrying in %.1fs (attempt=%d/%d)", delay, attempt + 1, retries
-                    )
-                    await asyncio.sleep(delay)
-                    last_exc = exc
-                    continue
-                raise
-            except httpx.HTTPError as exc:
-                if attempt < retries:
-                    await asyncio.sleep((2**attempt) * 1.0)
-                    last_exc = exc
-                    continue
-                raise
-        if last_exc is not None:
-            raise last_exc
-        raise RuntimeError("Tavily request failed")
+                if attempt >= _RETRIES or not _is_retryable_status(exc.response.status_code):
+                    raise
+            except httpx.TransportError:
+                if attempt >= _RETRIES:
+                    raise
+            delay = float(2**attempt)
+            logger.warning(
+                "Tavily request failed, retrying in %.0fs (attempt %d/%d)",
+                delay,
+                attempt + 1,
+                _RETRIES,
+                extra={"target_id": self.target.id, "collector": self.name.value},
+            )
+            await asyncio.sleep(delay)
+        raise RuntimeError("unreachable")  # pragma: no cover
+
+    # ─── Result assembly ──────────────────────────────────────────────────────
 
     @staticmethod
-    def _note_from_result(item: dict[str, Any]) -> str | None:
-        url = str(item.get("url") or "").strip()
+    def _safe_url(value: Any) -> str | None:
+        url = str(value or "").strip()
         if not url:
             return None
-        title = str(item.get("title") or "").strip()
-        snippet = str(item.get("content") or item.get("snippet") or "").strip()
-        score = item.get("score")
-        published = item.get("published_date") or item.get("publishedAt")
-        raw = item.get("raw_content") or snippet
-        digest = hashlib.sha256(raw.encode("utf-8", errors="ignore")).hexdigest() if raw else ""
-        bits = [
-            "tavily",
-            title or "result",
-            f"url={url}",
-            f"published={published or 'unknown'}",
-            f"score={score if score is not None else 'n/a'}",
-        ]
-        if digest:
-            bits.append(f"sha256={digest}")
+        parts = urlsplit(url)
+        if parts.scheme.lower() not in _ALLOWED_SCHEMES or not parts.netloc:
+            return None
+        return url
+
+    @classmethod
+    def _note_from_result(cls, item: dict[str, Any]) -> str | None:
+        # Only fields that are stable across re-crawls go into the note: the
+        # normaliser derives the STIX Note id from this text, so a relevance
+        # score or a content digest would create a new Note on every run.
+        url = cls._safe_url(item.get("url"))
+        if url is None:
+            return None
+        title = flatten_untrusted(str(item.get("title") or "")) or "result"
+        snippet = flatten_untrusted(str(item.get("content") or item.get("snippet") or ""))
+        published = item.get("published_date") or item.get("publishedAt") or "unknown"
+        bits = ["tavily", title, f"url={url}", f"published={flatten_untrusted(str(published))}"]
         if snippet:
             bits.append(f"snippet={snippet[:200]}")
         return " | ".join(bits)
 
-    @staticmethod
-    def _to_observables(results: Iterable[dict[str, Any]]) -> list[Observable]:
+    @classmethod
+    def _to_observables(cls, results: Iterable[dict[str, Any]]) -> list[Observable]:
         observables: list[Observable] = []
-        seen: set[tuple[str, str]] = set()
+        seen: set[str] = set()
         for item in results:
-            if not isinstance(item, dict):
+            url = cls._safe_url(item.get("url")) if isinstance(item, dict) else None
+            if url is None or url in seen:
                 continue
-            url = str(item.get("url") or "").strip()
-            if not url:
-                continue
-            key = ("url", url)
-            if key in seen:
-                continue
-            seen.add(key)
+            seen.add(url)
             observables.append(Observable(type="url", value=url, extra={"source": "tavily"}))
         return observables
 
-    def _failure(self, fqdn: str, error: str) -> CollectorResult:
-        return CollectorResult(
-            collector=self.name,
-            target_fqdn=fqdn,
-            success=False,
-            error=error,
-        )
+    def _failure(self, fqdn: str, error: str, log_extra: dict[str, Any]) -> CollectorResult:
+        logger.warning("%s target=%s", error, fqdn, extra=log_extra)
+        return CollectorResult(collector=self.name, target_fqdn=fqdn, success=False, error=error)
