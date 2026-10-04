@@ -80,7 +80,7 @@ Ask for or verify output for:
 - `ruff check orchestrator/ tests/unit/`
 - `ruff format --check orchestrator/ tests/unit/`
 - `pytest tests/unit/ -v -m "not integration"`
-- If a migration was added: `alembic upgrade head && alembic check` on a temporary SQLite DB.
+- If a migration was added: `ORCHESTRATOR_DATABASE_URL=sqlite+aiosqlite:////tmp/migration_check.db alembic upgrade head && alembic check` (the default URL is the real `./orchestrator.db`).
 - Run the tests on a checkout without a local `.env` (`ORCHESTRATOR_ENV_FILE=""`), as CI does.
 - If `deploy/helm/` changed:
   - `helm lint deploy/helm/osint-orchestrator --strict`
