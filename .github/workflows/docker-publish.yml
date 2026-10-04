@@ -87,7 +87,7 @@ jobs:
       - name: Smoke-test /health
         if: github.event_name == 'pull_request'
         env:
-          ORCHESTRATOR_API_KEY: test-token
+          ORCHESTRATOR_API_KEY: ci-only-placeholder
         run: |
           set -euo pipefail
           cid="$(docker run -d \
@@ -109,7 +109,7 @@ jobs:
               exit 1
             fi
             if response="$(curl -fsS http://127.0.0.1:18080/health)"; then
-              if python -c "import json, sys; payload=json.loads(sys.argv[1]); sys.exit(0 if payload.get('status') == 'ok' else 1)" "${response}"; then
+              if python3 -c "import json, sys; payload=json.loads(sys.argv[1]); sys.exit(0 if payload.get('status') == 'ok' else 1)" "${response}"; then
                 echo "${response}"
                 health_ok=1
                 break
