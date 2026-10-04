@@ -22,7 +22,7 @@ Error handling: no exception from the LLM ever crashes the calling pipeline.
 
 LLM selection:
   target.llm == "local"  → always OllamaClient (regardless of global setting).
-  settings.llm_provider   → OllamaClient | AnthropicClient | OpenAICompatClient.
+  settings.llm_provider   → OllamaClient | AnthropicClient | OpenAICompatClient (OpenAI/Nebius).
 """
 
 from __future__ import annotations
@@ -43,6 +43,7 @@ from orchestrator.database import get_session
 from orchestrator.i18n import resolve_language, t
 from orchestrator.models import Finding, FindingRecord, Run, RunObservable, RunStatus, Target
 from orchestrator.reports import CollectorReportResult, ReportObservable, RunReportData
+from orchestrator.synthesizer.model_routing import resolve_model_for_route
 from orchestrator.textsafe import flatten_untrusted, neutralise_markdown
 
 logger = logging.getLogger(__name__)
@@ -121,6 +122,27 @@ class _FindingOutput(BaseModel):
     def _coerce_risk_level(cls, v: object) -> str:
         s = str(v).strip().lower()
         return s if s in _RISK_LEVELS else "unknown"
+
+
+_FINDING_JSON_SCHEMA = _FindingOutput.model_json_schema()
+
+
+async def _complete_with_optional_schema(
+    client: Any,
+    system: str,
+    user: str,
+    *,
+    timeout: float,
+    model_route: str,
+    response_schema: dict[str, Any] | None,
+) -> str:
+    return await client.complete(
+        system,
+        user,
+        timeout=timeout,
+        model_route=model_route,
+        response_schema=response_schema,
+    )
 
 
 # ─── Prompt building ──────────────────────────────────────────────────────────
@@ -419,8 +441,13 @@ async def synthesize(
         )
 
         t0 = time.monotonic()
-        raw = await client.complete(
-            _SYSTEM_PROMPT, user_prompt, timeout=settings.llm_timeout_seconds
+        raw = await _complete_with_optional_schema(
+            client,
+            _SYSTEM_PROMPT,
+            user_prompt,
+            timeout=settings.llm_timeout_seconds,
+            model_route="reasoning",
+            response_schema=_FINDING_JSON_SCHEMA,
         )
         duration_ms = int((time.monotonic() - t0) * 1000)
 
@@ -437,8 +464,13 @@ async def synthesize(
             # One retry with a repair prompt.
             logger.warning("Synthesis JSON parse failed (run=%d): %s — retrying", run_id, error)
             repair_prompt = _build_repair_prompt(user_prompt, raw, error)
-            raw2 = await client.complete(
-                _SYSTEM_PROMPT, repair_prompt, timeout=settings.llm_timeout_seconds
+            raw2 = await _complete_with_optional_schema(
+                client,
+                _SYSTEM_PROMPT,
+                repair_prompt,
+                timeout=settings.llm_timeout_seconds,
+                model_route="reasoning",
+                response_schema=_FINDING_JSON_SCHEMA,
             )
             duration_ms = int((time.monotonic() - t0) * 1000)
             # Regardless of whether the retry parses, use raw2 as the auditable response.
@@ -461,7 +493,7 @@ async def synthesize(
         await _persist_finding(
             finding,
             provider=provider_name,
-            model=settings.llm_model,
+            model=resolve_model_for_route("reasoning"),
             duration_ms=duration_ms,
             raw_response=raw,
         )

@@ -7,6 +7,7 @@ Install: pip install anthropic
 from __future__ import annotations
 
 import logging
+from typing import Any, Literal
 
 from orchestrator.config import settings
 
@@ -23,8 +24,18 @@ except ImportError:
 class AnthropicClient:
     """Calls the Anthropic Messages API using the official SDK."""
 
-    async def complete(self, system: str, user: str, *, timeout: float) -> str:
+    async def complete(
+        self,
+        system: str,
+        user: str,
+        *,
+        timeout: float,
+        model_route: Literal["reasoning", "fast"] = "reasoning",
+        response_schema: dict[str, Any] | None = None,
+    ) -> str:
         """One Messages-API completion (temperature 0); returns the raw text."""
+        _ = model_route
+        _ = response_schema
         if not _HAS_ANTHROPIC:
             raise RuntimeError("anthropic package is not installed; run: pip install anthropic")
         client = _anthropic_sdk.AsyncAnthropic(
