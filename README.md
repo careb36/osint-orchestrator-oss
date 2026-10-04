@@ -396,6 +396,38 @@ target's domain) is mounted the same way.
 
 ---
 
+## Tavily
+
+The Tavily collector performs web-search-based due diligence on an authorised
+entity. It is intentionally opt-in, and it stays off unless a target enables
+`collectors.tavily.enabled: true`.
+
+**This collector is disabled by default** (`collectors.tavily.enabled: false`).
+
+### What it searches
+
+- adverse news and public reporting
+- sanctions, regulatory actions and litigation
+- ownership structure and published shareholder data
+- beneficial ownership and legal-entity relationships
+- source URLs and summarised excerpts from public web results
+
+### Usage
+
+```yaml
+collectors:
+  tavily:
+    enabled: true
+    search_depth: basic
+    max_results: 5
+    include_domains: []
+    exclude_domains: []
+    max_calls_per_run: 3
+    timeout_seconds: 120
+```
+
+---
+
 ## Configuration
 
 Every variable is listed with an inline comment in
@@ -463,6 +495,13 @@ Two groups of variables live in the same `.env`:
 | `AMASS_DATA_DIR` | `/app/amass/data` | Volume shared with the engine; `asset.db` is read from here. |
 | `AMASS_ENUM_BIN` / `AMASS_SUBS_BIN` | `oam_enum` / `oam_subs` | Amass CLI clients (absolute paths when running outside Docker). |
 | `AMASS_TIMEOUT_SECONDS` | `1800` | Default wall-clock bound for a full Amass run (enum + subs). |
+| `TAVILY_API_KEY` | *(empty)* | Required when `collectors.tavily.enabled=true`; leave blank to keep the collector off. |
+| `TAVILY_SEARCH_DEPTH` | `basic` | Tavily query depth: `basic` or `advanced`. |
+| `TAVILY_MAX_RESULTS` | `5` | Maximum search results to request per query. |
+| `TAVILY_TIMEOUT_SECONDS` | `120` | Timeout for each Tavily request. |
+| `TAVILY_MAX_CALLS_PER_RUN` | `3` | Hard cap on Tavily API calls per collector execution. |
+| `TAVILY_INCLUDE_DOMAINS` | *(empty)* | Optional allowlist of domains for Tavily search results. |
+| `TAVILY_EXCLUDE_DOMAINS` | *(empty)* | Optional denylist of domains that must be skipped. |
 | `ALERT_TIMEOUT_SECONDS` | `10` | Timeout for webhook/email alert send attempts. |
 | `ALERT_SMTP_PORT` | `587` | SMTP port for email alerts. |
 | `ALERT_SMTP_USER` | *(empty)* | SMTP username for email alerts. |

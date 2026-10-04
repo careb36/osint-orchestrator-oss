@@ -413,6 +413,38 @@ dominio de cada objetivo) se monta de la misma forma.
 
 ---
 
+## Tavily
+
+El recolector Tavily realiza diligencia web pública sobre una entidad
+autorizada. Es opt-in por diseño y se mantiene apagado hasta que un objetivo
+habilita `collectors.tavily.enabled: true`.
+
+**Este recolector está deshabilitado por defecto** (`collectors.tavily.enabled: false`).
+
+### Qué busca
+
+- noticias adversas y cobertura pública
+- sanciones, acciones regulatorias y litigios
+- estructura societaria y accionistas publicados
+- beneficiarios finales y relaciones jurídicas
+- URLs origen y fragmentos resumidos de resultados públicos
+
+### Uso
+
+```yaml
+collectors:
+  tavily:
+    enabled: true
+    search_depth: basic
+    max_results: 5
+    include_domains: []
+    exclude_domains: []
+    max_calls_per_run: 3
+    timeout_seconds: 120
+```
+
+---
+
 ## Configuración
 
 Todas las variables están listadas con un comentario en
@@ -480,6 +512,13 @@ En el mismo `.env` conviven dos grupos de variables:
 | `AMASS_DATA_DIR` | `/app/amass/data` | Volumen compartido con el engine; `asset.db` se lee desde aquí. |
 | `AMASS_ENUM_BIN` / `AMASS_SUBS_BIN` | `oam_enum` / `oam_subs` | Clientes CLI de Amass (rutas absolutas fuera de Docker). |
 | `AMASS_TIMEOUT_SECONDS` | `1800` | Límite de tiempo de pared por defecto de una ejecución completa de Amass (enum + subs). |
+| `TAVILY_API_KEY` | *(vacío)* | Requerida cuando `collectors.tavily.enabled=true`; dejarla vacía mantiene el recolector apagado. |
+| `TAVILY_SEARCH_DEPTH` | `basic` | Profundidad de la búsqueda Tavily: `basic` o `advanced`. |
+| `TAVILY_MAX_RESULTS` | `5` | Número máximo de resultados por consulta. |
+| `TAVILY_TIMEOUT_SECONDS` | `120` | Tiempo máximo por petición Tavily. |
+| `TAVILY_MAX_CALLS_PER_RUN` | `3` | Tope duro de llamadas Tavily por ejecución del recolector. |
+| `TAVILY_INCLUDE_DOMAINS` | *(vacío)* | Lista opcional de dominios permitidos en resultados Tavily. |
+| `TAVILY_EXCLUDE_DOMAINS` | *(vacío)* | Lista opcional de dominios a excluir. |
 | `ALERT_TIMEOUT_SECONDS` | `10` | Tiempo máximo por intento de envío de alerta (webhook/email). |
 | `ALERT_SMTP_PORT` | `587` | Puerto SMTP para alertas por correo. |
 | `ALERT_SMTP_USER` | *(vacío)* | Usuario SMTP para alertas por correo. |
