@@ -338,9 +338,15 @@ async def test_same_page_from_two_queries_yields_one_observable_and_one_note(
 
 
 @pytest.mark.parametrize(
-    "bad_url", ["https://news.example.com:notaport/a", "https://news.example.com:99999/a"]
+    "bad_url",
+    [
+        "https://news.example.com:notaport/a",
+        "https://news.example.com:99999/a",
+        "https://[oops/a",
+        "https://[1.2.3.4]/a",
+    ],
 )
-async def test_malformed_port_in_a_result_does_not_abort_the_run(httpx_mock, bad_url: str) -> None:
+async def test_malformed_url_in_a_result_does_not_abort_the_run(httpx_mock, bad_url: str) -> None:
     httpx_mock.add_response(
         method="POST",
         url=TAVILY_SEARCH_URL,

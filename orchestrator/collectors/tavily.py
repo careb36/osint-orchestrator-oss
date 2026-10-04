@@ -286,12 +286,15 @@ class TavilyCollector(BaseCollector):
         url = str(value or "").strip()
         if not url:
             return None
-        parts = urlsplit(url)
-        if parts.scheme.lower() not in _ALLOWED_SCHEMES or not parts.netloc:
-            return None
         try:
-            parts.port  # noqa: B018 — raises ValueError on a non-numeric or out-of-range port
+            # Both the split (unbalanced brackets, bad bracketed host, NFKC
+            # netloc) and the port accessor raise ValueError on third-party
+            # input; any of them means "not a URL we emit".
+            parts = urlsplit(url)
+            parts.port  # noqa: B018
         except ValueError:
+            return None
+        if parts.scheme.lower() not in _ALLOWED_SCHEMES or not parts.netloc:
             return None
         return url
 
