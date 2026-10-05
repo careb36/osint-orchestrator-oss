@@ -16,6 +16,7 @@ import secrets
 import uuid
 from collections import defaultdict
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from time import perf_counter
@@ -263,9 +264,47 @@ app.add_middleware(RequestContextMiddleware)
 
 
 @app.get("/health", tags=["public"])
-async def health() -> dict[str, str]:
-    """Liveness probe: returns the service status and version. No API key."""
-    return {"status": "ok", "version": VERSION}
+async def health() -> dict[str, Any]:
+    """Liveness probe and small service health snapshot for the dashboard."""
+    checks: dict[str, dict[str, str]] = {
+        "api": {"status": "ok", "detail": "API is responding"},
+        "database": {"status": "ok", "detail": "Database is available"},
+        "scheduler": {"status": "ok", "detail": "Scheduler is running"},
+        "opencti": {"status": "ok", "detail": "OpenCTI sink is enabled"},
+    }
+
+    try:
+        async with get_session() as session:
+            await session.exec(select(1))
+    except Exception:
+        checks["database"] = {"status": "offline", "detail": "Database check failed"}
+
+    scheduler_running = False
+    try:
+        from orchestrator.scheduler import scheduler as scheduler_runtime
+
+        scheduler_running = bool(scheduler_runtime.running)
+    except Exception:
+        scheduler_running = False
+    if not scheduler_running:
+        checks["scheduler"] = {"status": "degraded", "detail": "Scheduler is not running"}
+
+    if not settings.opencti_enabled:
+        checks["opencti"] = {"status": "degraded", "detail": "OpenCTI sink disabled"}
+
+    if any(payload["status"] == "offline" for payload in checks.values()):
+        overall = "offline"
+    elif any(payload["status"] == "degraded" for payload in checks.values()):
+        overall = "degraded"
+    else:
+        overall = "ok"
+
+    return {
+        "status": overall,
+        "version": VERSION,
+        "updated_at": datetime.now(UTC).isoformat(),
+        "checks": checks,
+    }
 
 
 @app.get("/metrics", include_in_schema=False)

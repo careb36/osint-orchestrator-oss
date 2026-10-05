@@ -116,6 +116,7 @@ other route needs `X-API-Key: <key>` or `Authorization: Bearer <key>`.
 | `GET` | `/metrics` | Prometheus metrics (no API key) |
 | `GET` | `/console/i18n.json` | Console translation catalogue (public; no target/run data) |
 | `GET` | `/console` | Operator console shell (public, no data; every call it makes needs the API key, entered on the page) |
+| `GET` | `/health` | Service health snapshot (`ok`, `degraded`, `offline`) used by the console health cards |
 | `GET` | `/analytics/risk-trends` | Per-target risk and new-observable trends for the console risk view |
 | `GET` | `/targets` | List configured targets |
 | `GET` | `/targets/{id}` | Get a single target |
@@ -136,6 +137,23 @@ other route needs `X-API-Key: <key>` or `Authorization: Bearer <key>`.
 Errors carry a `detail` string in the operator language: `404` unknown target,
 run, report or finding; `400` disabled target; `401` missing or wrong key; `409`
 a run is already active for the target.
+
+### Health dashboard polling and retry behaviour
+
+The console health tab polls `/health` every 15 seconds when the tab is open and
+re-renders the status cards without losing the current page selection. The status
+payload is deterministic and intentionally limited to three values so the UI can
+render every state without guessing:
+
+- `ok`: all core checks are healthy
+- `degraded`: the app is still serving requests, but a dependency is degraded
+  (for example, the scheduler is not running or OpenCTI is disabled)
+- `offline`: a core dependency failed its self-check (for example, DB access)
+
+A failed poll is surfaced as an error state in the dashboard rather than
+crashing the page; the next periodic refresh retries automatically. The UI keeps
+its polling interval modest to avoid creating a visible thundering herd while a
+service is recovering.
 
 **Key rotation:** set `ORCHESTRATOR_API_KEY=old,new`, restart, move the callers,
 then drop the old key. Keys are compared in constant time.
