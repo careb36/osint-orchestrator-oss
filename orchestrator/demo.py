@@ -77,6 +77,8 @@ def demo_target(target_id: str) -> Target | None:
 
 def _uses_nebius(target: Target) -> bool:
     """True when this target's synthesis goes to Nebius (see providers.get_client)."""
+    if settings.llm_provider == "none":
+        return False  # synthesis is off for every target; no client is ever built
     if target.llm == "nebius":
         return True
     return target.llm == "openai" and settings.llm_provider == "nebius"

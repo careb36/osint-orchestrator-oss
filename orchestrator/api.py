@@ -817,14 +817,27 @@ def _demo_language(request: Request) -> str:
     ``ORCHESTRATOR_LANGUAGE`` is the fallback, not the rule.
     """
     requested = (request.query_params.get("lang") or "").strip().lower()
-    if not requested:
-        header = request.headers.get("accept-language", "")
-        first = header.split(",", 1)[0].strip()
-        requested = first.split(";", 1)[0].split("-", 1)[0].lower()
-    # Visitor input is not operator configuration: an unsupported locale falls
+    if requested in SUPPORTED_LANGUAGES:
+        return resolve_language(requested)
+    # Accept-Language: best supported primary subtag by quality value.
+    candidates: list[tuple[float, str]] = []
+    for entry in request.headers.get("accept-language", "").split(","):
+        tag, _, params = entry.strip().partition(";")
+        quality = 1.0
+        for param in params.split(";"):
+            key, _, value = param.strip().partition("=")
+            if key == "q":
+                try:
+                    quality = float(value)
+                except ValueError:
+                    quality = 0.0
+        language = tag.strip().split("-", 1)[0].lower()
+        if quality > 0 and language in SUPPORTED_LANGUAGES:
+            candidates.append((quality, language))
+    # Visitor input is not operator configuration: anything unsupported falls
     # back quietly instead of reaching resolve_language's warning (which exists
     # for typos in targets.yaml / ORCHESTRATOR_LANGUAGE).
-    return resolve_language(requested if requested in SUPPORTED_LANGUAGES else None)
+    return resolve_language(max(candidates)[1] if candidates else None)
 
 
 @app.get("/demo", response_class=HTMLResponse, include_in_schema=False)
@@ -973,14 +986,21 @@ async def demo_run_manifest(run_id: int) -> dict[str, Any]:
 # a tampered file is still reported within _DEMO_VERIFY_CACHE_SECONDS.
 _DEMO_VERIFY_CACHE_SECONDS = 15.0
 _demo_verify_cache: dict[str, tuple[float, dict[str, Any]]] = {}
-_demo_verify_lock = asyncio.Lock()
+
+
+def _demo_verify_lock(request: Request) -> asyncio.Lock:
+    """One lock per running app: created in the serving loop, never at import time."""
+    lock = getattr(request.app.state, "demo_verify_lock", None)
+    if lock is None:
+        lock = request.app.state.demo_verify_lock = asyncio.Lock()
+    return lock
 
 
 @app.get("/demo/targets/{target_id}/chain/verify", tags=["demo"])
-async def demo_verify_chain(target_id: str) -> dict[str, Any]:
+async def demo_verify_chain(target_id: str, request: Request) -> dict[str, Any]:
     """Verify the evidence chain of an allowlisted target."""
     target = _demo_target_or_404(target_id)
-    async with _demo_verify_lock:
+    async with _demo_verify_lock(request):
         cached = _demo_verify_cache.get(target_id)
         now = time.monotonic()
         if cached is not None and now - cached[0] < _DEMO_VERIFY_CACHE_SECONDS:
@@ -998,9 +1018,9 @@ async def demo_verify_chain(target_id: str) -> dict[str, Any]:
                 metrics.evidence_chain_verify_total.labels(target_id, "error").inc()
                 raise
             _demo_verify_cache[target_id] = (now, dict(result))
-            metrics.evidence_chain_verify_total.labels(
-                target_id, "ok" if result["ok"] else "broken"
-            ).inc()
+    # Counted on every request, cached or not, like the protected route: the
+    # metric answers "how many verifications were asked for".
+    metrics.evidence_chain_verify_total.labels(target_id, "ok" if result["ok"] else "broken").inc()
     if result["reason"]:
         result["message"] = t(
             f"chain.reason.{result['reason']}",

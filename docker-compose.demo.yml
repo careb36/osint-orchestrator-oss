@@ -31,8 +31,9 @@ services:
       DEMO_TRUSTED_PROXY_HOPS: "0"
       # Behind Docker's port mapping every browser on this machine arrives
       # from the same bridge address, so the per-visitor cap would be a cap
-      # for the whole room. Local default: the global cap. Override in .env.
-      DEMO_MAX_RUNS_PER_IP_PER_DAY: "${DEMO_MAX_RUNS_PER_IP_PER_DAY:-50}"
+      # for the whole room. Local default: the global cap. A value set in
+      # .env still wins (.env.example ships it commented out for this reason).
+      DEMO_MAX_RUNS_PER_IP_PER_DAY: "${DEMO_MAX_RUNS_PER_IP_PER_DAY:-${DEMO_MAX_RUNS_PER_DAY:-50}}"
     ports:
       - "7860:7860"
     volumes:

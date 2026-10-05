@@ -100,6 +100,7 @@ def client(demo_settings: Path, monkeypatch: pytest.MonkeyPatch):
             raise AssertionError("the OpenCTI sink must not be used in demo mode")
 
     monkeypatch.setattr(pipeline_module, "OpenCTISink", _NoOpenCTI)
+    api_module._demo_verify_cache.clear()  # module state keyed by target id
     with TestClient(api_module.app) as test_client:
         with _db() as conn:
             conn.execute("DELETE FROM demo_daily_usage")
@@ -176,6 +177,12 @@ def test_demo_page_language_follows_query_then_accept_language(client: TestClien
 
     header = client.get("/demo", headers={"Accept-Language": "es-UY,es;q=0.9,en;q=0.8"})
     assert '<html lang="es">' in header.text
+
+    # quality values decide, and q=0 excludes a language
+    weighted = client.get("/demo", headers={"Accept-Language": "es;q=0.8,en;q=0.9"})
+    assert '<html lang="en">' in weighted.text
+    excluded = client.get("/demo", headers={"Accept-Language": "fr,es;q=0,en;q=0.1"})
+    assert '<html lang="en">' in excluded.text
 
     unknown = client.get("/demo", params={"lang": "xx"})
     assert '<html lang="en">' in unknown.text  # falls back to the global setting
@@ -653,12 +660,27 @@ def test_nebius_targets_need_a_key_and_both_model_routes(
     # .env must stop the service instead of failing every run in public.
     shipped = Path(__file__).parents[2] / "demo" / "targets.demo.yaml"
     monkeypatch.setattr(settings, "demo_targets_file", str(shipped))
+    monkeypatch.setattr(settings, "llm_provider", "nebius")  # the fixture turns synthesis off
     monkeypatch.setattr(settings, "nebius_api_key", "test-token")
     monkeypatch.setattr(settings, "llm_model_reasoning", "nvidia/reasoning-model")
     monkeypatch.setattr(settings, "llm_model_fast", "nvidia/fast-model")
     monkeypatch.setattr(settings, setting, "")
     with pytest.raises(RuntimeError, match=expected):
         demo.validate_demo_mode()
+
+
+def test_nebius_settings_are_not_required_when_synthesis_is_off(
+    demo_settings: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # LLM_PROVIDER=none builds no client at all (providers.get_client), so the
+    # shipped allowlist must start without Nebius settings.
+    shipped = Path(__file__).parents[2] / "demo" / "targets.demo.yaml"
+    monkeypatch.setattr(settings, "demo_targets_file", str(shipped))
+    monkeypatch.setattr(settings, "llm_provider", "none")
+    monkeypatch.setattr(settings, "nebius_api_key", "")
+    monkeypatch.setattr(settings, "llm_model_reasoning", "")
+    monkeypatch.setattr(settings, "llm_model_fast", "")
+    demo.validate_demo_mode()
 
 
 def test_demo_page_has_the_console_security_headers(client: TestClient) -> None:
@@ -704,7 +726,7 @@ def test_public_chain_verify_is_cached_briefly_and_counted(
         "osint_orchestrator_evidence_chain_verify_total",
         {"target_id": "demo-corp", "outcome": "ok"},
     )
-    assert after - before == 1
+    assert after - before == 2  # every request is counted, cached or not
 
 
 def test_public_target_view_has_no_authorization_text(demo_settings: Path) -> None:

@@ -94,8 +94,9 @@ Guards:
   `NEBIUS_API_KEY`, `LLM_MODEL_REASONING` and `LLM_MODEL_FAST` are set. Nothing
   runs on a schedule.
 - **Local demo.** `docker-compose.demo.yml` sets `DEMO_TRUSTED_PROXY_HOPS=0`
-  and raises `DEMO_MAX_RUNS_PER_IP_PER_DAY` to the global cap: behind Docker's
-  port mapping every browser on the machine shares one address. The counters
+  and, unless `.env` sets it, raises `DEMO_MAX_RUNS_PER_IP_PER_DAY` to the
+  global cap: behind Docker's port mapping every browser on the machine shares
+  one address. The counters
   live in the `demo-data` volume; `docker compose -f docker-compose.demo.yml
   down -v` resets them. `/health` reports the OpenCTI sink as `disabled`, not
   `degraded`, because demo mode turns it off by design.
@@ -161,6 +162,10 @@ render every state without guessing:
 - `degraded`: the app is still serving requests, but a dependency is degraded
   (for example, the scheduler is not running or OpenCTI is disabled)
 - `offline`: a core dependency failed its self-check (for example, DB access)
+
+Each entry under `checks` carries one of the same three values, plus `disabled`
+for a component that is off by configuration and does not affect the overall
+status (today only the OpenCTI sink in demo mode).
 
 A failed poll is surfaced as an error state in the dashboard rather than
 crashing the page; the next periodic refresh retries automatically. The UI keeps
