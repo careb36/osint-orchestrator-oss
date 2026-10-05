@@ -43,7 +43,7 @@ from orchestrator.auth import log_auth_status, log_secret_key_status, require_ap
 from orchestrator.config import NEBIUS_DEFAULT_BASE_URL, settings
 from orchestrator.database import create_db_and_tables, get_session
 from orchestrator.evidence import load_manifest_file, manifest_path_for_report, verify_target_chain
-from orchestrator.i18n import console_i18n_catalogue, resolve_language, t
+from orchestrator.i18n import SUPPORTED_LANGUAGES, console_i18n_catalogue, resolve_language, t
 from orchestrator.logging_config import configure_logging, request_id_var
 from orchestrator.models import AlertRecord, EvidenceQualification, FindingRecord, Run, Target
 from orchestrator.pipeline import (
@@ -821,7 +821,10 @@ def _demo_language(request: Request) -> str:
         header = request.headers.get("accept-language", "")
         first = header.split(",", 1)[0].strip()
         requested = first.split(";", 1)[0].split("-", 1)[0].lower()
-    return resolve_language(requested or None)
+    # Visitor input is not operator configuration: an unsupported locale falls
+    # back quietly instead of reaching resolve_language's warning (which exists
+    # for typos in targets.yaml / ORCHESTRATOR_LANGUAGE).
+    return resolve_language(requested if requested in SUPPORTED_LANGUAGES else None)
 
 
 @app.get("/demo", response_class=HTMLResponse, include_in_schema=False)
