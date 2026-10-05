@@ -125,8 +125,9 @@ The review checklist both agents and reviewers follow is
 3. `main` is protected by a ruleset that requires the *Lint & Unit Tests*,
    *Helm chart*, *Public-release guard* and *PR is complete* checks and forbids
    force pushes, so nothing reaches `main` without a pull request and a green
-   CI run. *PR is complete* (`.github/workflows/pr-guard.yml`) fails while a PR
-   is a draft, is titled `[WIP]` or changes no files.
+   CI run. *PR is complete* (`.github/workflows/pr-guard.yml`) exits successfully
+   for draft PRs and enforces the `[WIP]`/empty-change checks after
+   `ready_for_review`.
 
 ### Delegating one task
 

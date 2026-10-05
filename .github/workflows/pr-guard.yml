@@ -34,6 +34,10 @@ jobs:
             exit 0
           fi
           fail=0
+          if [ "${PR_DRAFT}" = "true" ]; then
+            echo "Draft PR: completeness checks run after ready_for_review."
+            exit 0
+          fi
           case "${PR_TITLE}" in
             "[WIP]"*|"WIP:"*|"WIP "*)
               echo "::error::The title still says work in progress: the PR is not finished."
