@@ -39,15 +39,16 @@ describe('api.request language', () => {
   });
 
   it('sends Accept-Language from the resolved locale and omits it before one is chosen', async () => {
-    const fetchMock = vi.fn(async () => json(200, []));
+    const fetchMock = vi.fn<typeof fetch>(async () => json(200, []));
     vi.stubGlobal('fetch', fetchMock);
+    const headersOf = (call: number) => new Headers(fetchMock.mock.calls[call][1]?.headers);
 
     expect(currentLocale()).toBeNull();
     await api.getTargets();
-    expect(new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers).has('Accept-Language')).toBe(false);
+    expect(headersOf(0).has('Accept-Language')).toBe(false);
 
     setCurrentLocale('es');
     await api.getTargets();
-    expect(new Headers((fetchMock.mock.calls[1][1] as RequestInit).headers).get('Accept-Language')).toBe('es');
+    expect(headersOf(1).get('Accept-Language')).toBe('es');
   });
 });
