@@ -7,6 +7,7 @@ This folder holds the product and UX guardrails for the UI2 super-app scope. All
 - [Scope and boundaries](./scope.md)
 - [KPI baseline and targets](./kpis.md)
 - [Phased definition of done](./dod.md)
+- [Route map and shell conventions](./routes.md)
 
 ## Policy note
 

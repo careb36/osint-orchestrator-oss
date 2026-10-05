@@ -4,6 +4,7 @@ import { HomePage } from './pages/HomePage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { RunsPage } from './pages/RunsPage';
 import { TargetsPage } from './pages/TargetsPage';
+import { APP_ROUTES, QUICK_ACTIONS } from './routes';
 
 function AppShell() {
   return (
@@ -18,11 +19,21 @@ function AppShell() {
         </div>
 
         <nav className="nav" aria-label="Main navigation">
-          <NavLink to="/" end>Overview</NavLink>
-          <NavLink to="/targets">Targets</NavLink>
-          <NavLink to="/runs">Runs</NavLink>
+          {APP_ROUTES.filter((route) => route.showInNav).map((route) => (
+            <NavLink key={route.path} to={route.path} end={route.path === '/'}>
+              {route.label}
+            </NavLink>
+          ))}
         </nav>
       </header>
+
+      <div className="shell-toolbar" aria-label="Quick actions">
+        {QUICK_ACTIONS.map((action) => (
+          <NavLink key={action.to} className="action-chip" to={action.to}>
+            {action.label}
+          </NavLink>
+        ))}
+      </div>
 
       <main className="content">
         <Routes>
