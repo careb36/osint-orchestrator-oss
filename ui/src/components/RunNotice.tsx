@@ -1,7 +1,8 @@
 import type { RunNotice as Notice } from '../hooks/useStartRun';
 import { useLocale, type MessageKey } from '../i18n';
 
-const STATUS_KEYS: Record<number, MessageKey> = {
+// Partial: a status outside the map (429, 502, …) must reach the generic fallback.
+const STATUS_KEYS: Partial<Record<number, MessageKey>> = {
   400: 'run.failed.disabled',
   401: 'run.failed.unauthorized',
   404: 'run.failed.notFound',
@@ -19,8 +20,13 @@ export function RunNotice({ notice }: { notice: Notice | null }) {
       </p>
     );
   }
-  const key = notice.status === null ? 'run.failed' : STATUS_KEYS[notice.status];
-  const text = key ? t(key) : t('run.failed.status', { status: notice.status ?? '' });
+  let text: string;
+  if (notice.status === null) {
+    text = t('run.failed');
+  } else {
+    const key = STATUS_KEYS[notice.status];
+    text = key ? t(key) : t('run.failed.status', { status: notice.status });
+  }
   return (
     <p className="state-card error" role="alert">
       {text}

@@ -251,6 +251,18 @@ describe('App shell', () => {
     expect(alert).toHaveTextContent(/server detail: ya hay una corrida en curso/i);
   });
 
+  it('falls back to a generic sentence with the code for a status outside the map', async () => {
+    installFetchMock({
+      routes: [{ pattern: /^\/targets\/example-corp\/run$/, status: 429, body: { detail: 'Too many runs' } }],
+    });
+    const user = userEvent.setup();
+    renderApp(['/targets']);
+
+    await screen.findByRole('table');
+    await user.click(screen.getByRole('button', { name: /start run for example-corp/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/could not be started \(status 429\)/i);
+  });
+
   it('starts a run from the overview and reports the accepted run', async () => {
     const fetchMock = installFetchMock({
       routes: [{ pattern: /^\/targets\/example-corp\/run$/, body: { run_id: 99, status: 'pending', target_id: 'example-corp' } }],

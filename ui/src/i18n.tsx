@@ -1,5 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
+import { setCurrentLocale } from './lib/locale';
 
 /**
  * Operator-facing text of the dashboard, Spanish first (ADR-004: operators
@@ -533,28 +534,25 @@ type LocaleContextValue = {
 
 const LocaleContext = createContext<LocaleContextValue | undefined>(undefined);
 
-/** Keep <html lang> in step so screen readers, telemetry and CSS :lang() see the operator's language. */
-function applyDocumentLanguage(locale: Locale) {
+/** Publish the locale to <html lang> (screen readers, CSS :lang()) and to the non-React modules. */
+function applyLocale(locale: Locale) {
   if (typeof document !== 'undefined') {
     document.documentElement.lang = locale;
   }
+  setCurrentLocale(locale);
 }
 
 export function LocaleProvider({ children, initialLocale }: { children: ReactNode; initialLocale?: Locale }) {
-  // Resolved and applied during the first render, before any child effect
-  // (app_loaded telemetry reads the document language) can run.
-  const [locale, setLocaleState] = useState<Locale>(() => {
-    const resolved = initialLocale ?? detectLocale();
-    applyDocumentLanguage(resolved);
-    return resolved;
-  });
+  const [locale, setLocaleState] = useState<Locale>(() => initialLocale ?? detectLocale());
 
-  useEffect(() => {
-    applyDocumentLanguage(locale);
+  // A layout effect of the parent runs before every child's passive effect,
+  // so the app_loaded telemetry and the first API requests (both passive
+  // effects) already see the committed locale; the render itself stays pure.
+  useLayoutEffect(() => {
+    applyLocale(locale);
   }, [locale]);
 
   const setLocale = useCallback((next: Locale) => {
-    applyDocumentLanguage(next);
     setLocaleState(next);
     try {
       window.localStorage.setItem(LOCALE_STORAGE_KEY, next);

@@ -10,9 +10,10 @@ export type RunNotice =
 /**
  * POST /targets/{id}/run with the operator-facing outcome as a notice. The
  * backend owns the rules (400 disabled target, 409 run already in progress,
- * 404 unknown target); the notice translates the status itself and shows the
- * server's `detail`, which is in the server's configured language, as a
- * secondary line.
+ * 404 unknown target); the notice translates the status itself. The server's
+ * `detail` is rendered in the target's own `language` for 400 and 409 and in
+ * ORCHESTRATOR_LANGUAGE otherwise, neither of which need match the operator's
+ * choice, so it is shown as an attributed secondary line, not as the message.
  */
 export function useStartRun() {
   const queryClient = useQueryClient();

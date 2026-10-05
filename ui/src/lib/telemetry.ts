@@ -1,3 +1,5 @@
+import { currentLocale } from './locale';
+
 export type UiTelemetryEntry = {
   timestamp: string;
   event: string;
@@ -35,7 +37,7 @@ export function trackUiTelemetry(event: string, detail: Record<string, unknown> 
     timestamp: new Date().toISOString(),
     event,
     detail: sanitizedDetail,
-    language: typeof document !== 'undefined' && document.documentElement.lang ? document.documentElement.lang : 'en',
+    language: currentLocale() ?? 'unset',
     path: window.location.pathname,
   };
 
