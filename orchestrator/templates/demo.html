@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>OSINT Orchestrator · demo</title>
-    <style>
+    <style nonce="{{ csp_nonce }}">
       body { font-family: system-ui, sans-serif; margin: 2rem auto; max-width: 62rem; line-height: 1.5; padding: 0 1rem; color: #1a1a1a; }
       h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
       .note { background: #fff8e1; border-left: 4px solid #f0b400; padding: 0.6rem 0.9rem; font-size: 0.92rem; }
@@ -45,7 +45,7 @@
     <h2>Report</h2>
     <pre id="report"></pre>
 
-    <script>
+    <script nonce="{{ csp_nonce }}">
       const el = (id) => document.getElementById(id);
       const say = (text, cls) => { el("status").textContent = text; el("status").className = cls || "muted"; };
       async function api(path, options) {
@@ -93,12 +93,18 @@
         await showRun(el("run").value);
       }
       async function poll(runId) {
+        // A finished run is sealed a moment after its status turns terminal;
+        // wait for the seal briefly, but never keep polling a failed run.
+        let terminalTicks = 0;
         for (let i = 0; i < 90; i += 1) {
           const run = await api(`/demo/runs/${runId}`);
-          say(`Run ${runId}: ${run.status}`);
-          if (!["pending", "running"].includes(run.status) && run.sealed) { return; }
+          const terminal = !["pending", "running"].includes(run.status);
+          say(`Run ${runId}: ${run.status}`, run.status === "failed" ? "bad" : "");
+          if (terminal && (run.sealed || run.status === "failed" || terminalTicks >= 3)) { return; }
+          if (terminal) { terminalTicks += 1; }
           await new Promise((resolve) => setTimeout(resolve, 4000));
         }
+        say(`Run ${runId} is still running; reload this page in a minute.`);
       }
       el("start").addEventListener("click", async () => {
         try {

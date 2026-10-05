@@ -75,6 +75,24 @@ def demo_target(target_id: str) -> Target | None:
     return next((target for target in load_demo_targets() if target.id == target_id), None)
 
 
+def _synthesis_provider(target: Target) -> str | None:
+    """The provider ``providers.get_client`` would build for this target, or None."""
+    if settings.llm_provider == "none":
+        return None  # synthesis is off for every target; no client is ever built
+    if target.llm == "local":
+        return "ollama"
+    if target.llm == "openai":
+        return "nebius" if settings.llm_provider == "nebius" else "openai"
+    return target.llm  # "anthropic" | "nebius"
+
+
+_PROVIDER_KEY_SETTINGS = {
+    "anthropic": "anthropic_api_key",
+    "openai": "openai_api_key",
+    "nebius": "nebius_api_key",
+}
+
+
 def _enabled_collectors(target: Target) -> list[str]:
     collectors = target.collectors
     return [
@@ -120,6 +138,23 @@ def validate_demo_mode() -> None:
                 f"demo target {target.id}: only the tavily collector may be enabled "
                 f"(enabled: {_enabled_collectors(target)})"
             )
+    # A demo that starts with a half-filled .env is worse than one that refuses
+    # to start: every run would fail or come back empty in front of the audience.
+    if enabled and not settings.tavily_api_key.strip():
+        problems.append("TAVILY_API_KEY must be set (every demo target collects with Tavily)")
+    providers = {_synthesis_provider(target) for target in enabled} - {None}
+    for provider in sorted(providers):
+        key_setting = _PROVIDER_KEY_SETTINGS.get(provider)
+        if key_setting and not getattr(settings, key_setting).strip():
+            problems.append(
+                f"{key_setting.upper()} must be set (demo targets synthesise with {provider})"
+            )
+        if provider == "nebius":
+            for name in ("llm_model_reasoning", "llm_model_fast"):
+                if not getattr(settings, name).strip():
+                    problems.append(
+                        f"{name.upper()} must name a Nemotron model served to your Nebius key"
+                    )
     if problems:
         raise RuntimeError("DEMO_MODE=true is misconfigured: " + "; ".join(problems))
     logger.info(

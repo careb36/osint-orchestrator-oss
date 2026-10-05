@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import secrets
+import time
 import uuid
 from collections import defaultdict
 from contextlib import asynccontextmanager
@@ -42,7 +43,7 @@ from orchestrator.auth import log_auth_status, log_secret_key_status, require_ap
 from orchestrator.config import NEBIUS_DEFAULT_BASE_URL, settings
 from orchestrator.database import create_db_and_tables, get_session
 from orchestrator.evidence import load_manifest_file, manifest_path_for_report, verify_target_chain
-from orchestrator.i18n import console_i18n_catalogue, resolve_language, t
+from orchestrator.i18n import SUPPORTED_LANGUAGES, console_i18n_catalogue, resolve_language, t
 from orchestrator.logging_config import configure_logging, request_id_var
 from orchestrator.models import AlertRecord, EvidenceQualification, FindingRecord, Run, Target
 from orchestrator.pipeline import (
@@ -128,10 +129,14 @@ async def lifespan(app: FastAPI):
     # cron in targets.yaml is never registered and the orchestrator only ever
     # runs when POST /targets/{id}/run is called by hand.
     start_scheduler()
+    # Per serving loop: an asyncio.Lock binds to the loop that first contends
+    # on it, and this app object outlives test loops.
+    app.state.demo_verify_lock = asyncio.Lock()
     try:
         yield
     finally:
         shutdown_scheduler()
+        app.state.demo_verify_lock = None
 
 
 async def _run_llm_model_preflight() -> None:
@@ -186,7 +191,8 @@ app = FastAPI(
     version=VERSION,
     summary="Orchestrates OSINT collectors, normalises findings to STIX 2.1 and ingests them into OpenCTI.",
     description=(
-        "Every endpoint except `GET /`, `GET /health` and `GET /metrics` requires an API key "
+        "Every endpoint except `GET /`, `GET /health`, `GET /metrics`, the documentation pages, "
+        "the console shell and, with `DEMO_MODE=true`, the `/demo` routes requires an API key "
         "(`X-API-Key: <key>` or `Authorization: Bearer <key>`). Error `detail` strings are "
         "localised per ADR-004. See docs/operations.md in the repository for the operator guide."
     ),
@@ -321,6 +327,10 @@ def _health_hint(component: str, status: str, detail: str) -> tuple[str, str]:
                 "OpenCTI ingestion is failing.",
                 "Check the OpenCTI endpoint, credentials, and broker connectivity before retrying.",
             ),
+            "disabled": (
+                "OpenCTI is intentionally off in this deployment (demo mode).",
+                "No action: reports, findings and the evidence chain do not need the sink.",
+            ),
         },
     }
     compact = hints.get(component, {}).get(
@@ -356,7 +366,16 @@ async def health() -> dict[str, Any]:
         checks["scheduler"] = {"status": "degraded", "detail": "Scheduler is not running"}
 
     if not settings.opencti_enabled:
-        checks["opencti"] = {"status": "degraded", "detail": "OpenCTI sink disabled"}
+        # ADR-008: without the sink the knowledge graph is degraded. In demo
+        # mode the sink is off by design (the service refuses to start with it
+        # on), so reporting it as degraded would make every demo look broken.
+        if settings.demo_mode:
+            checks["opencti"] = {
+                "status": "disabled",
+                "detail": "OpenCTI sink disabled (demo mode)",
+            }
+        else:
+            checks["opencti"] = {"status": "degraded", "detail": "OpenCTI sink disabled"}
 
     for component, payload in checks.items():
         status = payload["status"]
@@ -795,15 +814,64 @@ async def _demo_run_or_404(run_id: int) -> tuple[Run, Target]:
     return run, target
 
 
+def _demo_language(request: Request) -> str:
+    """Page language: ``?lang=`` first, then the browser's Accept-Language, then the global default.
+
+    Visitors of a public page have no per-target setting; the operator's
+    ``ORCHESTRATOR_LANGUAGE`` is the fallback, not the rule.
+    """
+    requested = (request.query_params.get("lang") or "").strip().lower()
+    if requested in SUPPORTED_LANGUAGES:
+        return resolve_language(requested)
+    # Accept-Language: best supported primary subtag by quality value.
+    candidates: list[tuple[float, int, str]] = []
+    for position, entry in enumerate(request.headers.get("accept-language", "").split(",")):
+        tag, _, params = entry.strip().partition(";")
+        quality = 1.0
+        for param in params.split(";"):
+            key, _, value = param.strip().partition("=")
+            if key == "q":
+                try:
+                    quality = float(value)
+                except ValueError:
+                    quality = 0.0
+        language = tag.strip().split("-", 1)[0].lower()
+        if quality > 0 and language in SUPPORTED_LANGUAGES:
+            # Equal quality: the browser lists its preference first.
+            candidates.append((quality, -position, language))
+    # Visitor input is not operator configuration: anything unsupported falls
+    # back quietly instead of reaching resolve_language's warning (which exists
+    # for typos in targets.yaml / ORCHESTRATOR_LANGUAGE).
+    return resolve_language(max(candidates)[2] if candidates else None)
+
+
 @app.get("/demo", response_class=HTMLResponse, include_in_schema=False)
 async def demo_page(request: Request) -> HTMLResponse:
     """The public demo page (static shell; it calls the /demo/* routes)."""
     _require_demo()
-    language = resolve_language(None)
+    language = _demo_language(request)
+    # Same second line of defence as the console: the page renders model- and
+    # internet-derived strings (titles, rationales, the report), so only this
+    # response's inline script/style may run and nothing may be framed.
+    nonce = secrets.token_urlsafe(16)
+    csp = (
+        f"default-src 'none'; script-src 'nonce-{nonce}'; style-src 'nonce-{nonce}'; "
+        "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    )
     return templates.TemplateResponse(
         request=request,
         name="demo.html",
-        context={"language": language, "disclaimer": t("demo.disclaimer", language=language)},
+        context={
+            "language": language,
+            "disclaimer": t("demo.disclaimer", language=language),
+            "csp_nonce": nonce,
+        },
+        headers={
+            "Content-Security-Policy": csp,
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "no-referrer",
+            "Cache-Control": "no-store",
+        },
     )
 
 
@@ -917,14 +985,48 @@ async def demo_run_manifest(run_id: int) -> dict[str, Any]:
         ) from None
 
 
+# The public chain check re-hashes every artefact of every sealed run of the
+# target and needs no key, so one visitor could keep the event loop busy by
+# reloading it. Results are kept for a few seconds and computed one at a time;
+# a tampered file is still reported within _DEMO_VERIFY_CACHE_SECONDS.
+_DEMO_VERIFY_CACHE_SECONDS = 15.0
+_demo_verify_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+
+
+def _demo_verify_lock(request: Request) -> asyncio.Lock:
+    """The lock the lifespan created for this serving loop (never one from an earlier loop)."""
+    lock = getattr(request.app.state, "demo_verify_lock", None)
+    if lock is None:  # app served without its lifespan (bare TestClient)
+        lock = request.app.state.demo_verify_lock = asyncio.Lock()
+    return lock
+
+
 @app.get("/demo/targets/{target_id}/chain/verify", tags=["demo"])
-async def demo_verify_chain(target_id: str) -> dict[str, Any]:
+async def demo_verify_chain(target_id: str, request: Request) -> dict[str, Any]:
     """Verify the evidence chain of an allowlisted target."""
     target = _demo_target_or_404(target_id)
-    async with get_session() as session:
-        result = await verify_target_chain(
-            target_id=target_id, secret_key=settings.orchestrator_secret_key, session=session
-        )
+    async with _demo_verify_lock(request):
+        cached = _demo_verify_cache.get(target_id)
+        if cached is not None and time.monotonic() - cached[0] < _DEMO_VERIFY_CACHE_SECONDS:
+            result = dict(cached[1])
+        else:
+            try:
+                async with get_session() as session:
+                    result = await verify_target_chain(
+                        target_id=target_id,
+                        secret_key=settings.orchestrator_secret_key,
+                        session=session,
+                    )
+            except Exception:
+                # Metric parity with the protected route.
+                metrics.evidence_chain_verify_total.labels(target_id, "error").inc()
+                raise
+            # Stamped after the hashing: a slow verification must not come out
+            # of the cache already half expired.
+            _demo_verify_cache[target_id] = (time.monotonic(), dict(result))
+    # Counted on every request, cached or not, like the protected route: the
+    # metric answers "how many verifications were asked for".
+    metrics.evidence_chain_verify_total.labels(target_id, "ok" if result["ok"] else "broken").inc()
     if result["reason"]:
         result["message"] = t(
             f"chain.reason.{result['reason']}",

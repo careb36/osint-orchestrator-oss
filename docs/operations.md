@@ -88,9 +88,23 @@ Guards:
   (`DEMO_LLM_CALLS_PER_DAY`). When one is spent the call is not made, the run
   still finishes and its error field says why.
 - **Startup check.** With `DEMO_MODE=true` the service refuses to start unless
-  `OPENCTI_ENABLED=false`, the API key and the signing key are set, and every
-  allowlisted target enables the Tavily collector and nothing else. Nothing
-  runs on a schedule.
+  `OPENCTI_ENABLED=false`, the API key and the signing key are set,
+  `TAVILY_API_KEY` is set, every allowlisted target enables the Tavily
+  collector and nothing else, and, for each target, the key of the provider
+  its synthesis would use is set: `anthropic` → `ANTHROPIC_API_KEY`; `openai`
+  → `OPENAI_API_KEY`; `nebius` → `NEBIUS_API_KEY` plus both `LLM_MODEL_*` ids.
+  The provider is the resolved one: `llm: openai` under `LLM_PROVIDER=nebius`
+  is the Nebius route; `llm: local` and `LLM_PROVIDER=none` need no key.
+  Nothing runs on a schedule.
+- **Local demo.** `docker-compose.demo.yml` sets `DEMO_TRUSTED_PROXY_HOPS=0`
+  and, unless `.env` sets it, raises `DEMO_MAX_RUNS_PER_IP_PER_DAY` to the
+  global cap: behind Docker's port mapping every browser on the machine shares
+  one address. The counters
+  live in the `demo-data` volume; `docker compose -f docker-compose.demo.yml
+  down -v` resets them. `/health` reports the OpenCTI sink as `disabled`, not
+  `degraded`, because demo mode turns it off by design.
+- **Page language.** `/demo?lang=es|en` or the browser's `Accept-Language`;
+  the global `ORCHESTRATOR_LANGUAGE` is the fallback.
 
 Runs shown before any visitor starts one are loaded from `demo/seed/` (see its
 [README](../demo/seed/README.md)); deployment: [deploy.md](deploy.md).
@@ -106,8 +120,10 @@ scheduler): one replica, `Recreate` strategy, one `ReadWriteOnce` volume
 ## API
 
 Interactive reference: `/docs` (OpenAPI at `/openapi.json`). Public routes are
-`/`, `/health`, `/metrics`, `/docs`, `/console` and `/console/i18n.json`; every
-other route needs `X-API-Key: <key>` or `Authorization: Bearer <key>`.
+`/`, `/health`, `/metrics`, `/docs`, `/redoc`, `/openapi.json`, `/console`,
+`/console/i18n.json` and, with `DEMO_MODE=true`, the `/demo` routes listed
+under [Demo mode](#demo-mode); every other route needs `X-API-Key: <key>` or
+`Authorization: Bearer <key>`.
 
 | Method | Path | Description |
 | --- | --- | --- |
@@ -149,6 +165,10 @@ render every state without guessing:
 - `degraded`: the app is still serving requests, but a dependency is degraded
   (for example, the scheduler is not running or OpenCTI is disabled)
 - `offline`: a core dependency failed its self-check (for example, DB access)
+
+Each entry under `checks` carries one of the same three values, plus `disabled`
+for a component that is off by configuration and does not affect the overall
+status (today only the OpenCTI sink in demo mode).
 
 A failed poll is surfaced as an error state in the dashboard rather than
 crashing the page; the next periodic refresh retries automatically. The UI keeps

@@ -9,9 +9,10 @@
 #                           # ORCHESTRATOR_SECRET_KEY
 #   docker compose -f docker-compose.demo.yml up -d --build
 #   open http://localhost:7860/demo
+#   docker compose -f docker-compose.demo.yml down -v   # also resets the daily counters
 #
 # The service refuses to start if the demo configuration is unsafe to expose
-# (see docs/operations.md, Demo mode).
+# or incomplete (see docs/operations.md, Demo mode).
 
 services:
   demo:
@@ -28,6 +29,11 @@ services:
       ORCHESTRATOR_DATABASE_URL: sqlite+aiosqlite:////app/data/orchestrator.db
       # No reverse proxy in front when run locally.
       DEMO_TRUSTED_PROXY_HOPS: "0"
+      # Behind Docker's port mapping every browser on this machine arrives
+      # from the same bridge address, so the per-visitor cap would be a cap
+      # for the whole room. Local default: the global cap. A value set in
+      # .env still wins (.env.example ships it commented out for this reason).
+      DEMO_MAX_RUNS_PER_IP_PER_DAY: "${DEMO_MAX_RUNS_PER_IP_PER_DAY:-${DEMO_MAX_RUNS_PER_DAY:-50}}"
     ports:
       - "7860:7860"
     volumes:

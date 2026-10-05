@@ -100,6 +100,7 @@ def client(demo_settings: Path, monkeypatch: pytest.MonkeyPatch):
             raise AssertionError("the OpenCTI sink must not be used in demo mode")
 
     monkeypatch.setattr(pipeline_module, "OpenCTISink", _NoOpenCTI)
+    api_module._demo_verify_cache.clear()  # module state keyed by target id
     with TestClient(api_module.app) as test_client:
         with _db() as conn:
             conn.execute("DELETE FROM demo_daily_usage")
@@ -167,6 +168,67 @@ def test_demo_mode_starts_and_mounts_demo_routes(client: TestClient) -> None:
     assert client.get("/demo/targets/demo-corp/runs").json() == []
 
 
+def test_demo_page_language_follows_query_then_accept_language(client: TestClient) -> None:
+    # The operator default is "en" here; the visitor's choice wins over it.
+    es = client.get("/demo", params={"lang": "es"})
+    assert es.status_code == 200
+    assert '<html lang="es">' in es.text
+    assert "Demostración con información pública" in es.text
+
+    header = client.get("/demo", headers={"Accept-Language": "es-UY,es;q=0.9,en;q=0.8"})
+    assert '<html lang="es">' in header.text
+
+    # quality values decide, and q=0 excludes a language
+    weighted = client.get("/demo", headers={"Accept-Language": "es;q=0.8,en;q=0.9"})
+    assert '<html lang="en">' in weighted.text
+    excluded = client.get("/demo", headers={"Accept-Language": "fr,es;q=0,en;q=0.1"})
+    assert '<html lang="en">' in excluded.text
+    # equal quality: the first listed wins, not the alphabetically smaller tag
+    ordered = client.get("/demo", headers={"Accept-Language": "en,es"})
+    assert '<html lang="en">' in ordered.text
+    ordered_es = client.get("/demo", headers={"Accept-Language": "es;q=0.9,en;q=0.9"})
+    assert '<html lang="es">' in ordered_es.text
+
+    unknown = client.get("/demo", params={"lang": "xx"})
+    assert '<html lang="en">' in unknown.text  # falls back to the global setting
+
+
+def test_unsupported_visitor_locale_falls_back_without_a_warning(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Visitor input must not become log noise on a public page.
+    with caplog.at_level("WARNING", logger="orchestrator.i18n"):
+        resp = client.get("/demo", headers={"Accept-Language": "fr-FR,fr;q=0.9"})
+    assert resp.status_code == 200 and '<html lang="en">' in resp.text
+    assert not [r for r in caplog.records if r.name == "orchestrator.i18n"]
+
+
+def test_public_chain_verify_counts_errors_like_the_protected_route(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from orchestrator import metrics
+
+    api_module._demo_verify_cache.clear()
+
+    async def _boom(**kwargs):
+        raise RuntimeError("disk gone")
+
+    monkeypatch.setattr(api_module, "verify_target_chain", _boom)
+    labels = {"target_id": "demo-corp", "outcome": "error"}
+    before = metrics.sample("osint_orchestrator_evidence_chain_verify_total", labels) or 0.0
+    with pytest.raises(RuntimeError):
+        client.get("/demo/targets/demo-corp/chain/verify")
+    assert metrics.sample("osint_orchestrator_evidence_chain_verify_total", labels) - before == 1
+
+
+def test_health_is_ok_in_demo_mode_with_the_sink_off_by_design(client: TestClient) -> None:
+    payload = client.get("/health").json()
+    assert payload["status"] == "ok"
+    assert payload["checks"]["opencti"]["status"] == "disabled"
+    assert payload["checks"]["opencti"]["hint"]
+    assert payload["checks"]["opencti"]["action"]
+
+
 def test_demo_routes_are_404_when_demo_mode_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "demo_mode", False)
     with TestClient(api_module.app) as plain:
@@ -183,6 +245,7 @@ def test_demo_routes_are_404_when_demo_mode_is_off(monkeypatch: pytest.MonkeyPat
         ("orchestrator_secret_key", "", "ORCHESTRATOR_SECRET_KEY must be set"),
         ("orchestrator_api_key", "", "ORCHESTRATOR_API_KEY must be set"),
         ("demo_max_runs_per_ip_per_day", 0, "DEMO_MAX_RUNS_PER_IP_PER_DAY must be > 0"),
+        ("tavily_api_key", "", "TAVILY_API_KEY must be set"),
     ],
 )
 def test_demo_mode_refuses_to_start_with_opencti_enabled_or_non_tavily_collectors(
@@ -580,8 +643,138 @@ def test_shipped_allowlist_is_a_valid_demo_configuration(
 ) -> None:
     shipped = Path(__file__).parents[2] / "demo" / "targets.demo.yaml"
     monkeypatch.setattr(settings, "demo_targets_file", str(shipped))
+    monkeypatch.setattr(settings, "nebius_api_key", "test-token")
+    monkeypatch.setattr(settings, "llm_model_reasoning", "nvidia/reasoning-model")
+    monkeypatch.setattr(settings, "llm_model_fast", "nvidia/fast-model")
     demo.validate_demo_mode()
     assert all(target.fqdn.startswith("example.") for target in demo.load_demo_targets())
+
+
+@pytest.mark.parametrize(
+    ("setting", "expected"),
+    [
+        ("nebius_api_key", "NEBIUS_API_KEY must be set"),
+        ("llm_model_reasoning", "LLM_MODEL_REASONING must name a Nemotron model"),
+        ("llm_model_fast", "LLM_MODEL_FAST must name a Nemotron model"),
+    ],
+)
+def test_nebius_targets_need_a_key_and_both_model_routes(
+    demo_settings: Path, monkeypatch: pytest.MonkeyPatch, setting: str, expected: str
+) -> None:
+    # The shipped allowlist synthesises with ``llm: nebius``; a half-filled
+    # .env must stop the service instead of failing every run in public.
+    shipped = Path(__file__).parents[2] / "demo" / "targets.demo.yaml"
+    monkeypatch.setattr(settings, "demo_targets_file", str(shipped))
+    monkeypatch.setattr(settings, "llm_provider", "nebius")  # the fixture turns synthesis off
+    monkeypatch.setattr(settings, "nebius_api_key", "test-token")
+    monkeypatch.setattr(settings, "llm_model_reasoning", "nvidia/reasoning-model")
+    monkeypatch.setattr(settings, "llm_model_fast", "nvidia/fast-model")
+    monkeypatch.setattr(settings, setting, "")
+    with pytest.raises(RuntimeError, match=expected):
+        demo.validate_demo_mode()
+
+
+def test_nebius_settings_are_not_required_when_synthesis_is_off(
+    demo_settings: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # LLM_PROVIDER=none builds no client at all (providers.get_client), so the
+    # shipped allowlist must start without Nebius settings.
+    shipped = Path(__file__).parents[2] / "demo" / "targets.demo.yaml"
+    monkeypatch.setattr(settings, "demo_targets_file", str(shipped))
+    monkeypatch.setattr(settings, "llm_provider", "none")
+    monkeypatch.setattr(settings, "nebius_api_key", "")
+    monkeypatch.setattr(settings, "llm_model_reasoning", "")
+    monkeypatch.setattr(settings, "llm_model_fast", "")
+    demo.validate_demo_mode()
+
+
+@pytest.mark.parametrize(
+    ("llm", "provider", "expected"),
+    [
+        ("anthropic", "anthropic", "ANTHROPIC_API_KEY must be set"),
+        ("openai", "openai", "OPENAI_API_KEY must be set"),
+        ("openai", "nebius", "NEBIUS_API_KEY must be set"),
+    ],
+)
+def test_every_cloud_provider_a_demo_target_uses_needs_its_key(
+    demo_settings: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    llm: str,
+    provider: str,
+    expected: str,
+) -> None:
+    # The guard follows providers.get_client: whatever client a target would
+    # build must have its key, not only the Nebius route.
+    path = tmp_path / "targets.cloud.yaml"
+    path.write_text(
+        _TARGETS.format(
+            target_id="cloud-corp", report_dir=tmp_path / "r", openosint="false"
+        ).replace("    language: en\n", f"    language: en\n    llm: {llm}\n"),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(settings, "demo_targets_file", str(path))
+    monkeypatch.setattr(settings, "llm_provider", provider)
+    for name in ("anthropic_api_key", "openai_api_key", "nebius_api_key"):
+        monkeypatch.setattr(settings, name, "")
+    with pytest.raises(RuntimeError, match=expected):
+        demo.validate_demo_mode()
+
+
+def test_local_targets_need_no_cloud_key_whatever_the_global_provider(
+    demo_settings: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A target without ``llm:`` defaults to ``local`` and always gets Ollama
+    # (providers.get_client), so a cloud LLM_PROVIDER must not demand its key.
+    monkeypatch.setattr(settings, "llm_provider", "anthropic")
+    monkeypatch.setattr(settings, "anthropic_api_key", "")
+    demo.validate_demo_mode()  # the fixture's targets carry no ``llm:``
+
+
+def test_demo_page_has_the_console_security_headers(client: TestClient) -> None:
+    resp = client.get("/demo")
+    csp = resp.headers["Content-Security-Policy"]
+    assert "default-src 'none'" in csp and "frame-ancestors 'none'" in csp
+    nonce = csp.split("script-src 'nonce-", 1)[1].split("'", 1)[0]
+    assert f'<script nonce="{nonce}">' in resp.text
+    assert f'<style nonce="{nonce}">' in resp.text
+    assert resp.headers["X-Content-Type-Options"] == "nosniff"
+    assert resp.headers["Referrer-Policy"] == "no-referrer"
+    assert resp.headers["Cache-Control"] == "no-store"
+
+
+def test_public_chain_verify_is_cached_briefly_and_counted(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from orchestrator import metrics
+
+    api_module._demo_verify_cache.clear()
+    calls: list[str] = []
+    real = api_module.verify_target_chain
+
+    async def _counting(**kwargs):
+        calls.append(kwargs["target_id"])
+        return await real(**kwargs)
+
+    monkeypatch.setattr(api_module, "verify_target_chain", _counting)
+    before = (
+        metrics.sample(
+            "osint_orchestrator_evidence_chain_verify_total",
+            {"target_id": "demo-corp", "outcome": "ok"},
+        )
+        or 0.0
+    )
+
+    first = client.get("/demo/targets/demo-corp/chain/verify").json()
+    second = client.get("/demo/targets/demo-corp/chain/verify").json()
+
+    assert first["ok"] is True and second == first
+    assert calls == ["demo-corp"]  # the second request was served from the cache
+    after = metrics.sample(
+        "osint_orchestrator_evidence_chain_verify_total",
+        {"target_id": "demo-corp", "outcome": "ok"},
+    )
+    assert after - before == 2  # every request is counted, cached or not
 
 
 def test_public_target_view_has_no_authorization_text(demo_settings: Path) -> None:

@@ -13,7 +13,7 @@ uid `1000`. Keys are read from the environment and never baked into the image.
 | `LLM_PROVIDER` | `nebius` |
 | `LLM_MODEL_REASONING`, `LLM_MODEL_FAST` | Nemotron ids served to your key (`GET /v1/models`) |
 | `DEMO_TRUSTED_PROXY_HOPS` | Number of proxies in front of the container (`1` behind a single platform proxy) |
-| `DEMO_*` limits | Optional; defaults in [configuration.md](configuration.md) |
+| `DEMO_*` limits | Optional; defaults in [configuration.md](configuration.md). Behind a platform proxy keep `DEMO_MAX_RUNS_PER_IP_PER_DAY` low; locally (`docker-compose.demo.yml`) it equals the global cap because every browser shares Docker's bridge address |
 
 The image already sets `DEMO_MODE=true`, `OPENCTI_ENABLED=false`, the allowlist
 path and the database path. The container refuses to start if a required value

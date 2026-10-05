@@ -75,6 +75,13 @@ Before any deployment beyond a laptop:
       client in the realm; `auth/keycloak/realm.json` ships a placeholder).
 - [ ] `.env` never committed; `targets.yaml` contains no credentials (it is
       not encrypted and not a secret store).
+- [ ] **Public demo** (`DEMO_MODE=true`): only the `/demo` routes are open;
+      they serve allowlisted targets, rate-limited runs and views without the
+      model's synthesis, under the same CSP as the console. The service refuses
+      to start with OpenCTI on, without the API/signing keys, or with a target
+      that enables any collector other than Tavily. Per-item categories and
+      rationales are still model output about a named entity: keep the
+      disclaimer and the allowlist deliberate.
 
 ## 4. Data protection and privacy
 
