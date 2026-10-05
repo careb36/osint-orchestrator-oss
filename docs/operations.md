@@ -240,10 +240,12 @@ values unless the target sets `include_values: false`.
 
 ## Retention
 
-A nightly job (`ORCHESTRATOR_RETENTION_CRON`) deletes runs, findings, alerts and
-`daily_reports/<date>` directories older than `ORCHESTRATOR_RETENTION_DAYS`
-(default `90`, `0` disables it). The delta memory (`seen_observables`) is never
-purged. The default is operational, not a legal retention period: when reports
+A nightly job (`ORCHESTRATOR_RETENTION_CRON`) deletes runs that finished more
+than `ORCHESTRATOR_RETENTION_DAYS` ago (default `90`, `0` disables it) with their
+observables, findings, qualified evidence, alerts and queued deliveries. A
+`daily_reports/<date>` directory is deleted once its whole day is older than the
+cutoff and no remaining run started that day, so a kept run never loses its
+report or manifest. The delta memory (`seen_observables`) is never purged. The default is operational, not a legal retention period: when reports
 are due-diligence evidence, set the period your regulation requires or archive
 the run directories before the purge.
 

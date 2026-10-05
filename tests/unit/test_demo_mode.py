@@ -10,6 +10,7 @@ that fails if it is ever constructed.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import sqlite3
@@ -469,6 +470,51 @@ async def test_budgets_are_not_counted_outside_demo_mode(monkeypatch: pytest.Mon
     monkeypatch.setattr(settings, "demo_mode", False)
     assert await demo.consume_budget("tavily") is True
     assert await demo.consume_budget("llm") is True
+
+
+async def test_concurrent_budget_checks_never_exceed_the_daily_limit(
+    demo_settings: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Two demo runs at once must not both spend the last Tavily call."""
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'usage.db'}")
+    async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all)
+
+    @asynccontextmanager
+    async def _session():
+        async with AsyncSession(engine, expire_on_commit=False) as session:
+            yield session
+
+    monkeypatch.setattr(demo, "get_session", _session)
+    monkeypatch.setattr(settings, "demo_tavily_calls_per_day", 5)
+    try:
+        allowed = await asyncio.gather(*(demo.consume_budget("tavily") for _ in range(20)))
+        async with _session() as session:
+            rows = (await session.exec(select(demo.DemoDailyUsage))).all()
+    finally:
+        await engine.dispose()
+
+    assert allowed.count(True) == 5
+    assert [(row.scope, row.tavily_calls) for row in rows] == [("global", 5)]
+
+
+@pytest.mark.parametrize("separator", ["\r", "\x0c", "\x85", "\u2028", "\u2029", "\x1e"])
+def test_public_report_withholds_synthesis_behind_any_line_separator(separator: str) -> None:
+    """Model text that spells a heading must not end the redaction early."""
+    markdown = (
+        "# Report\n\n## Errors\n_None._\n\n## Synthesis\n"
+        f"Fine.{separator}## Next\n\n**Risk**: `high` — SECRET-JUSTIFICATION\n"
+        "\n## Errors\nSECRET-PIVOT\n"
+    )
+
+    public = demo.public_report(markdown, "en")
+
+    assert "## Errors\n_None._" in public
+    assert public.endswith(
+        "## Synthesis\n" + demo.t("demo.synthesis_withheld", language="en") + "\n"
+    )
+    for forbidden in ("SECRET-", "high", "Fine.", "## Next"):
+        assert forbidden not in public
 
 
 # ─── A full demo run ──────────────────────────────────────────────────────────

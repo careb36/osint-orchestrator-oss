@@ -19,6 +19,7 @@ from orchestrator.models import (
     AlertDeliveryStatus,
     AlertRecord,
     AlertStatus,
+    EvidenceQualification,
     FindingRecord,
     OpenCTIOutbox,
     OpenCTIOutboxStatus,
@@ -129,6 +130,9 @@ async def test_purge_deletes_old_run_and_dependents(tmp_path, monkeypatch):
                 status=OpenCTIOutboxStatus.PENDING,
             )
         )
+        session.add(
+            EvidenceQualification(run_id=old_run.id, target_id="t1", url="https://old.example/news")
+        )
 
         # Recent run and its dependents
         recent_run = Run(
@@ -159,6 +163,11 @@ async def test_purge_deletes_old_run_and_dependents(tmp_path, monkeypatch):
                 suggested_pivots="[]",
             )
         )
+        session.add(
+            EvidenceQualification(
+                run_id=recent_run.id, target_id="t1", url="https://new.example/news"
+            )
+        )
 
         # SeenObservable must survive
         session.add(
@@ -181,6 +190,7 @@ async def test_purge_deletes_old_run_and_dependents(tmp_path, monkeypatch):
     assert summary.alerts_deleted == 1
     assert summary.alert_deliveries_deleted == 1
     assert summary.opencti_outbox_deleted == 1
+    assert summary.evidence_qualifications_deleted == 1
 
     # Verify DB state
     async with AsyncSession(engine, expire_on_commit=False) as session:
@@ -201,6 +211,8 @@ async def test_purge_deletes_old_run_and_dependents(tmp_path, monkeypatch):
         assert len(alert_deliveries) == 0  # old queue rows gone
         outbox_rows = (await session.exec(select(OpenCTIOutbox))).all()
         assert len(outbox_rows) == 0
+        evidence = (await session.exec(select(EvidenceQualification))).all()
+        assert [row.run_id for row in evidence] == [recent_run.id]
 
         # seen_observables untouched
         seen = (await session.exec(select(SeenObservable))).all()
@@ -340,6 +352,102 @@ async def test_filesystem_error_does_not_stop_other_dirs(tmp_path, monkeypatch):
     # At least one dir should have been attempted
     assert call_count["n"] >= 1
     assert len(summary.errors) >= 1
+
+
+async def _purge_with_runs(tmp_path, monkeypatch, runs: list[Run], dir_names: list[str]):
+    engine = _make_engine()
+    await _setup_db(engine)
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        session.add_all(runs)
+        await session.commit()
+
+    reports = tmp_path / "daily_reports"
+    for name in dir_names:
+        (reports / name).mkdir(parents=True)
+        (reports / name / "report.md").write_text("x")
+
+    monkeypatch.setattr("orchestrator.retention.get_session", _session_factory(engine))
+    monkeypatch.setattr("orchestrator.retention.settings.orchestrator_retention_days", 90)
+    monkeypatch.setattr(
+        "orchestrator.retention._collect_report_dirs",
+        lambda: {str(reports)},
+    )
+    summary = await purge_expired(now=NOW)
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        kept = (await session.exec(select(Run))).all()
+    return summary, reports, kept
+
+
+@pytest.mark.asyncio
+async def test_cutoff_day_directory_survives_while_its_later_runs_are_kept(tmp_path, monkeypatch):
+    """The run row expires by finished_at, so its directory must not go by date alone."""
+    cutoff = NOW - timedelta(days=90)  # 2026-06-11 12:00 UTC
+    before = Run(
+        target_id="t1",
+        started_at=cutoff - timedelta(hours=2),
+        finished_at=cutoff - timedelta(hours=1),
+        status=RunStatus.SUCCESS,
+    )
+    after = Run(
+        target_id="t1",
+        started_at=cutoff + timedelta(hours=1),
+        finished_at=cutoff + timedelta(hours=2),
+        status=RunStatus.SUCCESS,
+    )
+    day = cutoff.strftime("%Y-%m-%d")
+    previous_day = (cutoff - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    summary, reports, kept = await _purge_with_runs(
+        tmp_path, monkeypatch, [before, after], [previous_day, day]
+    )
+
+    assert [run.started_at.hour for run in kept] == [13]
+    assert (reports / day).exists(), "a kept run's report directory must survive"
+    assert not (reports / previous_day).exists()
+    assert summary.report_dirs_deleted == 1
+
+
+@pytest.mark.asyncio
+async def test_directory_of_a_surviving_old_run_is_not_deleted(tmp_path, monkeypatch):
+    """A run that started long ago but finished inside the window keeps its directory."""
+    long_run = Run(
+        target_id="t1",
+        started_at=NOW - timedelta(days=95),
+        finished_at=NOW - timedelta(days=10),
+        status=RunStatus.SUCCESS,
+    )
+    day = long_run.started_at.strftime("%Y-%m-%d")
+
+    summary, reports, kept = await _purge_with_runs(tmp_path, monkeypatch, [long_run], [day])
+
+    assert len(kept) == 1
+    assert (reports / day).exists()
+    assert summary.report_dirs_deleted == 0
+
+
+@pytest.mark.asyncio
+async def test_report_dirs_are_kept_when_surviving_runs_cannot_be_read(tmp_path, monkeypatch):
+    reports = tmp_path / "daily_reports"
+    old_dir = reports / "2026-01-01"
+    old_dir.mkdir(parents=True)
+
+    @asynccontextmanager
+    async def _broken_session():
+        raise RuntimeError("database is locked")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr("orchestrator.retention.get_session", _broken_session)
+    monkeypatch.setattr("orchestrator.retention.settings.orchestrator_retention_days", 90)
+    monkeypatch.setattr(
+        "orchestrator.retention._collect_report_dirs",
+        lambda: {str(reports)},
+    )
+
+    summary = await purge_expired(now=NOW)
+
+    assert old_dir.exists()
+    assert summary.report_dirs_deleted == 0
+    assert summary.errors == ["database", "report_dirs"]
 
 
 # ─── Scheduler registration tests ─────────────────────────────────────────────

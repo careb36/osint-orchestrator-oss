@@ -17,6 +17,10 @@ _AUTOLINK = re.compile(r"<((?:https?|ftp|mailto):[^>\s]+)>")
 _HTML_TAG = re.compile(r"</?[A-Za-z][^<>]*>")
 _HEADING = re.compile(r"^(\s*)(#{1,6})(?=\s)", re.MULTILINE)
 _SCHEME = re.compile(r"\b(h)ttp(s?)://", re.IGNORECASE)
+# Every separator str.splitlines() honours. A heading after a lone "\r" or a
+# "\u2028" is not at a line start for the regexes above, yet a reader that
+# splits lines (or reads the file back with universal newlines) sees one.
+_LINE_BREAK = re.compile(r"\r\n|[\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029]")
 
 
 def neutralise_markdown(text: str) -> str:
@@ -25,7 +29,10 @@ def neutralise_markdown(text: str) -> str:
     autolinks unwrapped, HTML tags removed, line-leading headings escaped and
     every ``http(s)://`` defanged to ``hxxp(s)://`` — the CTI convention, so a
     URL in an analyst's report is never one click away from being visited.
+    Every line break is normalised to ``\n`` first, so no heading hides behind
+    a separator the heading escape would not see.
     """
+    text = _LINE_BREAK.sub("\n", text)
     text = _LINK.sub(lambda m: f"{m.group(1)} ({m.group(2)})" if m.group(2) else m.group(1), text)
     text = _AUTOLINK.sub(r"\1", text)
     text = _HTML_TAG.sub("", text)
