@@ -1,4 +1,5 @@
 import type { HealthStatus, RunDetail, RunSummary, TargetSummary } from '../types';
+import { reportUiError, trackUiTelemetry } from './telemetry';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api';
 const LEGACY_API_KEY_STORAGE_KEY = 'osint-operator-api-key';
@@ -24,26 +25,37 @@ function getLegacyApiKey(): string | undefined {
 
 async function request<T>(path: string, parseJson = true): Promise<T> {
   const legacyApiKey = getLegacyApiKey();
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: {
-      Accept: parseJson ? 'application/json' : 'text/plain, application/json',
-      ...(legacyApiKey ? { 'X-API-Key': legacyApiKey } : {}),
-    },
-  });
+  const url = `${API_BASE_URL}${path}`;
 
-  if (response.status === 204) {
-    return undefined as T;
+  try {
+    const response = await fetch(url, {
+      headers: {
+        Accept: parseJson ? 'application/json' : 'text/plain, application/json',
+        ...(legacyApiKey ? { 'X-API-Key': legacyApiKey } : {}),
+      },
+    });
+
+    if (response.status === 204) {
+      return undefined as T;
+    }
+
+    if (!response.ok) {
+      const message = `Request failed with status ${response.status}`;
+      trackUiTelemetry('api_error', { path, status: response.status, message });
+      throw new ApiError(message, response.status);
+    }
+
+    trackUiTelemetry('api_request', { path, status: response.status });
+
+    if (!parseJson) {
+      return (await response.text()) as T;
+    }
+
+    return (await response.json()) as T;
+  } catch (error) {
+    reportUiError(error, { source: 'api_request', path, url });
+    throw error;
   }
-
-  if (!response.ok) {
-    throw new ApiError(`Request failed with status ${response.status}`, response.status);
-  }
-
-  if (!parseJson) {
-    return (await response.text()) as T;
-  }
-
-  return (await response.json()) as T;
 }
 
 export const api = {

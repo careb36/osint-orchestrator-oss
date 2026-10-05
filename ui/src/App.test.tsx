@@ -46,6 +46,7 @@ describe('App shell', () => {
     expect(screen.getByRole('link', { name: /overview/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /targets/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /runs/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /workspace/i })).toBeInTheDocument();
   });
 
   it('keeps the legacy API key in session storage for compatibility', () => {

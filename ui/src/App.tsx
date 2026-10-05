@@ -1,14 +1,16 @@
-import { type ReactNode } from 'react';
+import { type ReactNode, useEffect } from 'react';
 import { Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { useAuth } from './auth';
 import { AppErrorBoundary } from './components/ErrorBoundary';
-import { LoginPage } from './pages/LoginPage';
+import { trackUiTelemetry } from './lib/telemetry';
 import { HomePage } from './pages/HomePage';
+import { LoginPage } from './pages/LoginPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { RunWorkspacePage } from './pages/RunWorkspacePage';
 import { RunsPage } from './pages/RunsPage';
 import { TargetDetailPage } from './pages/TargetDetailPage';
 import { TargetsPage } from './pages/TargetsPage';
+import { WorkspacePage } from './pages/WorkspacePage';
 import { QUICK_ACTIONS } from './routes';
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
@@ -32,6 +34,7 @@ function AppShell() {
     { to: '/', label: 'Overview', roles: ['viewer', 'operator', 'admin'] },
     { to: '/targets', label: 'Targets', roles: ['operator', 'admin'] },
     { to: '/runs', label: 'Runs', roles: ['operator', 'admin'] },
+    { to: '/workspace/latest', label: 'Workspace', roles: ['operator', 'admin'] },
   ].filter(({ roles }) => session && roles.includes(session.role));
 
   return (
@@ -83,6 +86,7 @@ function AppShell() {
           <Route path="/targets/:targetId/runs/:runId" element={<ProtectedRoute><RunWorkspacePage /></ProtectedRoute>} />
           <Route path="/runs" element={<ProtectedRoute><RunsPage /></ProtectedRoute>} />
           <Route path="/runs/:runId" element={<ProtectedRoute><RunWorkspacePage /></ProtectedRoute>} />
+          <Route path="/workspace/:runId" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
           <Route path="*" element={<ProtectedRoute><NotFoundPage /></ProtectedRoute>} />
         </Routes>
       </main>
@@ -91,6 +95,10 @@ function AppShell() {
 }
 
 export default function App() {
+  useEffect(() => {
+    trackUiTelemetry('app_loaded', { path: window.location.pathname });
+  }, []);
+
   return (
     <AppErrorBoundary>
       <AppShell />

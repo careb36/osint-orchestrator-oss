@@ -1,12 +1,21 @@
+import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ErrorState, LoadingState, PageLayout } from '../components/PageState';
 import { api } from '../lib/api';
+import { reportUiError, trackUiTelemetry } from '../lib/telemetry';
 
 export function HomePage() {
   const { data, isLoading, error } = useQuery({
     queryKey: ['health'],
     queryFn: api.getHealth,
   });
+
+  useEffect(() => {
+    if (error) {
+      reportUiError(error, { source: 'home_health' });
+      trackUiTelemetry('health_fetch_failed', { message: error instanceof Error ? error.message : 'unknown' });
+    }
+  }, [error]);
 
   if (isLoading) {
     return <PageLayout title="Overview" subtitle="Checking the current operating state."><LoadingState message="Loading service health..." /></PageLayout>;
