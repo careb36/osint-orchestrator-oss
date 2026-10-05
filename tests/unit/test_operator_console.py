@@ -129,6 +129,11 @@ def test_console_template_fetches_artifacts_with_api_key() -> None:
     assert "localStorage.setItem" not in src
     assert 'data-target-id="${esc(target.id)}"' in src
     assert "await startRun(targetId);" in src
+    assert "sessionStorage.setItem(VIEW_STORAGE_KEY, viewName);" in src
+    assert "const storedView = sessionStorage.getItem(VIEW_STORAGE_KEY);" in src
+    assert "const storedRunId = sessionStorage.getItem(RUN_STORAGE_KEY);" in src
+    assert "if (storedRunId) {" in src
+    assert "loadRunDetail(storedRunId);" in src
 
 
 def test_console_run_workspace_supports_evidence_search_filter_and_sort() -> None:

@@ -139,8 +139,6 @@
         targets: [],
         runs: [],
         riskTrends: [],
-        activeRunId: null,
-        activeTargetId: null,
         currentView: "summary",
         statusPollTimer: null,
       };
@@ -193,6 +191,7 @@
 
       function setActive(viewName) {
         state.currentView = viewName;
+        sessionStorage.setItem(VIEW_STORAGE_KEY, viewName);
         Object.keys(views).forEach((key) => {
           views[key].classList.toggle("hidden", key !== viewName);
           const nav = document.getElementById(`nav-${key}`);
@@ -735,8 +734,6 @@
 
       function startPolling(runId, targetId) {
         if (state.statusPollTimer) clearInterval(state.statusPollTimer);
-        state.activeRunId = runId;
-        state.activeTargetId = targetId;
         sessionStorage.setItem(RUN_STORAGE_KEY, String(runId));
         state.statusPollTimer = setInterval(async () => {
           try {
@@ -787,7 +784,7 @@
           const run = await apiGet(`/runs/${runId}`);
           const delta = await apiGet(`/runs/${runId}/delta`);
           const statusText = run.status === "pending" || run.status === "running" ? t("runStatusProgress", { status: run.status }) : t("runStatusTerminal", { status: run.status });
-          state.activeRunId = run.id;
+          sessionStorage.setItem(RUN_STORAGE_KEY, String(run.id));
           if (["pending", "running"].includes(run.status)) {
             startPolling(run.id, run.target_id);
           }
@@ -937,9 +934,14 @@
       });
 
       const storedApiKey = sessionStorage.getItem(STORAGE_KEY);
+      const storedView = sessionStorage.getItem(VIEW_STORAGE_KEY);
+      const storedRunId = sessionStorage.getItem(RUN_STORAGE_KEY);
       if (storedApiKey) {
         state.apiKey = storedApiKey;
         document.getElementById("remember-key-toggle").checked = true;
+      }
+      if (storedView && views[storedView]) {
+        setActive(storedView);
       }
       loadI18n()
         .then(() => {
@@ -949,6 +951,10 @@
             document.getElementById("api-key-note").textContent = t("keyLoaded");
           }
           loadData();
+          if (storedRunId) {
+            document.getElementById("run-id-input").value = storedRunId;
+            loadRunDetail(storedRunId);
+          }
           setInterval(() => {
             if (document.getElementById("nav-health") && document.getElementById("nav-health").classList.contains("active")) {
               loadHealthStatus();
