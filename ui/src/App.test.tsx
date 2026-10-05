@@ -6,6 +6,7 @@ import App from './App';
 import { ApiKeyProvider } from './auth';
 import { LOCALE_STORAGE_KEY, LocaleProvider, type Locale } from './i18n';
 import { API_KEY_STORAGE_KEY } from './lib/api';
+import { uiTelemetry } from './lib/telemetry';
 import { installFetchMock } from './test/mockApi';
 
 // The assertions below read the English catalogue; Spanish is the default
@@ -120,6 +121,29 @@ describe('App shell', () => {
     expect(window.sessionStorage.getItem(API_KEY_STORAGE_KEY)).toBeNull();
   });
 
+  it('describes a request without any answer in prose, never as a raw token', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new TypeError('Failed to fetch');
+      }),
+    );
+    renderApp(['/'], 'es');
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/no obtuvo respuesta/i);
+    expect(alert.textContent).not.toMatch(/network/i);
+  });
+
+  it('records the operator language in the first telemetry event', async () => {
+    installFetchMock();
+    uiTelemetry.length = 0;
+    renderApp(['/'], 'es');
+    await screen.findByRole('heading', { name: /cifras clave/i });
+    const loaded = uiTelemetry.find((entry) => entry.event === 'app_loaded');
+    expect(loaded?.language).toBe('es');
+  });
+
   it('shows the API as unavailable, not as open, when it does not answer 2xx or 401', async () => {
     const fetchMock = installFetchMock({
       routes: [{ pattern: /^\/targets$/, status: 503, body: { detail: 'maintenance' } }],
@@ -212,6 +236,21 @@ describe('App shell', () => {
     expect(screen.getByRole('heading', { name: /nothing running/i })).toBeInTheDocument();
   });
 
+  it('translates a rejected run by its status and keeps the server detail', async () => {
+    installFetchMock({
+      routes: [{ pattern: /^\/targets\/example-corp\/run$/, status: 409, body: { detail: 'Ya hay una corrida en curso para example-corp' } }],
+    });
+    const user = userEvent.setup();
+    renderApp(['/targets']);
+
+    await screen.findByRole('table');
+    await user.click(screen.getByRole('button', { name: /start run for example-corp/i }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/a run is already in progress/i);
+    expect(alert).toHaveTextContent(/server detail: ya hay una corrida en curso/i);
+  });
+
   it('starts a run from the overview and reports the accepted run', async () => {
     const fetchMock = installFetchMock({
       routes: [{ pattern: /^\/targets\/example-corp\/run$/, body: { run_id: 99, status: 'pending', target_id: 'example-corp' } }],
@@ -225,6 +264,7 @@ describe('App shell', () => {
     expect(await screen.findByRole('status')).toHaveTextContent(/run #99 accepted for example-corp/i);
     const post = fetchMock.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'POST');
     expect(String(post?.[0])).toMatch(/\/targets\/example-corp\/run$/);
+    expect(new Headers((post?.[1] as RequestInit).headers).get('Accept-Language')).toBe('en');
   });
 
   it('shows empty states on the overview when nothing has run yet', async () => {

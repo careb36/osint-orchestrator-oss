@@ -5,12 +5,14 @@ import { api, ApiError } from '../lib/api';
 /** What happened on Start run; RunNotice renders it in the operator's language. */
 export type RunNotice =
   | { tone: 'ok'; runId: number; targetId: string }
-  | { tone: 'error'; detail: string | null };
+  | { tone: 'error'; status: number | null; detail: string | null };
 
 /**
  * POST /targets/{id}/run with the operator-facing outcome as a notice. The
- * backend owns the rules (disabled target, run already in progress); its
- * `detail`, already in the operator language, is what the notice shows on error.
+ * backend owns the rules (400 disabled target, 409 run already in progress,
+ * 404 unknown target); the notice translates the status itself and shows the
+ * server's `detail`, which is in the server's configured language, as a
+ * secondary line.
  */
 export function useStartRun() {
   const queryClient = useQueryClient();
@@ -24,7 +26,8 @@ export function useStartRun() {
       void queryClient.invalidateQueries({ queryKey: ['risk-trends'] });
     },
     onError: (error) => {
-      setNotice({ tone: 'error', detail: error instanceof ApiError ? error.message : null });
+      const apiError = error instanceof ApiError ? error : null;
+      setNotice({ tone: 'error', status: apiError?.status ?? null, detail: apiError?.message ?? null });
     },
   });
 

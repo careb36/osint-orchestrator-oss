@@ -19,8 +19,8 @@ describe('parseApiDate', () => {
 
 describe('formatDuration', () => {
   it('works across naive and offset timestamps', () => {
-    expect(formatDuration('2026-10-01T06:00:00', '2026-10-01T06:04:30')).toBe('4m 30s');
-    expect(formatDuration('2026-10-01T06:00:00', '2026-10-01T08:00:30+02:00')).toBe('30s');
+    expect(formatDuration('2026-10-01T06:00:00', '2026-10-01T06:04:30')).toBe('4 min 30 s');
+    expect(formatDuration('2026-10-01T06:00:00', '2026-10-01T08:00:30+02:00')).toBe('30 s');
     expect(formatDuration('2026-10-01T06:00:00', null)).toBe('—');
   });
 });

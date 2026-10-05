@@ -31,6 +31,7 @@ const en = {
   'unavailable.title': 'API unavailable',
   'unavailable.body': 'The orchestrator API could not be reached.',
   'unavailable.bodyWithStatus': 'The orchestrator API could not be reached (status {status}).',
+  'unavailable.bodyNetwork': 'The orchestrator API could not be reached: the request did not get an answer (network error or server down).',
   retry: 'Retry',
   'error.title': 'Something went wrong.',
   'error.body': 'The UI hit an unexpected error. Refresh to try again.',
@@ -39,7 +40,8 @@ const en = {
   // key gate
   'gate.eyebrow': 'Operator access',
   'gate.title': 'API key required',
-  'gate.lede': 'This dashboard reads the orchestrator API with the operator key ({setting}). The key stays in this browser tab; tick “remember” to keep it on this device.',
+  'gate.lede.before': 'This dashboard reads the orchestrator API with the operator key (',
+  'gate.lede.after': '). The key stays in this browser tab; tick “remember” to keep it on this device.',
   'gate.formTitle': 'Enter the API key',
   'gate.keyLabel': 'API key',
   'gate.remember': 'Remember on this browser',
@@ -58,6 +60,12 @@ const en = {
   // start run
   'run.accepted': 'Run #{runId} accepted for {targetId}.',
   'run.failed': 'The run could not be started.',
+  'run.failed.disabled': 'The run could not be started: the target is disabled.',
+  'run.failed.inProgress': 'The run could not be started: a run is already in progress for this target.',
+  'run.failed.notFound': 'The run could not be started: the target does not exist.',
+  'run.failed.unauthorized': 'The run could not be started: the API key was rejected.',
+  'run.failed.status': 'The run could not be started (status {status}).',
+  'run.serverDetail': 'Server detail: {detail}',
   'run.start': 'Start run',
   'run.running': 'Running…',
   'run.startFor': ' for {targetId}',
@@ -267,6 +275,7 @@ const es: Record<MessageKey, string> = {
   'unavailable.title': 'API no disponible',
   'unavailable.body': 'No se pudo contactar la API del orquestador.',
   'unavailable.bodyWithStatus': 'No se pudo contactar la API del orquestador (estado {status}).',
+  'unavailable.bodyNetwork': 'No se pudo contactar la API del orquestador: la solicitud no obtuvo respuesta (error de red o servidor caído).',
   retry: 'Reintentar',
   'error.title': 'Algo salió mal.',
   'error.body': 'La interfaz encontró un error inesperado. Recargá la página para intentar de nuevo.',
@@ -274,7 +283,8 @@ const es: Record<MessageKey, string> = {
   eyebrow: 'Operaciones',
   'gate.eyebrow': 'Acceso del operador',
   'gate.title': 'Se requiere la clave de API',
-  'gate.lede': 'Este panel lee la API del orquestador con la clave del operador ({setting}). La clave queda en esta pestaña; marcá “recordar” para conservarla en este dispositivo.',
+  'gate.lede.before': 'Este panel lee la API del orquestador con la clave del operador (',
+  'gate.lede.after': '). La clave queda en esta pestaña; marcá “recordar” para conservarla en este dispositivo.',
   'gate.formTitle': 'Ingresá la clave de API',
   'gate.keyLabel': 'Clave de API',
   'gate.remember': 'Recordar en este navegador',
@@ -291,6 +301,12 @@ const es: Record<MessageKey, string> = {
   'notFound.emptyBody': 'Usá la navegación de arriba para volver a una vista disponible.',
   'run.accepted': 'Corrida #{runId} aceptada para {targetId}.',
   'run.failed': 'No se pudo iniciar la corrida.',
+  'run.failed.disabled': 'No se pudo iniciar la corrida: el objetivo está deshabilitado.',
+  'run.failed.inProgress': 'No se pudo iniciar la corrida: ya hay una corrida en curso para este objetivo.',
+  'run.failed.notFound': 'No se pudo iniciar la corrida: el objetivo no existe.',
+  'run.failed.unauthorized': 'No se pudo iniciar la corrida: la API rechazó la clave.',
+  'run.failed.status': 'No se pudo iniciar la corrida (estado {status}).',
+  'run.serverDetail': 'Detalle del servidor: {detail}',
   'run.start': 'Iniciar corrida',
   'run.running': 'En curso…',
   'run.startFor': ' para {targetId}',
@@ -517,14 +533,28 @@ type LocaleContextValue = {
 
 const LocaleContext = createContext<LocaleContextValue | undefined>(undefined);
 
+/** Keep <html lang> in step so screen readers, telemetry and CSS :lang() see the operator's language. */
+function applyDocumentLanguage(locale: Locale) {
+  if (typeof document !== 'undefined') {
+    document.documentElement.lang = locale;
+  }
+}
+
 export function LocaleProvider({ children, initialLocale }: { children: ReactNode; initialLocale?: Locale }) {
-  const [locale, setLocaleState] = useState<Locale>(() => initialLocale ?? detectLocale());
+  // Resolved and applied during the first render, before any child effect
+  // (app_loaded telemetry reads the document language) can run.
+  const [locale, setLocaleState] = useState<Locale>(() => {
+    const resolved = initialLocale ?? detectLocale();
+    applyDocumentLanguage(resolved);
+    return resolved;
+  });
 
   useEffect(() => {
-    document.documentElement.lang = locale;
+    applyDocumentLanguage(locale);
   }, [locale]);
 
   const setLocale = useCallback((next: Locale) => {
+    applyDocumentLanguage(next);
     setLocaleState(next);
     try {
       window.localStorage.setItem(LOCALE_STORAGE_KEY, next);

@@ -5,6 +5,7 @@ import { ApiKeyGate } from './components/ApiKeyGate';
 import { AppErrorBoundary } from './components/ErrorBoundary';
 import { ErrorState, LoadingState } from './components/PageState';
 import { locales, useLocale, type MessageKey } from './i18n';
+import { describeUnavailable } from './lib/unavailable';
 import { trackUiTelemetry } from './lib/telemetry';
 import { HomePage } from './pages/HomePage';
 import { NotFoundPage } from './pages/NotFoundPage';
@@ -70,7 +71,7 @@ function AppShell() {
         {mode === 'unavailable' ? (
           <ErrorState
             title={t('unavailable.title')}
-            description={unavailableReason ? t('unavailable.bodyWithStatus', { status: unavailableReason }) : t('unavailable.body')}
+            description={unavailableReason ? describeUnavailable(t, unavailableReason) : t('unavailable.body')}
             action={
               <button type="button" className="primary-action" onClick={retry}>
                 {t('retry')}

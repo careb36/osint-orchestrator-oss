@@ -100,6 +100,12 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     Accept: parse === 'json' ? 'application/json' : 'text/plain, application/json',
     ...authHeaders(apiKey),
   };
+  // The operator's language, for any endpoint that negotiates it (today only
+  // the demo routes do; protected routes answer in the server's language).
+  const language = typeof document !== 'undefined' ? document.documentElement.lang : '';
+  if (language) {
+    headers['Accept-Language'] = language;
+  }
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json';
   }

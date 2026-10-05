@@ -2,6 +2,7 @@ import { type FormEvent, useState } from 'react';
 import { useApiKey } from '../auth';
 import { useLocale } from '../i18n';
 import { isKeyRemembered } from '../lib/api';
+import { describeUnavailable } from '../lib/unavailable';
 
 /** Asks for the operator's API key; shown while the API answers 401. */
 export function ApiKeyGate() {
@@ -23,7 +24,7 @@ export function ApiKeyGate() {
     if (!result.ok) {
       if (result.reason === 'empty') setError(t('gate.empty'));
       else if (result.reason === 'rejected') setError(t('gate.rejected'));
-      else if (result.reason === 'unavailable') setError(t('gate.unvalidated', { reason: t('unavailable.bodyWithStatus', { status: result.status }) }));
+      else if (result.reason === 'unavailable') setError(t('gate.unvalidated', { reason: describeUnavailable(t, result.cause) }));
       else setError(t('gate.unknownError'));
     }
   };
@@ -33,7 +34,11 @@ export function ApiKeyGate() {
       <div className="hero-card">
         <p className="eyebrow">{t('gate.eyebrow')}</p>
         <h1>{t('gate.title')}</h1>
-        <p className="lede">{t('gate.lede', { setting: 'ORCHESTRATOR_API_KEY' })}</p>
+        <p className="lede">
+          {t('gate.lede.before')}
+          <code>ORCHESTRATOR_API_KEY</code>
+          {t('gate.lede.after')}
+        </p>
       </div>
 
       <form className="state-card key-form" onSubmit={handleSubmit} aria-labelledby="api-key-title">

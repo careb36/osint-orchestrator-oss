@@ -64,10 +64,11 @@ export function formatDuration(startedAt: string, finishedAt: string | null): st
   if (!Number.isFinite(ms) || ms < 0) {
     return '—';
   }
+  // SI symbols (s, min), the same in Spanish and English; "m" would read as metres.
   const seconds = Math.round(ms / 1000);
   if (seconds < 60) {
-    return `${seconds}s`;
+    return `${seconds} s`;
   }
   const minutes = Math.floor(seconds / 60);
-  return `${minutes}m ${seconds % 60}s`;
+  return `${minutes} min ${seconds % 60} s`;
 }

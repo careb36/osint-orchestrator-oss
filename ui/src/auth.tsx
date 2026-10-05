@@ -19,8 +19,8 @@ export type AccessMode = 'checking' | 'open' | 'locked' | 'ready' | 'unavailable
 type ApiKeyContextValue = {
   mode: AccessMode;
   hasKey: boolean;
-  /** HTTP status (or 'network') behind `unavailable`, for the error state. */
-  unavailableReason: string | null;
+  /** Why the API is `unavailable`: an HTTP status, or no answer at all. */
+  unavailableReason: UnavailableReason | null;
   /** Validate the key against the API and store it on success. */
   submitKey: (key: string, remember: boolean) => Promise<SubmitResult>;
   forgetKey: () => void;
@@ -30,14 +30,17 @@ type ApiKeyContextValue = {
 
 const ApiKeyContext = createContext<ApiKeyContextValue | undefined>(undefined);
 
-type ProbeResult = { mode: 'ready' | 'open' | 'locked' } | { mode: 'unavailable'; reason: string };
+/** Machine-readable cause the components translate; never shown as is. */
+export type UnavailableReason = { kind: 'status'; status: number } | { kind: 'network' };
+
+type ProbeResult = { mode: 'ready' | 'open' | 'locked' } | { mode: 'unavailable'; reason: UnavailableReason };
 
 /** Outcome of submitKey; `reason` is a catalogue-neutral code the gate translates. */
 export type SubmitResult =
   | { ok: true }
   | { ok: false; reason: 'empty' }
   | { ok: false; reason: 'rejected' }
-  | { ok: false; reason: 'unavailable'; status: string };
+  | { ok: false; reason: 'unavailable'; cause: UnavailableReason };
 
 /** Only a 2xx proves the key (or its absence) is accepted; only a 401 proves it is not. */
 async function probe(key: string | null): Promise<ProbeResult> {
@@ -48,15 +51,16 @@ async function probe(key: string | null): Promise<ProbeResult> {
     if (error instanceof ApiError && error.status === 401) {
       return { mode: 'locked' };
     }
-    const status = error instanceof ApiError && error.status ? String(error.status) : 'network';
-    return { mode: 'unavailable', reason: status };
+    const reason: UnavailableReason =
+      error instanceof ApiError && error.status ? { kind: 'status', status: error.status } : { kind: 'network' };
+    return { mode: 'unavailable', reason };
   }
 }
 
 export function ApiKeyProvider({ children }: { children: ReactNode }) {
   const [mode, setMode] = useState<AccessMode>('checking');
   const [hasKey, setHasKey] = useState<boolean>(() => Boolean(readApiKey()));
-  const [unavailableReason, setUnavailableReason] = useState<string | null>(null);
+  const [unavailableReason, setUnavailableReason] = useState<UnavailableReason | null>(null);
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
@@ -98,7 +102,7 @@ export function ApiKeyProvider({ children }: { children: ReactNode }) {
       return { ok: false, reason: 'rejected' };
     }
     if (result.mode === 'unavailable') {
-      return { ok: false, reason: 'unavailable', status: result.reason };
+      return { ok: false, reason: 'unavailable', cause: result.reason };
     }
     storeApiKey(candidate, remember);
     setHasKey(true);
