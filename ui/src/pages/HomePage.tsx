@@ -9,22 +9,26 @@ export function HomePage() {
   });
 
   if (isLoading) {
-    return <PageLayout title="Overview" subtitle="Checking the current operating state."><LoadingState message="Loading service health..." /></PageLayout>;
+    return <PageLayout title="OSINT Orchestrator" eyebrow="Overview" subtitle="Checking the current operating state."><LoadingState message="Loading service health..." /></PageLayout>;
   }
 
   if (error) {
     return (
-      <PageLayout title="Overview" subtitle="The service health check could not be confirmed.">
+      <PageLayout title="OSINT Orchestrator" eyebrow="Overview" subtitle="The service health check could not be confirmed.">
         <ErrorState description="Backend health was not reachable from the browser. Verify the local API is running." />
       </PageLayout>
     );
   }
 
   return (
-    <PageLayout title="Overview" subtitle="Monitor active targets, inspect the latest runs and keep the evidence chain visible to the team.">
+    <PageLayout
+      title="OSINT Orchestrator"
+      eyebrow="Overview"
+      subtitle="Monitor active targets, inspect the latest runs and keep the evidence chain visible to the team."
+    >
       <div className="hero-card">
         <p className="eyebrow">Operations overview</p>
-        <h2>OSINT Orchestrator</h2>
+        <h2>Situation snapshot</h2>
         <p className="lede">
           Monitor active targets, inspect the latest runs and keep the evidence chain visible to the team.
         </p>

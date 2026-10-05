@@ -1,11 +1,12 @@
 # Route map and shell conventions
 
-This document captures the top-level route map for the UI2 super-app shell so contributors can add features without creating a second navigation model.
+This document captures the top-level route map for the UI super-app shell so contributors can add features without creating a second navigation model.
 
 ## Shell structure
 
 - The app is wrapped in a single `AppShell` layout.
 - Top-level navigation is defined in `src/routes.ts` and is rendered from the same source of truth.
+- Global quick actions are defined in `src/routes.ts` and link directly to `/console` and `/docs`.
 - Shared page layout/state primitives live in `src/components/PageState.tsx` and are expected to be reused by every major route.
 - Global runtime errors are caught by `src/components/ErrorBoundary.tsx` and show a fallback state instead of crashing the shell.
 

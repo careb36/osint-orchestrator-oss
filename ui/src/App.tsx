@@ -27,11 +27,11 @@ function AppShell() {
         </nav>
       </header>
 
-      <div className="shell-toolbar" aria-label="Quick actions">
+      <div className="shell-toolbar" role="group" aria-label="Quick actions">
         {QUICK_ACTIONS.map((action) => (
-          <NavLink key={action.to} className="action-chip" to={action.to}>
+          <a key={action.href} className="action-chip" href={action.href}>
             {action.label}
-          </NavLink>
+          </a>
         ))}
       </div>
 

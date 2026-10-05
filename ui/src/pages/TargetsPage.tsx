@@ -10,7 +10,7 @@ export function TargetsPage() {
 
   if (isLoading) {
     return (
-      <PageLayout title="Targets" subtitle="Review the active target set and coverage status.">
+      <PageLayout title="Targets" eyebrow="Operations" subtitle="Review the active target set and coverage status.">
         <LoadingState message="Loading targets..." />
       </PageLayout>
     );
@@ -18,7 +18,7 @@ export function TargetsPage() {
 
   if (error) {
     return (
-      <PageLayout title="Targets" subtitle="The target inventory is currently unavailable.">
+      <PageLayout title="Targets" eyebrow="Operations" subtitle="The target inventory is currently unavailable.">
         <ErrorState description="Unable to load targets." />
       </PageLayout>
     );
@@ -26,14 +26,14 @@ export function TargetsPage() {
 
   if (!data || data.length === 0) {
     return (
-      <PageLayout title="Targets" subtitle="The target inventory for this operator workspace.">
+      <PageLayout title="Targets" eyebrow="Operations" subtitle="The target inventory for this operator workspace.">
         <EmptyState title="No targets configured" description="Add a target to start tracking collection and monitoring workloads." />
       </PageLayout>
     );
   }
 
   return (
-    <PageLayout title="Targets" subtitle="The target inventory for this operator workspace.">
+    <PageLayout title="Targets" eyebrow="Operations" subtitle="The target inventory for this operator workspace.">
       <ul className="list-card">
         {data.map((target) => (
           <li key={target.id}>

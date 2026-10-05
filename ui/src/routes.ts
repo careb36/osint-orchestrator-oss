@@ -31,6 +31,6 @@ export const APP_ROUTES: AppRoute[] = [
 ];
 
 export const QUICK_ACTIONS = [
-  { label: 'Review runs', to: '/runs' },
-  { label: 'Inspect targets', to: '/targets' },
+  { label: 'Open console', href: '/console' },
+  { label: 'Open API docs', href: '/docs' },
 ];

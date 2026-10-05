@@ -10,7 +10,7 @@ export function RunsPage() {
 
   if (isLoading) {
     return (
-      <PageLayout title="Runs" subtitle="Review recent execution history and current system activity.">
+      <PageLayout title="Runs" eyebrow="Operations" subtitle="Review recent execution history and current system activity.">
         <LoadingState message="Loading recent runs..." />
       </PageLayout>
     );
@@ -18,7 +18,7 @@ export function RunsPage() {
 
   if (error) {
     return (
-      <PageLayout title="Runs" subtitle="Recent execution history is unavailable.">
+      <PageLayout title="Runs" eyebrow="Operations" subtitle="Recent execution history is unavailable.">
         <ErrorState description="Unable to load run history." />
       </PageLayout>
     );
@@ -26,14 +26,14 @@ export function RunsPage() {
 
   if (!data || data.length === 0) {
     return (
-      <PageLayout title="Runs" subtitle="Recent execution history and current activities.">
+      <PageLayout title="Runs" eyebrow="Operations" subtitle="Recent execution history and current activities.">
         <EmptyState title="No runs yet" description="There are no recent runs to display for the current operator workspace." />
       </PageLayout>
     );
   }
 
   return (
-    <PageLayout title="Runs" subtitle="Recent execution history and current activities.">
+    <PageLayout title="Runs" eyebrow="Operations" subtitle="Recent execution history and current activities.">
       <ul className="list-card">
         {data.map((run) => (
           <li key={run.id}>

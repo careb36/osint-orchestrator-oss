@@ -27,12 +27,14 @@ describe('App shell', () => {
 
     expect(screen.getByRole('link', { name: /^overview$/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /^targets$/i })).toBeInTheDocument();
-    expect(screen.getByText(/osint orchestrator/i)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /review runs/i })).toBeInTheDocument();
+    expect(screen.getByText(/osint orchestrator/i, { selector: '.brand-title' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /osint orchestrator/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /open console/i })).toBeInTheDocument();
   });
 
   it('exposes the unified route map for contributors', () => {
-    expect(APP_ROUTES.map((route) => route.path)).toEqual(['/', '/targets', '/runs']);
+    expect(APP_ROUTES.map((route) => route.path)).toEqual(expect.arrayContaining(['/', '/targets', '/runs']));
+    expect(APP_ROUTES).toHaveLength(3);
     expect(APP_ROUTES.every((route) => route.label.length > 0)).toBe(true);
   });
 
