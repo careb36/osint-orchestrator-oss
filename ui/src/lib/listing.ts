@@ -76,7 +76,8 @@ export function sortTargets(rows: TargetRow[], sort: Sort<TargetSortKey>): Targe
     case 'status':
       return sortBy(rows, sort.dir, (row) => (row.lastRun ? (STATUS_ORDER[row.lastRun.status] ?? 9) : null));
     case 'risk':
-      return sortBy(rows, sort.dir, (row) => RISK_RANK[row.latestRisk] ?? 0);
+      // 'unknown' (no finding) is a missing value: last in both directions.
+      return sortBy(rows, sort.dir, (row) => (row.latestRisk === 'unknown' ? null : (RISK_RANK[row.latestRisk] ?? null)));
     case 'attention':
     default:
       return sortBy(rows, sort.dir, (row) => row.attention);
@@ -105,8 +106,12 @@ export function runDurationMs(run: RunSummary, now: Date): number | null {
   return Number.isFinite(ms) && ms >= 0 ? ms : null;
 }
 
+export const SINCE_OPTIONS: readonly SinceFilter[] = ['', '24h', '7d'];
+
 export function filterRuns(runs: RunSummary[], filters: RunFilters, now: Date): RunSummary[] {
-  const sinceMs = filters.since ? now.getTime() - SINCE_MS[filters.since] : null;
+  // An unknown window (a hand-edited link) means no window, never NaN.
+  const window = filters.since in SINCE_MS ? SINCE_MS[filters.since as Exclude<SinceFilter, ''>] : null;
+  const sinceMs = window === null ? null : now.getTime() - window;
   return runs.filter((run) => {
     if (filters.target && run.target_id !== filters.target) return false;
     if (filters.status && run.status !== filters.status) return false;
@@ -157,7 +162,7 @@ export function sortEvidence(rows: EvidenceRow[], sort: Sort<EvidenceSortKey>): 
       return sortBy(rows, sort.dir, (row) => (row.title || row.url).toLowerCase());
     case 'relevance':
     default:
-      return sortBy(rows, sort.dir, (row) => RELEVANCE_RANK[row.relevance] ?? 0);
+      return sortBy(rows, sort.dir, (row) => RELEVANCE_RANK[row.relevance] ?? null);
   }
 }
 

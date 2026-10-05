@@ -7,12 +7,13 @@ import { StatusPill } from '../components/StatusPill';
 import { useListControls } from '../hooks/useListControls';
 import { api } from '../lib/api';
 import { formatDateTime, formatDuration, runStatusTone } from '../lib/format';
-import { distinct, filterRuns, sortRuns, type RunSortKey, type SinceFilter } from '../lib/listing';
+import { distinct, filterRuns, SINCE_OPTIONS, sortRuns, type RunSortKey, type SinceFilter } from '../lib/listing';
 import { isActiveStatus } from '../lib/overview';
 import type { RunStatus } from '../types';
 
 const STATUSES: RunStatus[] = ['running', 'pending', 'failed', 'partial', 'success'];
 const DEFAULTS = { q: '', target: '', status: '', since: '' };
+const SORT_KEYS: RunSortKey[] = ['started', 'duration', 'observables', 'status', 'target'];
 const ACTIVE_REFRESH_MS = 10_000;
 
 export function RunsPage() {
@@ -21,7 +22,14 @@ export function RunsPage() {
     queryFn: () => api.getRuns(),
     refetchInterval: (query) => ((query.state.data ?? []).some((run) => isActiveStatus(run.status)) ? ACTIVE_REFRESH_MS : false),
   });
-  const controls = useListControls<RunSortKey>(DEFAULTS, { key: 'started', dir: 'desc' });
+  // The target list is only known once the runs are loaded; an unknown target in the URL reads as "all".
+  const targetIds = distinct(runs.data ?? [], (run) => run.target_id);
+  const controls = useListControls<RunSortKey>({
+    defaults: DEFAULTS,
+    defaultSort: { key: 'started', dir: 'desc' },
+    sortKeys: SORT_KEYS,
+    allowed: { target: ['', ...targetIds], status: ['', ...STATUSES], since: SINCE_OPTIONS },
+  });
 
   if (runs.isLoading) {
     return (
@@ -48,7 +56,6 @@ export function RunsPage() {
   }
 
   const now = new Date();
-  const targetIds = distinct(runs.data, (run) => run.target_id);
   const visible = sortRuns(
     filterRuns(
       runs.data,

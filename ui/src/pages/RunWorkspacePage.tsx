@@ -12,9 +12,12 @@ import { distinct, filterDelta, filterEvidence, sortEvidence, type EvidenceSortK
 import type { ArtifactKind } from '../types';
 
 const RELEVANCES = ['high', 'medium', 'low'];
-// Evidence and observables keep separate search keys (q / dq): a term typed
-// on one tab must not filter the other.
+// Evidence and observables keep separate keys: a term typed on one tab must
+// not filter the other, and each tab's Clear filters touches its own keys only.
+const EVIDENCE_KEYS = ['q', 'relevance', 'category'] as const;
+const DELTA_KEYS = ['dq', 'type'] as const;
 const DEFAULTS = { q: '', relevance: '', category: '', dq: '', type: '' };
+const SORT_KEYS: EvidenceSortKey[] = ['relevance', 'confidence', 'category', 'title'];
 
 const STORAGE_PREFIX = 'osint-run-workspace';
 const ARTIFACTS: ArtifactKind[] = ['finding', 'evidence', 'delta', 'report', 'manifest'];
@@ -57,7 +60,15 @@ export function RunWorkspacePage() {
   const manifest = useQuery({ queryKey: ['run', runId, 'manifest'], queryFn: () => api.getRunManifest(runId), enabled: artifact === 'manifest' });
 
   const active = { finding, evidence, delta, report, manifest }[artifact];
-  const controls = useListControls<EvidenceSortKey>(DEFAULTS, { key: 'relevance', dir: 'desc' });
+  const categories = distinct(evidence.data ?? [], (row) => row.category);
+  const types = distinct(delta.data ?? [], (row) => row.stix_type);
+  const controls = useListControls<EvidenceSortKey>({
+    defaults: DEFAULTS,
+    defaultSort: { key: 'relevance', dir: 'desc' },
+    sortKeys: SORT_KEYS,
+    allowed: { relevance: ['', ...RELEVANCES], category: ['', ...categories], type: ['', ...types] },
+  });
+  const evidenceFiltered = controls.isAnySet(EVIDENCE_KEYS);
   const evidenceRows = evidence.data
     ? sortEvidence(
         filterEvidence(evidence.data, { query: controls.get('q'), relevance: controls.get('relevance'), category: controls.get('category') }),
@@ -65,11 +76,7 @@ export function RunWorkspacePage() {
       )
     : [];
   const deltaRows = delta.data ? filterDelta(delta.data, { query: controls.get('dq'), type: controls.get('type') }) : [];
-  const deltaFiltered = Boolean(controls.get('dq') || controls.get('type'));
-  const clearDeltaFilters = () => {
-    controls.set('dq', '');
-    controls.set('type', '');
-  };
+  const deltaFiltered = controls.isAnySet(DELTA_KEYS);
   const title = run.data ? `Run #${run.data.id}` : 'Run detail';
   const backTo = targetId ? `/targets/${encodeURIComponent(targetId)}` : run.data ? `/targets/${encodeURIComponent(run.data.target_id)}` : '/runs';
 
@@ -209,7 +216,7 @@ export function RunWorkspacePage() {
                     <span className="label">Category</span>
                     <select value={controls.get('category')} onChange={(event) => controls.set('category', event.target.value)}>
                       <option value="">Any category</option>
-                      {distinct(evidence.data, (row) => row.category).map((category) => (
+                      {categories.map((category) => (
                         <option key={category} value={category}>
                           {category}
                         </option>
@@ -219,8 +226,8 @@ export function RunWorkspacePage() {
                   <span className="count" role="status" aria-live="polite">
                     {evidenceRows.length} of {evidence.data.length}
                   </span>
-                  {controls.isFiltered ? (
-                    <button type="button" className="ghost-button" onClick={controls.clear}>
+                  {evidenceFiltered ? (
+                    <button type="button" className="ghost-button" onClick={() => controls.clearKeys(EVIDENCE_KEYS)}>
                       Clear filters
                     </button>
                   ) : null}
@@ -273,7 +280,7 @@ export function RunWorkspacePage() {
                     <span className="label">Type</span>
                     <select value={controls.get('type')} onChange={(event) => controls.set('type', event.target.value)}>
                       <option value="">Any type</option>
-                      {distinct(delta.data, (row) => row.stix_type).map((type) => (
+                      {types.map((type) => (
                         <option key={type} value={type}>
                           {type}
                         </option>
@@ -284,7 +291,7 @@ export function RunWorkspacePage() {
                     {deltaRows.length} of {delta.data.length}
                   </span>
                   {deltaFiltered ? (
-                    <button type="button" className="ghost-button" onClick={clearDeltaFilters}>
+                    <button type="button" className="ghost-button" onClick={() => controls.clearKeys(DELTA_KEYS)}>
                       Clear filters
                     </button>
                   ) : null}

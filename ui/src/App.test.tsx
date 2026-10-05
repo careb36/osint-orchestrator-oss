@@ -296,6 +296,26 @@ describe('App shell', () => {
     expect(screen.getByRole('columnheader', { name: /^target/i })).toHaveAttribute('aria-sort', 'descending');
   });
 
+  it('degrades an unknown filter value in the URL to the plain view', async () => {
+    installFetchMock();
+    renderApp(['/targets?enabled=sometimes&status=exploded&sort=bogus:desc']);
+
+    const rows = within(await screen.findByRole('table')).getAllByRole('row').slice(1);
+    expect(rows).toHaveLength(2);
+    expect(screen.getByRole('combobox', { name: /enabled/i })).toHaveValue('all');
+    expect(screen.getByRole('combobox', { name: /last run/i })).toHaveValue('');
+    expect(screen.queryByRole('button', { name: /clear filters/i })).not.toBeInTheDocument();
+  });
+
+  it('treats an unknown time window on the runs view as no window', async () => {
+    installFetchMock();
+    renderApp(['/runs?since=7days']);
+
+    const rows = within(await screen.findByRole('table')).getAllByRole('row').slice(1);
+    expect(rows).toHaveLength(2);
+    expect(screen.getByRole('combobox', { name: /started/i })).toHaveValue('');
+  });
+
   it('searches runs by error text and filters them by status', async () => {
     installFetchMock();
     const user = userEvent.setup();
@@ -345,15 +365,29 @@ describe('App shell', () => {
     expect(rowsOf()).toHaveLength(1);
     expect(rowsOf()[0]).toHaveTextContent('Forum thread');
 
-    // The observables tab has its own search: the evidence term does not leak into it.
+    // The observables tab has its own keys: the evidence term does not leak
+    // into it, and its Clear filters button appears only for its own keys.
     await user.click(screen.getByRole('tab', { name: /delta/i }));
     const deltaTable = await screen.findByRole('table');
     expect(within(deltaTable).getAllByRole('row').slice(1)).toHaveLength(3);
     expect(screen.getByRole('searchbox', { name: /search/i })).toHaveValue('');
+    expect(screen.queryByRole('button', { name: /clear filters/i })).not.toBeInTheDocument();
+
+    // Search and type set together: one click clears both (no lost update).
+    await user.type(screen.getByRole('searchbox', { name: /search/i }), 'paste');
     await user.selectOptions(screen.getByRole('combobox', { name: /type/i }), 'url');
     expect(within(deltaTable).getAllByRole('row').slice(1)).toHaveLength(1);
     await user.click(screen.getByRole('button', { name: /clear filters/i }));
     expect(within(deltaTable).getAllByRole('row').slice(1)).toHaveLength(3);
+    expect(screen.getByRole('searchbox', { name: /search/i })).toHaveValue('');
+    expect(screen.getByRole('combobox', { name: /type/i })).toHaveValue('');
+
+    // Back on Evidence its own term is still there and its own button clears only its keys.
+    await user.click(screen.getByRole('tab', { name: /evidence/i }));
+    expect(screen.getByRole('searchbox', { name: /search/i })).toHaveValue('portal');
+    await user.click(screen.getByRole('button', { name: /clear filters/i }));
+    expect(screen.getByRole('searchbox', { name: /search/i })).toHaveValue('');
+    expect(screen.queryByRole('button', { name: /clear filters/i })).not.toBeInTheDocument();
   });
 
   it('shows the risk trend and a start-run action on the target detail', async () => {

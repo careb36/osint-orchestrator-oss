@@ -13,6 +13,8 @@ import type { RunStatus } from '../types';
 
 const STATUSES: RunStatus[] = ['running', 'pending', 'failed', 'partial', 'success'];
 const DEFAULTS = { status: '' };
+const SORT_KEYS: RunSortKey[] = ['started'];
+const ALLOWED = { status: ['', ...STATUSES] };
 
 export function TargetDetailPage() {
   const { targetId = '' } = useParams();
@@ -20,7 +22,7 @@ export function TargetDetailPage() {
   const runs = useQuery({ queryKey: ['runs', targetId], queryFn: () => api.getRuns(targetId), enabled: Boolean(targetId) });
   const trends = useQuery({ queryKey: ['risk-trends'], queryFn: api.getRiskTrends });
   const { start, isPending, notice } = useStartRun();
-  const controls = useListControls<RunSortKey>(DEFAULTS, { key: 'started', dir: 'desc' });
+  const controls = useListControls<RunSortKey>({ defaults: DEFAULTS, defaultSort: { key: 'started', dir: 'desc' }, sortKeys: SORT_KEYS, allowed: ALLOWED });
 
   const title = target.data?.fqdn ?? targetId;
   const trend = trends.data?.find((row) => row.target_id === targetId);

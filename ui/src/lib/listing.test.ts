@@ -41,6 +41,13 @@ describe('targets', () => {
     expect(sortTargets(rows, { key: 'status', dir: 'asc' }).map((r) => r.lastRun?.status)).toEqual(['failed', 'success']);
   });
 
+  it('keeps unknown risk last whatever the direction', () => {
+    for (const dir of ['asc', 'desc'] as const) {
+      const sorted = sortTargets(rows, { key: 'risk', dir });
+      expect(sorted[sorted.length - 1].latestRisk).toBe('unknown');
+    }
+  });
+
   it('keeps targets without a run last whatever the direction', () => {
     const withNever = buildTargetRows([...sampleTargets, { ...sampleTargets[0], id: 'fresh', fqdn: 'fresh.example' }], sampleRuns, []);
     for (const dir of ['asc', 'desc'] as const) {
@@ -66,6 +73,8 @@ describe('runs', () => {
     expect(filterRuns(runs, { query: '', target: '', status: '', since: '7d' }, now).map((r) => r.id)).toEqual([1, 2, 3]);
     expect(filterRuns(runs, { query: '#4', target: '', status: '', since: '' }, now)).toEqual([]);
     expect(filterRuns(runs, { query: '4', target: '', status: '', since: '' }, now).map((r) => r.id)).toEqual([4]);
+    // An unknown window from a hand-edited link filters nothing (never NaN).
+    expect(filterRuns(runs, { query: '', target: '', status: '', since: '7days' as never }, now)).toHaveLength(4);
   });
 
   it('sorts by start, duration (active runs use now), observables, status and target', () => {
@@ -85,6 +94,11 @@ describe('evidence and delta', () => {
     expect(sortEvidence(sampleEvidence, { key: 'relevance', dir: 'desc' }).map((r) => r.relevance)).toEqual(['high', 'medium', 'low']);
     expect(sortEvidence(sampleEvidence, { key: 'confidence', dir: 'asc' }).map((r) => r.confidence)).toEqual([0.35, 0.6, 0.91]);
     expect(sortEvidence(sampleEvidence, { key: 'category', dir: 'asc' }).map((r) => r.category)).toEqual(['credential-leak', 'exposure', 'news']);
+    const odd = [...sampleEvidence, { ...sampleEvidence[0], id: 9, relevance: 'weird' }];
+    for (const dir of ['asc', 'desc'] as const) {
+      const sorted = sortEvidence(odd, { key: 'relevance', dir });
+      expect(sorted[sorted.length - 1].id).toBe(9);
+    }
   });
 
   it('filters delta rows by type and value', () => {

@@ -15,7 +15,10 @@ import type { RunStatus, TargetSummary } from '../types';
 
 const STATUSES: Array<RunStatus | 'never'> = ['running', 'pending', 'failed', 'partial', 'success', 'never'];
 const RISKS = ['critical', 'high', 'medium', 'low', 'unknown'];
+const ENABLED: EnabledFilter[] = ['all', 'enabled', 'disabled'];
 const DEFAULTS = { q: '', enabled: 'all', status: '', risk: '' };
+const SORT_KEYS: TargetSortKey[] = ['attention', 'target', 'lastRun', 'status', 'risk'];
+const ALLOWED = { enabled: ENABLED, status: ['', ...STATUSES], risk: ['', ...RISKS] };
 
 function enabledCollectors(target: TargetSummary): string[] {
   return Object.entries(target.collectors ?? {})
@@ -28,7 +31,7 @@ export function TargetsPage() {
   const runs = useQuery({ queryKey: ['runs'], queryFn: () => api.getRuns() });
   const trends = useQuery({ queryKey: ['risk-trends'], queryFn: api.getRiskTrends });
   const { start, isPending, notice } = useStartRun();
-  const controls = useListControls<TargetSortKey>(DEFAULTS, { key: 'attention', dir: 'asc' });
+  const controls = useListControls<TargetSortKey>({ defaults: DEFAULTS, defaultSort: { key: 'attention', dir: 'asc' }, sortKeys: SORT_KEYS, allowed: ALLOWED });
 
   if (targets.isLoading) {
     return (
