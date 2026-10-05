@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { reportUiError, trackUiTelemetry } from '../lib/telemetry';
 
 type ErrorBoundaryProps = {
   children: ReactNode;
@@ -17,6 +18,14 @@ export class AppErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundar
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
+    reportUiError(error, {
+      componentStack: errorInfo.componentStack,
+      location: window.location.pathname,
+    });
+    trackUiTelemetry('error_boundary_triggered', {
+      message: error.message,
+      componentStack: errorInfo.componentStack,
+    });
     console.error('Unhandled UI error', error, errorInfo);
   }
 
