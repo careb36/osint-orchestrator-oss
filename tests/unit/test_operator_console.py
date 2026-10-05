@@ -148,3 +148,14 @@ def test_console_i18n_endpoint_is_available(monkeypatch: pytest.MonkeyPatch) -> 
     payload = resp.json()
     assert payload["es"]["pageTitle"]
     assert payload["en"]["pageTitle"]
+
+
+def test_console_keyboard_enter_shortcuts_are_wired() -> None:
+    from pathlib import Path
+
+    src = Path("orchestrator/templates/console.html").read_text(encoding="utf-8")
+    assert 'document.getElementById("api-key-input").addEventListener("keydown"' in src
+    assert 'if (event.key === "Enter")' in src
+    assert 'document.getElementById("save-key-btn").click();' in src
+    assert 'document.getElementById("run-id-input").addEventListener("keydown"' in src
+    assert 'document.getElementById("load-run-btn").click();' in src

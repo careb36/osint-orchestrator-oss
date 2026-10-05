@@ -11,6 +11,12 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- Demo mode (`DEMO_MODE=true`, `Dockerfile.demo`, `docker-compose.demo.yml`):
+  public `/demo` page and routes restricted to an allowlist
+  (`demo/targets.demo.yaml`), per-visitor and global daily run limits, daily
+  Tavily and LLM call budgets, views without the model synthesis (no summary,
+  risk level or justification), startup check, seed import (`demo/seed/`) and
+  `scripts/export_demo_seed.py`. Deployment notes in `docs/deploy.md`.
 - Evidence qualification on the fast LLM route (`LLM_QUALIFY_ENABLED`,
   `LLM_QUALIFY_MAX_ITEMS`): each Tavily result is classified (category,
   relevance, confidence, rationale) against the entity under review, stored in
@@ -93,6 +99,9 @@ from [SECURITY.md](SECURITY.md).
 
 ### Fixed
 
+- Evidence qualification asks once more for the items an answer left out and
+  uses batches of 5: live, a 10-item answer was truncated and none of its items
+  were qualified.
 - `.env.example`: blank values no longer carry an inline comment. Compose's
   env_file parser took the comment as the value, so a copied template set
   e.g. `TAVILY_INCLUDE_DOMAINS` to the comment text (every Tavily query

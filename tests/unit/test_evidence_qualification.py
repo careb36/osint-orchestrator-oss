@@ -137,7 +137,7 @@ async def test_tavily_fills_structured_evidence_alongside_notes(
 
 
 @pytest.mark.asyncio
-async def test_qualifier_uses_fast_route_and_batches_by_10(
+async def test_qualifier_uses_fast_route_and_batches_of_5(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     items = [
@@ -170,7 +170,7 @@ async def test_qualifier_uses_fast_route_and_batches_by_10(
 
     rows = await qualify_evidence(_target(), 1, items)
 
-    assert len(client.calls) == 3
+    assert len(client.calls) == 5  # 21 items in batches of 5; all qualified, no retry
     assert all(call["model_route"] == "fast" for call in client.calls)
     assert all(call["response_schema"] is not None for call in client.calls)
     assert len(rows) == 21
@@ -696,12 +696,48 @@ async def test_duplicate_index_and_bool_values_are_not_qualified(
     )
     target = Target(id="t1", fqdn="example.com", authorization="self-owned", purpose="test")
 
+    first_answer = client.response
+
+    async def _answer(system: str, user: str, **kwargs) -> str:
+        client.calls.append({"user": user})
+        # The retry of the two unqualified items gets nothing usable either.
+        return json.dumps(first_answer if len(client.calls) == 1 else {"items": []})
+
+    client.complete = _answer
+
     with caplog.at_level("WARNING", logger="orchestrator.synthesizer.qualify"):
         rows = await qualify_evidence(target, 1, _items(3), client=client)
 
     assert [(row.url, row.category) for row in rows] == [("https://example.org/0", "sanctions")]
-    # The gap is visible to the operator in the message itself.
-    assert "qualified=1 of 3" in caplog.text
+    # The gap is visible to the operator in the message itself, and the two
+    # unqualified items were asked for once more, and only once.
+    assert "attempt=1 qualified=1 of 3" in caplog.text
+    assert "attempt=2 qualified=0 of 2" in caplog.text
+    assert len(client.calls) == 2
+    assert "https://example.org/0" not in client.calls[1]["user"]
+
+
+async def test_items_left_out_by_a_truncated_answer_are_qualified_on_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "llm_qualify_enabled", True)
+    monkeypatch.setattr(settings, "llm_qualify_max_items", 30)
+    client = _RouteCapturingClient({})
+    answers = iter(
+        ['{"items": [{"index": 0, "category": "sanc', json.dumps({"items": [_entry(0), _entry(1)]})]
+    )
+
+    async def _answer(system: str, user: str, **kwargs) -> str:
+        client.calls.append({"user": user})
+        return next(answers)
+
+    client.complete = _answer
+    target = Target(id="t1", fqdn="example.com", authorization="self-owned", purpose="test")
+
+    rows = await qualify_evidence(target, 1, _items(2), client=client)
+
+    assert sorted(row.url for row in rows) == ["https://example.org/0", "https://example.org/1"]
+    assert len(client.calls) == 2
 
 
 async def test_unparseable_answer_is_logged_not_silent(
@@ -719,7 +755,7 @@ async def test_unparseable_answer_is_logged_not_silent(
         rows = await qualify_evidence(target, 1, _items(2), client=_Garbage({}))
 
     assert rows == []
-    assert "qualified=0 of 2 parseable=False" in caplog.text
+    assert "attempt=1 qualified=0 of 2 parseable=False" in caplog.text
 
 
 async def test_prompt_names_the_entity_and_the_rationale_language(

@@ -693,6 +693,12 @@
         setAuthHelp("");
         loadData();
       });
+      document.getElementById("api-key-input").addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          document.getElementById("save-key-btn").click();
+        }
+      });
       document.getElementById("clear-key-btn").addEventListener("click", () => {
         state.apiKey = "";
         document.getElementById("api-key-input").value = "";
@@ -709,6 +715,12 @@
       document.getElementById("load-run-btn").addEventListener("click", () => {
         const runId = document.getElementById("run-id-input").value.trim();
         if (runId) loadRunDetail(runId);
+      });
+      document.getElementById("run-id-input").addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          document.getElementById("load-run-btn").click();
+        }
       });
 
       const storedApiKey = sessionStorage.getItem(STORAGE_KEY);

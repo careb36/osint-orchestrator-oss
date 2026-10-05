@@ -46,6 +46,7 @@ One run, in order (`orchestrator/pipeline.py`):
 | `synthesizer/` | LLM providers (Nebius, OpenAI-compatible, Anthropic, Ollama), model routing, evidence qualification, synthesis |
 | `reports/`, `evidence.py` | Run artefacts and the signed manifest chain |
 | `alerts/` | Webhook and SMTP dispatch with a retry queue |
+| `demo.py` | Public demo mode: allowlist, daily limits and call budgets, views without the risk assessment |
 | `i18n.py` | Operator-facing text in Spanish and English |
 
 ## LLM routing
@@ -55,7 +56,7 @@ Two routes share one provider client
 
 | Route | Setting | Used for | Code |
 | --- | --- | --- | --- |
-| fast | `LLM_MODEL_FAST` | Evidence qualification, batches of 10 | `synthesizer/qualify.py` |
+| fast | `LLM_MODEL_FAST` | Evidence qualification, batches of 5; unqualified items are retried once | `synthesizer/qualify.py` |
 | reasoning | `LLM_MODEL_REASONING` | Run synthesis | `synthesizer/__init__.py` |
 
 Both request a JSON-schema response and fall back once to a plain request when

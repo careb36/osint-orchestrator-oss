@@ -30,7 +30,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${PR_DRAFT}" = "true" ]; then
-            echo "Draft PR detected: skipping completion checks until it is marked ready for review."
+            echo "Draft PR: skipping completion guard until ready_for_review."
             exit 0
           fi
           fail=0
