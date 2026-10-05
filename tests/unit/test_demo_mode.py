@@ -167,6 +167,28 @@ def test_demo_mode_starts_and_mounts_demo_routes(client: TestClient) -> None:
     assert client.get("/demo/targets/demo-corp/runs").json() == []
 
 
+def test_demo_page_language_follows_query_then_accept_language(client: TestClient) -> None:
+    # The operator default is "en" here; the visitor's choice wins over it.
+    es = client.get("/demo", params={"lang": "es"})
+    assert es.status_code == 200
+    assert '<html lang="es">' in es.text
+    assert "Demostración con información pública" in es.text
+
+    header = client.get("/demo", headers={"Accept-Language": "es-UY,es;q=0.9,en;q=0.8"})
+    assert '<html lang="es">' in header.text
+
+    unknown = client.get("/demo", params={"lang": "xx"})
+    assert '<html lang="en">' in unknown.text  # falls back to the global setting
+
+
+def test_health_is_ok_in_demo_mode_with_the_sink_off_by_design(client: TestClient) -> None:
+    payload = client.get("/health").json()
+    assert payload["status"] == "ok"
+    assert payload["checks"]["opencti"]["status"] == "disabled"
+    assert payload["checks"]["opencti"]["hint"]
+    assert payload["checks"]["opencti"]["action"]
+
+
 def test_demo_routes_are_404_when_demo_mode_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "demo_mode", False)
     with TestClient(api_module.app) as plain:
@@ -183,6 +205,7 @@ def test_demo_routes_are_404_when_demo_mode_is_off(monkeypatch: pytest.MonkeyPat
         ("orchestrator_secret_key", "", "ORCHESTRATOR_SECRET_KEY must be set"),
         ("orchestrator_api_key", "", "ORCHESTRATOR_API_KEY must be set"),
         ("demo_max_runs_per_ip_per_day", 0, "DEMO_MAX_RUNS_PER_IP_PER_DAY must be > 0"),
+        ("tavily_api_key", "", "TAVILY_API_KEY must be set"),
     ],
 )
 def test_demo_mode_refuses_to_start_with_opencti_enabled_or_non_tavily_collectors(
@@ -580,8 +603,80 @@ def test_shipped_allowlist_is_a_valid_demo_configuration(
 ) -> None:
     shipped = Path(__file__).parents[2] / "demo" / "targets.demo.yaml"
     monkeypatch.setattr(settings, "demo_targets_file", str(shipped))
+    monkeypatch.setattr(settings, "nebius_api_key", "test-token")
+    monkeypatch.setattr(settings, "llm_model_reasoning", "nvidia/reasoning-model")
+    monkeypatch.setattr(settings, "llm_model_fast", "nvidia/fast-model")
     demo.validate_demo_mode()
     assert all(target.fqdn.startswith("example.") for target in demo.load_demo_targets())
+
+
+@pytest.mark.parametrize(
+    ("setting", "expected"),
+    [
+        ("nebius_api_key", "NEBIUS_API_KEY must be set"),
+        ("llm_model_reasoning", "LLM_MODEL_REASONING must name a Nemotron model"),
+        ("llm_model_fast", "LLM_MODEL_FAST must name a Nemotron model"),
+    ],
+)
+def test_nebius_targets_need_a_key_and_both_model_routes(
+    demo_settings: Path, monkeypatch: pytest.MonkeyPatch, setting: str, expected: str
+) -> None:
+    # The shipped allowlist synthesises with ``llm: nebius``; a half-filled
+    # .env must stop the service instead of failing every run in public.
+    shipped = Path(__file__).parents[2] / "demo" / "targets.demo.yaml"
+    monkeypatch.setattr(settings, "demo_targets_file", str(shipped))
+    monkeypatch.setattr(settings, "nebius_api_key", "test-token")
+    monkeypatch.setattr(settings, "llm_model_reasoning", "nvidia/reasoning-model")
+    monkeypatch.setattr(settings, "llm_model_fast", "nvidia/fast-model")
+    monkeypatch.setattr(settings, setting, "")
+    with pytest.raises(RuntimeError, match=expected):
+        demo.validate_demo_mode()
+
+
+def test_demo_page_has_the_console_security_headers(client: TestClient) -> None:
+    resp = client.get("/demo")
+    csp = resp.headers["Content-Security-Policy"]
+    assert "default-src 'none'" in csp and "frame-ancestors 'none'" in csp
+    nonce = csp.split("script-src 'nonce-", 1)[1].split("'", 1)[0]
+    assert f'<script nonce="{nonce}">' in resp.text
+    assert f'<style nonce="{nonce}">' in resp.text
+    assert resp.headers["X-Content-Type-Options"] == "nosniff"
+    assert resp.headers["Referrer-Policy"] == "no-referrer"
+    assert resp.headers["Cache-Control"] == "no-store"
+
+
+def test_public_chain_verify_is_cached_briefly_and_counted(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from orchestrator import metrics
+
+    api_module._demo_verify_cache.clear()
+    calls: list[str] = []
+    real = api_module.verify_target_chain
+
+    async def _counting(**kwargs):
+        calls.append(kwargs["target_id"])
+        return await real(**kwargs)
+
+    monkeypatch.setattr(api_module, "verify_target_chain", _counting)
+    before = (
+        metrics.sample(
+            "osint_orchestrator_evidence_chain_verify_total",
+            {"target_id": "demo-corp", "outcome": "ok"},
+        )
+        or 0.0
+    )
+
+    first = client.get("/demo/targets/demo-corp/chain/verify").json()
+    second = client.get("/demo/targets/demo-corp/chain/verify").json()
+
+    assert first["ok"] is True and second == first
+    assert calls == ["demo-corp"]  # the second request was served from the cache
+    after = metrics.sample(
+        "osint_orchestrator_evidence_chain_verify_total",
+        {"target_id": "demo-corp", "outcome": "ok"},
+    )
+    assert after - before == 1
 
 
 def test_public_target_view_has_no_authorization_text(demo_settings: Path) -> None:

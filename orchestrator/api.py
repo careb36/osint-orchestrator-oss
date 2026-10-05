@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import secrets
+import time
 import uuid
 from collections import defaultdict
 from contextlib import asynccontextmanager
@@ -186,7 +187,8 @@ app = FastAPI(
     version=VERSION,
     summary="Orchestrates OSINT collectors, normalises findings to STIX 2.1 and ingests them into OpenCTI.",
     description=(
-        "Every endpoint except `GET /`, `GET /health` and `GET /metrics` requires an API key "
+        "Every endpoint except `GET /`, `GET /health`, `GET /metrics`, the documentation pages, "
+        "the console shell and, with `DEMO_MODE=true`, the `/demo` routes requires an API key "
         "(`X-API-Key: <key>` or `Authorization: Bearer <key>`). Error `detail` strings are "
         "localised per ADR-004. See docs/operations.md in the repository for the operator guide."
     ),
@@ -321,6 +323,10 @@ def _health_hint(component: str, status: str, detail: str) -> tuple[str, str]:
                 "OpenCTI ingestion is failing.",
                 "Check the OpenCTI endpoint, credentials, and broker connectivity before retrying.",
             ),
+            "disabled": (
+                "OpenCTI is intentionally off in this deployment (demo mode).",
+                "No action: reports, findings and the evidence chain do not need the sink.",
+            ),
         },
     }
     compact = hints.get(component, {}).get(
@@ -356,7 +362,16 @@ async def health() -> dict[str, Any]:
         checks["scheduler"] = {"status": "degraded", "detail": "Scheduler is not running"}
 
     if not settings.opencti_enabled:
-        checks["opencti"] = {"status": "degraded", "detail": "OpenCTI sink disabled"}
+        # ADR-008: without the sink the knowledge graph is degraded. In demo
+        # mode the sink is off by design (the service refuses to start with it
+        # on), so reporting it as degraded would make every demo look broken.
+        if settings.demo_mode:
+            checks["opencti"] = {
+                "status": "disabled",
+                "detail": "OpenCTI sink disabled (demo mode)",
+            }
+        else:
+            checks["opencti"] = {"status": "degraded", "detail": "OpenCTI sink disabled"}
 
     for component, payload in checks.items():
         status = payload["status"]
@@ -795,15 +810,47 @@ async def _demo_run_or_404(run_id: int) -> tuple[Run, Target]:
     return run, target
 
 
+def _demo_language(request: Request) -> str:
+    """Page language: ``?lang=`` first, then the browser's Accept-Language, then the global default.
+
+    Visitors of a public page have no per-target setting; the operator's
+    ``ORCHESTRATOR_LANGUAGE`` is the fallback, not the rule.
+    """
+    requested = (request.query_params.get("lang") or "").strip().lower()
+    if not requested:
+        header = request.headers.get("accept-language", "")
+        first = header.split(",", 1)[0].strip()
+        requested = first.split(";", 1)[0].split("-", 1)[0].lower()
+    return resolve_language(requested or None)
+
+
 @app.get("/demo", response_class=HTMLResponse, include_in_schema=False)
 async def demo_page(request: Request) -> HTMLResponse:
     """The public demo page (static shell; it calls the /demo/* routes)."""
     _require_demo()
-    language = resolve_language(None)
+    language = _demo_language(request)
+    # Same second line of defence as the console: the page renders model- and
+    # internet-derived strings (titles, rationales, the report), so only this
+    # response's inline script/style may run and nothing may be framed.
+    nonce = secrets.token_urlsafe(16)
+    csp = (
+        f"default-src 'none'; script-src 'nonce-{nonce}'; style-src 'nonce-{nonce}'; "
+        "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    )
     return templates.TemplateResponse(
         request=request,
         name="demo.html",
-        context={"language": language, "disclaimer": t("demo.disclaimer", language=language)},
+        context={
+            "language": language,
+            "disclaimer": t("demo.disclaimer", language=language),
+            "csp_nonce": nonce,
+        },
+        headers={
+            "Content-Security-Policy": csp,
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "no-referrer",
+            "Cache-Control": "no-store",
+        },
     )
 
 
@@ -917,14 +964,35 @@ async def demo_run_manifest(run_id: int) -> dict[str, Any]:
         ) from None
 
 
+# The public chain check re-hashes every artefact of every sealed run of the
+# target and needs no key, so one visitor could keep the event loop busy by
+# reloading it. Results are kept for a few seconds and computed one at a time;
+# a tampered file is still reported within _DEMO_VERIFY_CACHE_SECONDS.
+_DEMO_VERIFY_CACHE_SECONDS = 15.0
+_demo_verify_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_demo_verify_lock = asyncio.Lock()
+
+
 @app.get("/demo/targets/{target_id}/chain/verify", tags=["demo"])
 async def demo_verify_chain(target_id: str) -> dict[str, Any]:
     """Verify the evidence chain of an allowlisted target."""
     target = _demo_target_or_404(target_id)
-    async with get_session() as session:
-        result = await verify_target_chain(
-            target_id=target_id, secret_key=settings.orchestrator_secret_key, session=session
-        )
+    async with _demo_verify_lock:
+        cached = _demo_verify_cache.get(target_id)
+        now = time.monotonic()
+        if cached is not None and now - cached[0] < _DEMO_VERIFY_CACHE_SECONDS:
+            result = dict(cached[1])
+        else:
+            async with get_session() as session:
+                result = await verify_target_chain(
+                    target_id=target_id,
+                    secret_key=settings.orchestrator_secret_key,
+                    session=session,
+                )
+            _demo_verify_cache[target_id] = (now, dict(result))
+            metrics.evidence_chain_verify_total.labels(
+                target_id, "ok" if result["ok"] else "broken"
+            ).inc()
     if result["reason"]:
         result["message"] = t(
             f"chain.reason.{result['reason']}",

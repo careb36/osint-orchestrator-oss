@@ -75,6 +75,13 @@ def demo_target(target_id: str) -> Target | None:
     return next((target for target in load_demo_targets() if target.id == target_id), None)
 
 
+def _uses_nebius(target: Target) -> bool:
+    """True when this target's synthesis goes to Nebius (see providers.get_client)."""
+    if target.llm == "nebius":
+        return True
+    return target.llm == "openai" and settings.llm_provider == "nebius"
+
+
 def _enabled_collectors(target: Target) -> list[str]:
     collectors = target.collectors
     return [
@@ -120,6 +127,18 @@ def validate_demo_mode() -> None:
                 f"demo target {target.id}: only the tavily collector may be enabled "
                 f"(enabled: {_enabled_collectors(target)})"
             )
+    # A demo that starts with a half-filled .env is worse than one that refuses
+    # to start: every run would fail or come back empty in front of the audience.
+    if enabled and not settings.tavily_api_key.strip():
+        problems.append("TAVILY_API_KEY must be set (every demo target collects with Tavily)")
+    if any(_uses_nebius(target) for target in enabled):
+        if not settings.nebius_api_key.strip():
+            problems.append("NEBIUS_API_KEY must be set (demo targets synthesise with llm: nebius)")
+        for name in ("llm_model_reasoning", "llm_model_fast"):
+            if not getattr(settings, name).strip():
+                problems.append(
+                    f"{name.upper()} must name a Nemotron model served to your Nebius key"
+                )
     if problems:
         raise RuntimeError("DEMO_MODE=true is misconfigured: " + "; ".join(problems))
     logger.info(
