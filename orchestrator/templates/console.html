@@ -743,7 +743,7 @@
               <div class="muted">${esc(check.detail || "")}</div>
             </article>
           `);
-          grid.innerHTML = cards.join("") || "<p class=\"muted\">${t("empty")}</p>";
+          grid.innerHTML = cards.join("") || `<p class="muted">${t("empty")}</p>`;
         } catch (error) {
           document.getElementById("health-grid").innerHTML = `<p class="error">${t("errorPrefix")}: ${esc(error.message)}</p>`;
         }

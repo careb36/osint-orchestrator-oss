@@ -18,6 +18,7 @@ import pytest
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
+import orchestrator.api as api_mod
 import orchestrator.auth as auth_mod
 from orchestrator.api import app, router
 from orchestrator.auth import auth_enabled, configured_api_keys, log_auth_status
@@ -202,6 +203,38 @@ def test_health_never_needs_a_key(one_key, client: TestClient) -> None:
     assert payload["version"]
     assert payload["checks"]["api"]["status"] == "ok"
     assert set(payload["checks"]).issubset({"api", "database", "scheduler", "opencti"})
+
+
+def test_health_reports_degraded_when_opencti_is_disabled(
+    one_key, client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "opencti_enabled", False)
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["status"] == "degraded"
+    assert payload["checks"]["opencti"]["status"] == "degraded"
+    assert payload["checks"]["database"]["status"] == "ok"
+
+
+def test_health_prioritizes_offline_when_database_check_fails(
+    one_key, client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class _FailingSessionContext:
+        async def __aenter__(self):
+            raise RuntimeError("db down")
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(api_mod, "get_session", lambda: _FailingSessionContext())
+    monkeypatch.setattr(settings, "opencti_enabled", False)
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["status"] == "offline"
+    assert payload["checks"]["database"]["status"] == "offline"
+    assert payload["checks"]["opencti"]["status"] == "degraded"
 
 
 def test_metrics_never_needs_a_key(one_key, client: TestClient) -> None:
