@@ -136,6 +136,15 @@ def test_console_template_fetches_artifacts_with_api_key() -> None:
     assert "loadRunDetail(storedRunId);" in src
 
 
+def test_console_health_cards_include_recovery_hints() -> None:
+    from pathlib import Path
+
+    src = Path("orchestrator/templates/console.html").read_text(encoding="utf-8")
+    assert "check.recovery || check.hint || check.action || check.detail" in src
+    assert "healthAction" in src
+    assert "Recommended action" in Path("orchestrator/i18n.py").read_text(encoding="utf-8")
+
+
 def test_console_run_workspace_supports_evidence_search_filter_and_sort() -> None:
     from pathlib import Path
 

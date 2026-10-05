@@ -205,6 +205,18 @@ def test_health_never_needs_a_key(one_key, client: TestClient) -> None:
     assert set(payload["checks"]).issubset({"api", "database", "scheduler", "opencti"})
 
 
+def test_health_includes_actionable_recovery_hints(one_key, client: TestClient) -> None:
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    payload = resp.json()
+    for check in payload["checks"].values():
+        assert "detail" in check
+        assert "hint" in check
+        assert "action" in check
+        assert check["hint"]
+        assert check["action"]
+
+
 def test_health_reports_degraded_when_opencti_is_disabled(
     one_key, client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -903,15 +903,25 @@
           const overall = payload.status || "ok";
           summary.textContent = overall.toUpperCase();
           summary.dataset.status = overall;
-          const cards = Object.entries(payload.checks || {}).map(([name, check]) => `
-            <article class="health-card" data-status="${esc(check.status || "ok")}">
-              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;">
-                <strong>${esc(name)}</strong>
-                <span class="status-pill" data-status="${esc(check.status || "ok")}">${esc(check.status || "ok")}</span>
-              </div>
-              <div class="muted">${esc(check.detail || "")}</div>
-            </article>
-          `);
+          const cards = Object.entries(payload.checks || {}).map(([name, check]) => {
+            const status = check.status || "ok";
+            const hint = check.recovery || check.hint || check.action || check.detail || "";
+            const action = check.action || "";
+            const recoveryMarkup = action
+              ? `<div class="muted" style="margin-top:8px;"><strong>${esc(t("healthAction"))}:</strong> ${esc(action)}</div>`
+              : "";
+            return `
+              <article class="health-card" data-status="${esc(status)}">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;">
+                  <strong>${esc(name)}</strong>
+                  <span class="status-pill" data-status="${esc(status)}">${esc(status)}</span>
+                </div>
+                <div class="muted">${esc(check.detail || "")}</div>
+                <div class="muted" style="margin-top:8px;">${esc(hint)}</div>
+                ${recoveryMarkup}
+              </article>
+            `;
+          });
           grid.innerHTML = cards.join("") || `<p class="muted">${t("empty")}</p>`;
         } catch (error) {
           document.getElementById("health-grid").innerHTML = `<p class="error">${t("errorPrefix")}: ${esc(error.message)}</p>`;
