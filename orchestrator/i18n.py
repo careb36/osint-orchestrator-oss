@@ -220,7 +220,7 @@ _MESSAGES: dict[str, dict[str, str]] = {
     "dashboard_missing_body": {
         "es": (
             "Este servicio corre desde un checkout sin el build del panel. Las imágenes "
-            "Docker lo construyen solas; en un checkout, construilo y copialo así:"
+            "Docker lo construyen solas; en un checkout, constrúyalo y cópielo así:"
         ),
         "en": (
             "This service runs from a checkout without the dashboard build. The Docker "
