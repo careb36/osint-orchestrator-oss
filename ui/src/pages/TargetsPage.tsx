@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { EmptyState, ErrorState, LoadingState, PageLayout } from '../components/PageState';
 import { api } from '../lib/api';
 
 export function TargetsPage() {
@@ -7,24 +8,43 @@ export function TargetsPage() {
     queryFn: api.getTargets,
   });
 
+  if (isLoading) {
+    return (
+      <PageLayout title="Targets" subtitle="Review the active target set and coverage status.">
+        <LoadingState message="Loading targets..." />
+      </PageLayout>
+    );
+  }
+
+  if (error) {
+    return (
+      <PageLayout title="Targets" subtitle="The target inventory is currently unavailable.">
+        <ErrorState description="Unable to load targets." />
+      </PageLayout>
+    );
+  }
+
+  if (!data || data.length === 0) {
+    return (
+      <PageLayout title="Targets" subtitle="The target inventory for this operator workspace.">
+        <EmptyState title="No targets configured" description="Add a target to start tracking collection and monitoring workloads." />
+      </PageLayout>
+    );
+  }
+
   return (
-    <section className="page">
-      <h1>Targets</h1>
-      {isLoading ? <p>Loading targets...</p> : null}
-      {error ? <p role="alert">Unable to load targets.</p> : null}
-      {!isLoading && !error && data ? (
-        <ul className="list-card">
-          {data.map((target) => (
-            <li key={target.id}>
-              <div>
-                <strong>{target.fqdn}</strong>
-                <small>{target.id}</small>
-              </div>
-              <span>{target.enabled ? 'Enabled' : 'Disabled'}</span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-    </section>
+    <PageLayout title="Targets" subtitle="The target inventory for this operator workspace.">
+      <ul className="list-card">
+        {data.map((target) => (
+          <li key={target.id}>
+            <div>
+              <strong>{target.fqdn}</strong>
+              <small>{target.id}</small>
+            </div>
+            <span>{target.enabled ? 'Enabled' : 'Disabled'}</span>
+          </li>
+        ))}
+      </ul>
+    </PageLayout>
   );
 }
