@@ -34,6 +34,7 @@ def test_console_shell_is_reachable_from_a_browser_while_data_stays_protected(
     assert legacy.status_code == 200
     assert 'id="api-key-input"' in legacy.text
     assert catalogue.status_code == 200
+    assert "application/json" in catalogue.headers["content-type"]
     assert data.status_code == 401
     assert trends.status_code == 401
 
@@ -303,9 +304,11 @@ def test_console_client_routes_are_404_without_a_build(
     assert resp.status_code == 404
     assert legacy.status_code == 200
     assert catalogue.status_code == 200
+    assert "application/json" in catalogue.headers["content-type"]
 
 
 def test_console_legacy_stays_available_next_to_the_dashboard(ui_build: Path) -> None:
+    """The fixed routes keep their own payloads: the catch-all must not shadow them."""
     with TestClient(app, raise_server_exceptions=True) as client:
         legacy = client.get("/console/legacy")
         catalogue = client.get("/console/i18n.json")
@@ -313,3 +316,24 @@ def test_console_legacy_stays_available_next_to_the_dashboard(ui_build: Path) ->
     assert 'id="api-key-input"' in legacy.text
     assert "nonce-" in legacy.headers["content-security-policy"]
     assert catalogue.status_code == 200
+    assert "application/json" in catalogue.headers["content-type"]
+    assert '<div id="root">' not in catalogue.text
+    assert isinstance(catalogue.json(), dict)
+
+
+def test_console_catch_all_refuses_file_like_paths(ui_build: Path) -> None:
+    """A stale or mistyped asset link is a miss, not a 200 shell."""
+    with TestClient(app, raise_server_exceptions=True) as client:
+        typo_dir = client.get("/console/asset/index-abc123.js")
+        typo_file = client.get("/console/i18n.jso")
+        favicon = client.get("/console/favicon.ico")
+        nested = client.get("/console/runs/42/report.md")
+        view = client.get("/console/targets/example.com")
+    assert typo_dir.status_code == 404
+    assert typo_file.status_code == 404
+    assert favicon.status_code == 404
+    assert nested.status_code == 404
+    # Target ids may contain dots (orchestrator/models.py::_TARGET_ID_RE), so a
+    # deep link to such a target is a view, not a file.
+    assert view.status_code == 200
+    assert '<div id="root"></div>' in view.text
