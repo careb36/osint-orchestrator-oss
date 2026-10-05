@@ -52,8 +52,36 @@ def test_console_without_a_build_is_a_503_with_build_instructions(
     assert f'<style nonce="{nonce.group(1)}">' in resp.text
     assert "default-src 'none'" in csp
     assert "script-src" not in csp
+    # Same directive set as the shell's CSP apart from the script/style sources.
+    for directive in (
+        "connect-src 'self'",
+        "img-src 'self' data:",
+        "font-src 'self'",
+        "frame-ancestors 'none'",
+    ):
+        assert directive in csp
     assert resp.headers["x-content-type-options"] == "nosniff"
     assert resp.headers["cache-control"] == "no-store"
+
+
+def test_console_shell_and_missing_build_share_the_hardening_headers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, ui_build: Path
+) -> None:
+    """Only the CSP (bundle vs. no script) and Retry-After may differ between the two branches."""
+    monkeypatch.setattr(settings, "orchestrator_api_key", "")
+    with TestClient(app, raise_server_exceptions=True) as client:
+        shell = client.get("/console")
+        monkeypatch.setattr(api_module, "UI_DIST_DIR", tmp_path / "no-build")
+        missing = client.get("/console")
+    assert shell.status_code == 200
+    assert missing.status_code == 503
+    shared = ("x-content-type-options", "referrer-policy", "cache-control")
+    for header in shared:
+        assert shell.headers[header] == missing.headers[header], header
+    assert "retry-after" not in shell.headers
+    assert missing.headers["retry-after"] == "60"
+    assert "script-src 'self'" in shell.headers["content-security-policy"]
+    assert "script-src" not in missing.headers["content-security-policy"]
 
 
 def test_console_missing_build_page_follows_the_operator_language(

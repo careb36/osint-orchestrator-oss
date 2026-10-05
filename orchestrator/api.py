@@ -553,20 +553,24 @@ def _ui_dist_index() -> Path | None:
     return index if index.is_file() else None
 
 
+# Directives every /console response shares: same-origin connections, images
+# and fonts, no base/form/frame tricks. The script and style sources differ
+# per page and are prepended below.
+_CONSOLE_CSP_TAIL = (
+    "connect-src 'self'; img-src 'self' data:; font-src 'self'; base-uri 'none'; "
+    "form-action 'none'; frame-ancestors 'none'"
+)
 # The React dashboard is one bundled script and one stylesheet, both served
 # from this origin under /console/assets/. Nothing inline, nothing remote: a
 # string that reaches the DOM from a collector or a model cannot execute.
-_UI_CSP = (
-    "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
-    "img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'; "
-    "frame-ancestors 'none'"
-)
-_UI_SHELL_HEADERS = {
-    "Content-Security-Policy": _UI_CSP,
+_UI_CSP = f"default-src 'none'; script-src 'self'; style-src 'self'; {_CONSOLE_CSP_TAIL}"
+# Hardening headers every /console HTML response carries, shell or 503 alike.
+_CONSOLE_HARDENING_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
     "Cache-Control": "no-store",
 }
+_UI_SHELL_HEADERS = {**_CONSOLE_HARDENING_HEADERS, "Content-Security-Policy": _UI_CSP}
 
 
 def _dashboard_missing_response(request: Request) -> HTMLResponse:
@@ -575,6 +579,10 @@ def _dashboard_missing_response(request: Request) -> HTMLResponse:
 
     A deployment without the dashboard is a deployment error, so the status
     is one a probe notices; the page itself carries no data and no script.
+    It shares ``_CONSOLE_HARDENING_HEADERS`` with the shell and differs from
+    it on purpose in two places: the CSP allows no script at all and styles
+    only by nonce (the page has no bundle), and ``Retry-After`` tells the
+    probe when to look again.
     """
     nonce = secrets.token_urlsafe(16)
     language = resolve_language(None)
@@ -590,20 +598,21 @@ def _dashboard_missing_response(request: Request) -> HTMLResponse:
         },
         status_code=503,
         headers={
-            "Content-Security-Policy": (
-                f"default-src 'none'; style-src 'nonce-{nonce}'; base-uri 'none'; "
-                "form-action 'none'; frame-ancestors 'none'"
-            ),
-            "X-Content-Type-Options": "nosniff",
-            "Referrer-Policy": "no-referrer",
-            "Cache-Control": "no-store",
+            **_CONSOLE_HARDENING_HEADERS,
+            "Content-Security-Policy": f"default-src 'none'; style-src 'nonce-{nonce}'; {_CONSOLE_CSP_TAIL}",
             "Retry-After": "60",
         },
     )
 
 
 def _ui_shell_response(request: Request) -> HTMLResponse:
-    """The React dashboard's index.html, or the 503 build notice without a build."""
+    """
+    The React dashboard's index.html, or the 503 build notice without a build.
+
+    Both branches carry ``_CONSOLE_HARDENING_HEADERS``; only the CSP (bundle
+    vs. no script) and the 503's ``Retry-After`` differ, as documented on
+    ``_dashboard_missing_response``.
+    """
     index = _ui_dist_index()
     if index is None:
         return _dashboard_missing_response(request)
