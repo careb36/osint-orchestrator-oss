@@ -5,7 +5,9 @@ import { AppErrorBoundary } from './components/ErrorBoundary';
 import { LoginPage } from './pages/LoginPage';
 import { HomePage } from './pages/HomePage';
 import { NotFoundPage } from './pages/NotFoundPage';
+import { RunWorkspacePage } from './pages/RunWorkspacePage';
 import { RunsPage } from './pages/RunsPage';
+import { TargetDetailPage } from './pages/TargetDetailPage';
 import { TargetsPage } from './pages/TargetsPage';
 import { QUICK_ACTIONS } from './routes';
 
@@ -77,7 +79,10 @@ function AppShell() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/" element={<ProtectedRoute><HomePage /></ProtectedRoute>} />
           <Route path="/targets" element={<ProtectedRoute><TargetsPage /></ProtectedRoute>} />
+          <Route path="/targets/:targetId" element={<ProtectedRoute><TargetDetailPage /></ProtectedRoute>} />
+          <Route path="/targets/:targetId/runs/:runId" element={<ProtectedRoute><RunWorkspacePage /></ProtectedRoute>} />
           <Route path="/runs" element={<ProtectedRoute><RunsPage /></ProtectedRoute>} />
+          <Route path="/runs/:runId" element={<ProtectedRoute><RunWorkspacePage /></ProtectedRoute>} />
           <Route path="*" element={<ProtectedRoute><NotFoundPage /></ProtectedRoute>} />
         </Routes>
       </main>
