@@ -183,6 +183,11 @@ def test_demo_page_language_follows_query_then_accept_language(client: TestClien
     assert '<html lang="en">' in weighted.text
     excluded = client.get("/demo", headers={"Accept-Language": "fr,es;q=0,en;q=0.1"})
     assert '<html lang="en">' in excluded.text
+    # equal quality: the first listed wins, not the alphabetically smaller tag
+    ordered = client.get("/demo", headers={"Accept-Language": "en,es"})
+    assert '<html lang="en">' in ordered.text
+    ordered_es = client.get("/demo", headers={"Accept-Language": "es;q=0.9,en;q=0.9"})
+    assert '<html lang="es">' in ordered_es.text
 
     unknown = client.get("/demo", params={"lang": "xx"})
     assert '<html lang="en">' in unknown.text  # falls back to the global setting
@@ -681,6 +686,39 @@ def test_nebius_settings_are_not_required_when_synthesis_is_off(
     monkeypatch.setattr(settings, "llm_model_reasoning", "")
     monkeypatch.setattr(settings, "llm_model_fast", "")
     demo.validate_demo_mode()
+
+
+@pytest.mark.parametrize(
+    ("llm", "provider", "expected"),
+    [
+        ("anthropic", "anthropic", "ANTHROPIC_API_KEY must be set"),
+        ("openai", "openai", "OPENAI_API_KEY must be set"),
+        ("openai", "nebius", "NEBIUS_API_KEY must be set"),
+    ],
+)
+def test_every_cloud_provider_a_demo_target_uses_needs_its_key(
+    demo_settings: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    llm: str,
+    provider: str,
+    expected: str,
+) -> None:
+    # The guard follows providers.get_client: whatever client a target would
+    # build must have its key, not only the Nebius route.
+    path = tmp_path / "targets.cloud.yaml"
+    path.write_text(
+        _TARGETS.format(
+            target_id="cloud-corp", report_dir=tmp_path / "r", openosint="false"
+        ).replace("    language: en\n", f"    language: en\n    llm: {llm}\n"),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(settings, "demo_targets_file", str(path))
+    monkeypatch.setattr(settings, "llm_provider", provider)
+    for name in ("anthropic_api_key", "openai_api_key", "nebius_api_key"):
+        monkeypatch.setattr(settings, name, "")
+    with pytest.raises(RuntimeError, match=expected):
+        demo.validate_demo_mode()
 
 
 def test_demo_page_has_the_console_security_headers(client: TestClient) -> None:

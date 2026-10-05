@@ -129,10 +129,14 @@ async def lifespan(app: FastAPI):
     # cron in targets.yaml is never registered and the orchestrator only ever
     # runs when POST /targets/{id}/run is called by hand.
     start_scheduler()
+    # Per serving loop: an asyncio.Lock binds to the loop that first contends
+    # on it, and this app object outlives test loops.
+    app.state.demo_verify_lock = asyncio.Lock()
     try:
         yield
     finally:
         shutdown_scheduler()
+        app.state.demo_verify_lock = None
 
 
 async def _run_llm_model_preflight() -> None:
@@ -820,8 +824,8 @@ def _demo_language(request: Request) -> str:
     if requested in SUPPORTED_LANGUAGES:
         return resolve_language(requested)
     # Accept-Language: best supported primary subtag by quality value.
-    candidates: list[tuple[float, str]] = []
-    for entry in request.headers.get("accept-language", "").split(","):
+    candidates: list[tuple[float, int, str]] = []
+    for position, entry in enumerate(request.headers.get("accept-language", "").split(",")):
         tag, _, params = entry.strip().partition(";")
         quality = 1.0
         for param in params.split(";"):
@@ -833,11 +837,12 @@ def _demo_language(request: Request) -> str:
                     quality = 0.0
         language = tag.strip().split("-", 1)[0].lower()
         if quality > 0 and language in SUPPORTED_LANGUAGES:
-            candidates.append((quality, language))
+            # Equal quality: the browser lists its preference first.
+            candidates.append((quality, -position, language))
     # Visitor input is not operator configuration: anything unsupported falls
     # back quietly instead of reaching resolve_language's warning (which exists
     # for typos in targets.yaml / ORCHESTRATOR_LANGUAGE).
-    return resolve_language(max(candidates)[1] if candidates else None)
+    return resolve_language(max(candidates)[2] if candidates else None)
 
 
 @app.get("/demo", response_class=HTMLResponse, include_in_schema=False)
@@ -989,9 +994,9 @@ _demo_verify_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
 def _demo_verify_lock(request: Request) -> asyncio.Lock:
-    """One lock per running app: created in the serving loop, never at import time."""
+    """The lock the lifespan created for this serving loop (never one from an earlier loop)."""
     lock = getattr(request.app.state, "demo_verify_lock", None)
-    if lock is None:
+    if lock is None:  # app served without its lifespan (bare TestClient)
         lock = request.app.state.demo_verify_lock = asyncio.Lock()
     return lock
 
@@ -1002,8 +1007,7 @@ async def demo_verify_chain(target_id: str, request: Request) -> dict[str, Any]:
     target = _demo_target_or_404(target_id)
     async with _demo_verify_lock(request):
         cached = _demo_verify_cache.get(target_id)
-        now = time.monotonic()
-        if cached is not None and now - cached[0] < _DEMO_VERIFY_CACHE_SECONDS:
+        if cached is not None and time.monotonic() - cached[0] < _DEMO_VERIFY_CACHE_SECONDS:
             result = dict(cached[1])
         else:
             try:
@@ -1017,7 +1021,9 @@ async def demo_verify_chain(target_id: str, request: Request) -> dict[str, Any]:
                 # Metric parity with the protected route.
                 metrics.evidence_chain_verify_total.labels(target_id, "error").inc()
                 raise
-            _demo_verify_cache[target_id] = (now, dict(result))
+            # Stamped after the hashing: a slow verification must not come out
+            # of the cache already half expired.
+            _demo_verify_cache[target_id] = (time.monotonic(), dict(result))
     # Counted on every request, cached or not, like the protected route: the
     # metric answers "how many verifications were asked for".
     metrics.evidence_chain_verify_total.labels(target_id, "ok" if result["ok"] else "broken").inc()
