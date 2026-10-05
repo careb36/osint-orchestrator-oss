@@ -1,11 +1,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { AppErrorBoundary } from './components/ErrorBoundary';
 import App from './App';
-import { APP_ROUTES } from './routes';
+import { AuthProvider } from './auth';
+import { AppErrorBoundary } from './components/ErrorBoundary';
 
-const renderWithProviders = (ui: React.ReactElement, initialEntry = '/') => {
+const renderWithProviders = (ui: React.ReactElement, initialEntries = ['/']) => {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -16,24 +16,56 @@ const renderWithProviders = (ui: React.ReactElement, initialEntry = '/') => {
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[initialEntry]}>{ui}</MemoryRouter>
+      <MemoryRouter initialEntries={initialEntries}>
+        <AuthProvider>{ui}</AuthProvider>
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 };
 
 describe('App shell', () => {
-  it('renders the main navigation and heading', () => {
-    renderWithProviders(<App />);
-
-    expect(screen.getByRole('link', { name: /^overview$/i })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /^targets$/i })).toBeInTheDocument();
-    expect(screen.getByText(/osint orchestrator/i)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /review runs/i })).toBeInTheDocument();
+  beforeEach(() => {
+    window.sessionStorage.clear();
   });
 
-  it('exposes the unified route map for contributors', () => {
-    expect(APP_ROUTES.map((route) => route.path)).toEqual(['/', '/targets', '/runs']);
-    expect(APP_ROUTES.every((route) => route.label.length > 0)).toBe(true);
+  it('redirects unauthenticated users to the login screen', () => {
+    renderWithProviders(<App />, ['/targets']);
+
+    expect(screen.getByRole('heading', { name: /sign in/i })).toBeInTheDocument();
+    expect(screen.getByText(/legacy api-key/i)).toBeInTheDocument();
+  });
+
+  it('shows role-aware navigation for an operator', () => {
+    window.sessionStorage.setItem(
+      'osint-operator-session',
+      JSON.stringify({ username: 'operator', role: 'operator', displayName: 'Operator' }),
+    );
+
+    renderWithProviders(<App />);
+
+    expect(screen.getByRole('link', { name: /overview/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /targets/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /runs/i })).toBeInTheDocument();
+  });
+
+  it('keeps the legacy API key in session storage for compatibility', () => {
+    window.sessionStorage.setItem('osint-operator-api-key', 'legacy-key');
+
+    renderWithProviders(<App />);
+
+    expect(window.sessionStorage.getItem('osint-operator-api-key')).toBe('legacy-key');
+  });
+
+  it('blocks viewer access to protected routes', () => {
+    window.sessionStorage.setItem(
+      'osint-operator-session',
+      JSON.stringify({ username: 'viewer', role: 'viewer', displayName: 'Viewer' }),
+    );
+
+    renderWithProviders(<App />, ['/targets']);
+
+    expect(screen.getByRole('heading', { name: /osint orchestrator/i })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /targets/i })).not.toBeInTheDocument();
   });
 
   it('renders the global error boundary fallback for broken children', () => {
@@ -56,7 +88,7 @@ describe('App shell', () => {
         <Route path="/" element={<div>home</div>} />
         <Route path="*" element={<div>Page not found</div>} />
       </Routes>,
-      '/missing',
+      ['/missing'],
     );
 
     expect(screen.getByText(/page not found/i)).toBeInTheDocument();

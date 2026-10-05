@@ -1,12 +1,37 @@
-import { NavLink, Route, Routes } from 'react-router-dom';
+import { type ReactNode } from 'react';
+import { Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom';
+import { useAuth } from './auth';
 import { AppErrorBoundary } from './components/ErrorBoundary';
+import { LoginPage } from './pages/LoginPage';
 import { HomePage } from './pages/HomePage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { RunsPage } from './pages/RunsPage';
 import { TargetsPage } from './pages/TargetsPage';
-import { APP_ROUTES, QUICK_ACTIONS } from './routes';
+import { QUICK_ACTIONS } from './routes';
+
+function ProtectedRoute({ children }: { children: ReactNode }) {
+  const { session, canAccess } = useAuth();
+  const location = useLocation();
+
+  if (!session) {
+    return <Navigate to="/login" replace state={location.pathname} />;
+  }
+
+  if (!canAccess(location.pathname)) {
+    return <Navigate to="/" replace />;
+  }
+
+  return <>{children}</>;
+}
 
 function AppShell() {
+  const { session, signOut } = useAuth();
+  const navItems = [
+    { to: '/', label: 'Overview', roles: ['viewer', 'operator', 'admin'] },
+    { to: '/targets', label: 'Targets', roles: ['operator', 'admin'] },
+    { to: '/runs', label: 'Runs', roles: ['operator', 'admin'] },
+  ].filter(({ roles }) => session && roles.includes(session.role));
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -18,10 +43,22 @@ function AppShell() {
           </div>
         </div>
 
+        {session ? (
+          <div className="toolbar">
+            <div className="session-chip" aria-live="polite">
+              <span>{session.displayName}</span>
+              <small>{session.role}</small>
+            </div>
+            <button className="ghost-button" type="button" onClick={signOut}>
+              Sign out
+            </button>
+          </div>
+        ) : null}
+
         <nav className="nav" aria-label="Main navigation">
-          {APP_ROUTES.filter((route) => route.showInNav).map((route) => (
-            <NavLink key={route.path} to={route.path} end={route.path === '/'}>
-              {route.label}
+          {navItems.map((item) => (
+            <NavLink key={item.to} to={item.to} end={item.to === '/'}>
+              {item.label}
             </NavLink>
           ))}
         </nav>
@@ -37,10 +74,11 @@ function AppShell() {
 
       <main className="content">
         <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/targets" element={<TargetsPage />} />
-          <Route path="/runs" element={<RunsPage />} />
-          <Route path="*" element={<NotFoundPage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/" element={<ProtectedRoute><HomePage /></ProtectedRoute>} />
+          <Route path="/targets" element={<ProtectedRoute><TargetsPage /></ProtectedRoute>} />
+          <Route path="/runs" element={<ProtectedRoute><RunsPage /></ProtectedRoute>} />
+          <Route path="*" element={<ProtectedRoute><NotFoundPage /></ProtectedRoute>} />
         </Routes>
       </main>
     </div>

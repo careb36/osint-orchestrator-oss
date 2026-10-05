@@ -1,6 +1,7 @@
 import type { HealthStatus, RunSummary, TargetSummary } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api';
+const LEGACY_API_KEY_STORAGE_KEY = 'osint-operator-api-key';
 
 class ApiError extends Error {
   constructor(
@@ -12,10 +13,21 @@ class ApiError extends Error {
   }
 }
 
+function getLegacyApiKey(): string | undefined {
+  if (typeof window === 'undefined') {
+    return undefined;
+  }
+
+  const key = window.sessionStorage.getItem(LEGACY_API_KEY_STORAGE_KEY);
+  return key ? key.trim() : undefined;
+}
+
 async function request<T>(path: string): Promise<T> {
+  const legacyApiKey = getLegacyApiKey();
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
       Accept: 'application/json',
+      ...(legacyApiKey ? { 'X-API-Key': legacyApiKey } : {}),
     },
   });
 
