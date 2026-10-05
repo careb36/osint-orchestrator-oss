@@ -69,7 +69,7 @@ export function TargetDetailPage() {
               <StatusPill label={trend?.latest_risk_level ?? 'unknown'} tone={riskTone(trend?.latest_risk_level ?? 'unknown')} />
             </strong>
             <small>
-              peak {trend?.peak_risk_level ?? 'unknown'} over {trend?.runs_considered ?? 0} runs
+              peak {trend?.peak_risk_level ?? 'unknown'} over {trend?.runs_considered ?? 0} {trend?.runs_considered === 1 ? 'run' : 'runs'}
             </small>
             {trend && trend.risk_history.length > 1 ? (
               <div className="risk-history" aria-label="Risk history, oldest first">

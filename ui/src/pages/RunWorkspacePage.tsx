@@ -12,7 +12,9 @@ import { distinct, filterDelta, filterEvidence, sortEvidence, type EvidenceSortK
 import type { ArtifactKind } from '../types';
 
 const RELEVANCES = ['high', 'medium', 'low'];
-const DEFAULTS = { q: '', relevance: '', category: '', type: '' };
+// Evidence and observables keep separate search keys (q / dq): a term typed
+// on one tab must not filter the other.
+const DEFAULTS = { q: '', relevance: '', category: '', dq: '', type: '' };
 
 const STORAGE_PREFIX = 'osint-run-workspace';
 const ARTIFACTS: ArtifactKind[] = ['finding', 'evidence', 'delta', 'report', 'manifest'];
@@ -62,7 +64,12 @@ export function RunWorkspacePage() {
         controls.sort,
       )
     : [];
-  const deltaRows = delta.data ? filterDelta(delta.data, { query: controls.get('q'), type: controls.get('type') }) : [];
+  const deltaRows = delta.data ? filterDelta(delta.data, { query: controls.get('dq'), type: controls.get('type') }) : [];
+  const deltaFiltered = Boolean(controls.get('dq') || controls.get('type'));
+  const clearDeltaFilters = () => {
+    controls.set('dq', '');
+    controls.set('type', '');
+  };
   const title = run.data ? `Run #${run.data.id}` : 'Run detail';
   const backTo = targetId ? `/targets/${encodeURIComponent(targetId)}` : run.data ? `/targets/${encodeURIComponent(run.data.target_id)}` : '/runs';
 
@@ -261,7 +268,7 @@ export function RunWorkspacePage() {
             ) : (
               <>
                 <div className="filters" role="search" aria-label="Filter observables">
-                  <SearchField label="Search" value={controls.get('q')} onChange={(value) => controls.set('q', value)} placeholder="value" />
+                  <SearchField label="Search" value={controls.get('dq')} onChange={(value) => controls.set('dq', value)} placeholder="value" />
                   <label>
                     <span className="label">Type</span>
                     <select value={controls.get('type')} onChange={(event) => controls.set('type', event.target.value)}>
@@ -276,6 +283,11 @@ export function RunWorkspacePage() {
                   <span className="count" role="status" aria-live="polite">
                     {deltaRows.length} of {delta.data.length}
                   </span>
+                  {deltaFiltered ? (
+                    <button type="button" className="ghost-button" onClick={clearDeltaFilters}>
+                      Clear filters
+                    </button>
+                  ) : null}
                 </div>
                 {deltaRows.length === 0 ? <p className="muted">No observables match the current filters.</p> : null}
               <table className="data-table">

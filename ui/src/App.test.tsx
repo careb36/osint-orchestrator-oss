@@ -344,6 +344,16 @@ describe('App shell', () => {
     await user.type(screen.getByRole('searchbox', { name: /search/i }), 'portal');
     expect(rowsOf()).toHaveLength(1);
     expect(rowsOf()[0]).toHaveTextContent('Forum thread');
+
+    // The observables tab has its own search: the evidence term does not leak into it.
+    await user.click(screen.getByRole('tab', { name: /delta/i }));
+    const deltaTable = await screen.findByRole('table');
+    expect(within(deltaTable).getAllByRole('row').slice(1)).toHaveLength(3);
+    expect(screen.getByRole('searchbox', { name: /search/i })).toHaveValue('');
+    await user.selectOptions(screen.getByRole('combobox', { name: /type/i }), 'url');
+    expect(within(deltaTable).getAllByRole('row').slice(1)).toHaveLength(1);
+    await user.click(screen.getByRole('button', { name: /clear filters/i }));
+    expect(within(deltaTable).getAllByRole('row').slice(1)).toHaveLength(3);
   });
 
   it('shows the risk trend and a start-run action on the target detail', async () => {
@@ -351,7 +361,7 @@ describe('App shell', () => {
     renderApp(['/targets/example-corp']);
 
     await screen.findByRole('heading', { name: 'example.com' });
-    expect(screen.getByText(/peak high over 1 runs/i)).toBeInTheDocument();
+    expect(screen.getByText(/peak high over 1 run$/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /start run/i })).toBeEnabled();
   });
 
