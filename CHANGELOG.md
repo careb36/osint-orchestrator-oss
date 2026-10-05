@@ -24,6 +24,15 @@ from [SECURITY.md](SECURITY.md).
   attention with latest and peak risk from `/analytics/risk-trends` and a
   Start-run action, active runs with elapsed time that refresh themselves,
   the findings of the latest runs, and empty states for each block.
+- Dashboard in Spanish and English (`ui/src/i18n.tsx`): every operator-facing
+  string of the React app carries both languages, checked by a catalogue
+  test like the backend's; the stored choice wins, then a supported browser
+  language, then Spanish (ADR-004). A language switcher in the top bar
+  persists the choice; dates follow the locale; persisted identifiers (run
+  status, risk, relevance) keep their English value in the data and get a
+  display label. Accessibility smoke tests with axe-core (WCAG 2.1 A/AA and
+  best-practice rules, colour contrast excluded in jsdom) cover the overview,
+  targets, runs, target and run detail, the key gate and the not-found view.
 - Dashboard triage controls: search, filters and sortable columns on the
   targets view (text, enabled flag, last-run status, risk), on the runs view
   (text, target, status, started within 24 h or 7 days) and on a run's

@@ -7,6 +7,7 @@ import { SortableHeader } from '../components/SortableHeader';
 import { StatusPill } from '../components/StatusPill';
 import { useListControls } from '../hooks/useListControls';
 import { useStartRun } from '../hooks/useStartRun';
+import { useLocale, type MessageKey } from '../i18n';
 import { api } from '../lib/api';
 import { formatDateTime, riskTone, runStatusTone } from '../lib/format';
 import { filterTargets, sortTargets, type EnabledFilter, type TargetSortKey } from '../lib/listing';
@@ -27,6 +28,7 @@ function enabledCollectors(target: TargetSummary): string[] {
 }
 
 export function TargetsPage() {
+  const { t, tv, locale } = useLocale();
   const targets = useQuery({ queryKey: ['targets'], queryFn: () => api.getTargets() });
   const runs = useQuery({ queryKey: ['runs'], queryFn: () => api.getRuns() });
   const trends = useQuery({ queryKey: ['risk-trends'], queryFn: api.getRiskTrends });
@@ -35,24 +37,24 @@ export function TargetsPage() {
 
   if (targets.isLoading) {
     return (
-      <PageLayout title="Targets" subtitle="Review the active target set and coverage status.">
-        <LoadingState message="Loading targets…" />
+      <PageLayout title={t('targets.title')} subtitle={t('targets.loadingSubtitle')}>
+        <LoadingState message={t('targets.loading')} />
       </PageLayout>
     );
   }
 
   if (targets.error) {
     return (
-      <PageLayout title="Targets" subtitle="The target inventory is currently unavailable.">
-        <ErrorState description="Unable to load targets." />
+      <PageLayout title={t('targets.title')} subtitle={t('targets.downSubtitle')}>
+        <ErrorState description={t('targets.down')} />
       </PageLayout>
     );
   }
 
   if (!targets.data || targets.data.length === 0) {
     return (
-      <PageLayout title="Targets" subtitle="The target inventory for this operator workspace.">
-        <EmptyState title="No targets configured" description="Add a target to targets.yaml and reload the scheduler to start tracking it." />
+      <PageLayout title={t('targets.title')} subtitle={t('targets.subtitle')}>
+        <EmptyState title={t('targets.empty.title')} description={t('targets.empty.body')} />
       </PageLayout>
     );
   }
@@ -67,74 +69,69 @@ export function TargetsPage() {
     }),
     controls.sort,
   );
+  const clearButton = (
+    <button type="button" className="ghost-button" onClick={controls.clear}>
+      {t('clearFilters')}
+    </button>
+  );
 
   return (
-    <PageLayout title="Targets" subtitle="The target inventory for this operator workspace.">
+    <PageLayout title={t('targets.title')} subtitle={t('targets.subtitle')}>
       <RunNotice notice={notice} />
-      {trends.error ? <p className="helper-text">Risk levels are unavailable right now; the table shows run status only.</p> : null}
+      {trends.error ? <p className="helper-text">{t('overview.trendsDown')}</p> : null}
 
-      <div className="filters" role="search" aria-label="Filter targets">
-        <SearchField label="Search" value={controls.get('q')} onChange={(value) => controls.set('q', value)} placeholder="id, domain, purpose or collector" />
+      <div className="filters" role="search" aria-label={t('targets.filters')}>
+        <SearchField label={t('search')} value={controls.get('q')} onChange={(value) => controls.set('q', value)} placeholder={t('targets.searchPlaceholder')} />
         <label>
-          <span className="label">Enabled</span>
+          <span className="label">{t('targets.enabled')}</span>
           <select value={controls.get('enabled')} onChange={(event) => controls.set('enabled', event.target.value)}>
-            <option value="all">All</option>
-            <option value="enabled">Enabled only</option>
-            <option value="disabled">Disabled only</option>
-          </select>
-        </label>
-        <label>
-          <span className="label">Last run</span>
-          <select value={controls.get('status')} onChange={(event) => controls.set('status', event.target.value)}>
-            <option value="">Any status</option>
-            {STATUSES.map((status) => (
-              <option key={status} value={status}>
-                {status === 'never' ? 'never collected' : status}
+            {ENABLED.map((option) => (
+              <option key={option} value={option}>
+                {t(`targets.enabled.${option}` as MessageKey)}
               </option>
             ))}
           </select>
         </label>
         <label>
-          <span className="label">Risk</span>
+          <span className="label">{t('col.lastRun')}</span>
+          <select value={controls.get('status')} onChange={(event) => controls.set('status', event.target.value)}>
+            <option value="">{t('targets.anyStatus')}</option>
+            {STATUSES.map((status) => (
+              <option key={status} value={status}>
+                {status === 'never' ? t('targets.neverCollected') : tv(status)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span className="label">{t('col.risk')}</span>
           <select value={controls.get('risk')} onChange={(event) => controls.set('risk', event.target.value)}>
-            <option value="">Any risk</option>
+            <option value="">{t('targets.anyRisk')}</option>
             {RISKS.map((risk) => (
               <option key={risk} value={risk}>
-                {risk}
+                {tv(risk)}
               </option>
             ))}
           </select>
         </label>
         <span className="count" role="status" aria-live="polite">
-          {visible.length} of {rows.length}
+          {t('count.of', { visible: visible.length, total: rows.length })}
         </span>
-        {controls.isFiltered ? (
-          <button type="button" className="ghost-button" onClick={controls.clear}>
-            Clear filters
-          </button>
-        ) : null}
+        {controls.isFiltered ? clearButton : null}
       </div>
 
       {visible.length === 0 ? (
-        <EmptyState
-          title="No targets match"
-          description="Clear a filter or widen the search to see more targets."
-          action={
-            <button type="button" className="ghost-button" onClick={controls.clear}>
-              Clear filters
-            </button>
-          }
-        />
+        <EmptyState title={t('targets.noMatch.title')} description={t('targets.noMatch.body')} action={clearButton} />
       ) : (
         <table className="data-table">
           <thead>
             <tr>
-              <SortableHeader label="Target" column="target" sort={controls.sort} onSort={controls.toggleSort} />
-              <th scope="col">Collectors</th>
-              <SortableHeader label="Last run" column="lastRun" sort={controls.sort} onSort={controls.toggleSort} naturalDir="desc" />
-              <SortableHeader label="Status" column="status" sort={controls.sort} onSort={controls.toggleSort} />
-              <SortableHeader label="Risk" column="risk" sort={controls.sort} onSort={controls.toggleSort} naturalDir="desc" />
-              <th scope="col">Actions</th>
+              <SortableHeader label={t('col.target')} column="target" sort={controls.sort} onSort={controls.toggleSort} />
+              <th scope="col">{t('col.collectors')}</th>
+              <SortableHeader label={t('col.lastRun')} column="lastRun" sort={controls.sort} onSort={controls.toggleSort} naturalDir="desc" />
+              <SortableHeader label={t('col.status')} column="status" sort={controls.sort} onSort={controls.toggleSort} />
+              <SortableHeader label={t('col.risk')} column="risk" sort={controls.sort} onSort={controls.toggleSort} naturalDir="desc" />
+              <th scope="col">{t('col.actions')}</th>
             </tr>
           </thead>
           <tbody>
@@ -147,24 +144,27 @@ export function TargetsPage() {
                   <br />
                   <small>
                     {target.id}
-                    {target.enabled ? '' : ' · disabled'}
+                    {target.enabled ? '' : t('disabledSuffix')}
                   </small>
                 </td>
                 <td>{enabledCollectors(target).join(', ') || '—'}</td>
-                <td>{lastRun ? <Link to={`/runs/${lastRun.id}`}>#{lastRun.id} · {formatDateTime(lastRun.started_at)}</Link> : <span className="muted">never</span>}</td>
-                <td>{lastRun ? <StatusPill label={lastRun.status} tone={runStatusTone(lastRun.status)} /> : <span className="muted">no runs</span>}</td>
+                <td>
+                  {lastRun ? (
+                    <Link to={`/runs/${lastRun.id}`}>
+                      #{lastRun.id} · {formatDateTime(lastRun.started_at, locale)}
+                    </Link>
+                  ) : (
+                    <span className="muted">{t('never')}</span>
+                  )}
+                </td>
+                <td>{lastRun ? <StatusPill label={lastRun.status} tone={runStatusTone(lastRun.status)} /> : <span className="muted">{t('noRuns')}</span>}</td>
                 <td>
                   <StatusPill label={latestRisk} tone={riskTone(latestRisk)} />
                 </td>
                 <td>
-                  <button
-                    type="button"
-                    className="ghost-button"
-                    disabled={isPending || active || !target.enabled}
-                    onClick={() => start(target.id)}
-                  >
-                    {active ? 'Running…' : 'Start run'}
-                    <span className="visually-hidden"> for {target.id}</span>
+                  <button type="button" className="ghost-button" disabled={isPending || active || !target.enabled} onClick={() => start(target.id)}>
+                    {active ? t('run.running') : t('run.start')}
+                    <span className="visually-hidden">{t('run.startFor', { targetId: target.id })}</span>
                   </button>
                 </td>
               </tr>

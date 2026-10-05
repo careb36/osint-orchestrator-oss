@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import App from './App';
 import { ApiKeyProvider } from './auth';
+import { LocaleProvider } from './i18n';
 import { installFetchMock } from './test/mockApi';
 
 const renderApp = () => {
@@ -18,9 +19,11 @@ const renderApp = () => {
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={['/']}>
-        <ApiKeyProvider>
-          <App />
-        </ApiKeyProvider>
+        <LocaleProvider initialLocale="en">
+          <ApiKeyProvider>
+            <App />
+          </ApiKeyProvider>
+        </LocaleProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );

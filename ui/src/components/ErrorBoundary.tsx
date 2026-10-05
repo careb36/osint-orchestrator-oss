@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { reportUiError, trackUiTelemetry } from '../lib/telemetry';
+import { ErrorFallback } from './ErrorFallback';
 
 type ErrorBoundaryProps = {
   children: ReactNode;
@@ -31,14 +32,7 @@ export class AppErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundar
 
   render(): ReactNode {
     if (this.state.hasError) {
-      return (
-        this.props.fallback ?? (
-          <div className="state-card error" role="alert">
-            <h2>Something went wrong.</h2>
-            <p>The UI hit an unexpected error. Refresh to try again.</p>
-          </div>
-        )
-      );
+      return this.props.fallback ?? <ErrorFallback />;
     }
 
     return this.props.children;

@@ -1,10 +1,13 @@
 import { type FormEvent, useState } from 'react';
 import { useApiKey } from '../auth';
+import { useLocale } from '../i18n';
 import { isKeyRemembered } from '../lib/api';
+import { describeUnavailable } from '../lib/unavailable';
 
 /** Asks for the operator's API key; shown while the API answers 401. */
 export function ApiKeyGate() {
   const { submitKey } = useApiKey();
+  const { t } = useLocale();
   const [key, setKey] = useState('');
   // Pre-tick when the last key was remembered on this browser: clearApiKey()
   // keeps that preference, so a rejected or forgotten key leaves it in place.
@@ -19,25 +22,29 @@ export function ApiKeyGate() {
     const result = await submitKey(key, remember);
     setBusy(false);
     if (!result.ok) {
-      setError(result.message ?? 'Unable to use this key.');
+      if (result.reason === 'empty') setError(t('gate.empty'));
+      else if (result.reason === 'rejected') setError(t('gate.rejected'));
+      else if (result.reason === 'unavailable') setError(t('gate.unvalidated', { reason: describeUnavailable(t, result.cause) }));
+      else setError(t('gate.unknownError'));
     }
   };
 
   return (
     <section className="page">
       <div className="hero-card">
-        <p className="eyebrow">Operator access</p>
-        <h1>API key required</h1>
+        <p className="eyebrow">{t('gate.eyebrow')}</p>
+        <h1>{t('gate.title')}</h1>
         <p className="lede">
-          This dashboard reads the orchestrator API with the operator key (<code>ORCHESTRATOR_API_KEY</code>).
-          The key stays in this browser tab; tick &ldquo;remember&rdquo; to keep it on this device.
+          {t('gate.lede.before')}
+          <code>ORCHESTRATOR_API_KEY</code>
+          {t('gate.lede.after')}
         </p>
       </div>
 
       <form className="state-card key-form" onSubmit={handleSubmit} aria-labelledby="api-key-title">
-        <h2 id="api-key-title">Enter the API key</h2>
+        <h2 id="api-key-title">{t('gate.formTitle')}</h2>
         <label>
-          <span className="label">API key</span>
+          <span className="label">{t('gate.keyLabel')}</span>
           <input
             type="password"
             value={key}
@@ -50,10 +57,10 @@ export function ApiKeyGate() {
         </label>
         <label className="checkbox">
           <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} />
-          <span>Remember on this browser</span>
+          <span>{t('gate.remember')}</span>
         </label>
         <p id="api-key-help" className="helper-text">
-          Without &ldquo;remember&rdquo; the key is forgotten when the tab closes.
+          {t('gate.help')}
         </p>
         {error ? (
           <p className="state-card warning" role="alert">
@@ -61,7 +68,7 @@ export function ApiKeyGate() {
           </p>
         ) : null}
         <button type="submit" className="primary-action" disabled={busy}>
-          {busy ? 'Checking…' : 'Use key'}
+          {busy ? t('gate.checking') : t('gate.submit')}
         </button>
       </form>
     </section>

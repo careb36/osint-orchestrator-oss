@@ -1,4 +1,5 @@
 import { api, ApiError } from './api';
+import { currentLocale, setCurrentLocale } from './locale';
 import { uiTelemetry } from './telemetry';
 
 const json = (status: number, body: unknown) =>
@@ -27,5 +28,27 @@ describe('api.request telemetry', () => {
     await expect(api.getRunFinding(42, { optional: true })).rejects.toMatchObject({ status: 500 });
 
     expect(uiTelemetry.filter((entry) => entry.event === 'api_error').map((entry) => entry.detail.status)).toEqual([404, 500]);
+  });
+
+});
+
+describe('api.request language', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    setCurrentLocale(null);
+  });
+
+  it('sends Accept-Language from the resolved locale and omits it before one is chosen', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => json(200, []));
+    vi.stubGlobal('fetch', fetchMock);
+    const headersOf = (call: number) => new Headers(fetchMock.mock.calls[call][1]?.headers);
+
+    expect(currentLocale()).toBeNull();
+    await api.getTargets();
+    expect(headersOf(0).has('Accept-Language')).toBe(false);
+
+    setCurrentLocale('es');
+    await api.getTargets();
+    expect(headersOf(1).get('Accept-Language')).toBe('es');
   });
 });

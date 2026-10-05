@@ -5,6 +5,7 @@ import { SearchField } from '../components/SearchField';
 import { SortableHeader } from '../components/SortableHeader';
 import { StatusPill } from '../components/StatusPill';
 import { useListControls } from '../hooks/useListControls';
+import { useLocale } from '../i18n';
 import { api } from '../lib/api';
 import { formatDateTime, formatDuration, runStatusTone } from '../lib/format';
 import { distinct, filterRuns, SINCE_OPTIONS, sortRuns, type RunSortKey, type SinceFilter } from '../lib/listing';
@@ -17,6 +18,7 @@ const SORT_KEYS: RunSortKey[] = ['started', 'duration', 'observables', 'status',
 const ACTIVE_REFRESH_MS = 10_000;
 
 export function RunsPage() {
+  const { t, tv, locale } = useLocale();
   const runs = useQuery({
     queryKey: ['runs'],
     queryFn: () => api.getRuns(),
@@ -33,24 +35,24 @@ export function RunsPage() {
 
   if (runs.isLoading) {
     return (
-      <PageLayout title="Runs" subtitle="Review recent execution history and current system activity.">
-        <LoadingState message="Loading recent runs…" />
+      <PageLayout title={t('runs.title')} subtitle={t('runs.loadingSubtitle')}>
+        <LoadingState message={t('runs.loading')} />
       </PageLayout>
     );
   }
 
   if (runs.error) {
     return (
-      <PageLayout title="Runs" subtitle="Recent execution history is unavailable.">
-        <ErrorState description="Unable to load run history." />
+      <PageLayout title={t('runs.title')} subtitle={t('runs.downSubtitle')}>
+        <ErrorState description={t('runs.down')} />
       </PageLayout>
     );
   }
 
   if (!runs.data || runs.data.length === 0) {
     return (
-      <PageLayout title="Runs" subtitle="Recent execution history and current activities.">
-        <EmptyState title="No runs yet" description="There are no recent runs to display. Start one from the Targets view." />
+      <PageLayout title={t('runs.title')} subtitle={t('runs.emptySubtitle')}>
+        <EmptyState title={t('runs.empty.title')} description={t('runs.empty.body')} />
       </PageLayout>
     );
   }
@@ -70,15 +72,20 @@ export function RunsPage() {
     controls.sort,
     now,
   );
+  const clearButton = (
+    <button type="button" className="ghost-button" onClick={controls.clear}>
+      {t('clearFilters')}
+    </button>
+  );
 
   return (
-    <PageLayout title="Runs" subtitle={`The ${runs.data.length} most recent runs the API returns (at most 100).`}>
-      <div className="filters" role="search" aria-label="Filter runs">
-        <SearchField label="Search" value={controls.get('q')} onChange={(value) => controls.set('q', value)} placeholder="run id, target, collector or error" />
+    <PageLayout title={t('runs.title')} subtitle={t('runs.subtitle', { count: runs.data.length })}>
+      <div className="filters" role="search" aria-label={t('runs.filters')}>
+        <SearchField label={t('search')} value={controls.get('q')} onChange={(value) => controls.set('q', value)} placeholder={t('runs.searchPlaceholder')} />
         <label>
-          <span className="label">Target</span>
+          <span className="label">{t('col.target')}</span>
           <select value={controls.get('target')} onChange={(event) => controls.set('target', event.target.value)}>
-            <option value="">All targets</option>
+            <option value="">{t('runs.allTargets')}</option>
             {targetIds.map((id) => (
               <option key={id} value={id}>
                 {id}
@@ -87,53 +94,41 @@ export function RunsPage() {
           </select>
         </label>
         <label>
-          <span className="label">Status</span>
+          <span className="label">{t('col.status')}</span>
           <select value={controls.get('status')} onChange={(event) => controls.set('status', event.target.value)}>
-            <option value="">All statuses</option>
+            <option value="">{t('runs.allStatuses')}</option>
             {STATUSES.map((status) => (
               <option key={status} value={status}>
-                {status}
+                {tv(status)}
               </option>
             ))}
           </select>
         </label>
         <label>
-          <span className="label">Started</span>
+          <span className="label">{t('col.started')}</span>
           <select value={controls.get('since')} onChange={(event) => controls.set('since', event.target.value)}>
-            <option value="">Any time</option>
-            <option value="24h">Last 24 hours</option>
-            <option value="7d">Last 7 days</option>
+            <option value="">{t('runs.anyTime')}</option>
+            <option value="24h">{t('runs.last24h')}</option>
+            <option value="7d">{t('runs.last7d')}</option>
           </select>
         </label>
         <span className="count" role="status" aria-live="polite">
-          {visible.length} of {runs.data.length}
+          {t('count.of', { visible: visible.length, total: runs.data.length })}
         </span>
-        {controls.isFiltered ? (
-          <button type="button" className="ghost-button" onClick={controls.clear}>
-            Clear filters
-          </button>
-        ) : null}
+        {controls.isFiltered ? clearButton : null}
       </div>
       {visible.length === 0 ? (
-        <EmptyState
-          title="No runs match"
-          description="Clear a filter or widen the search to see more runs."
-          action={
-            <button type="button" className="ghost-button" onClick={controls.clear}>
-              Clear filters
-            </button>
-          }
-        />
+        <EmptyState title={t('runs.noMatch.title')} description={t('runs.noMatch.body')} action={clearButton} />
       ) : (
         <table className="data-table">
           <thead>
             <tr>
-              <th scope="col">Run</th>
-              <SortableHeader label="Target" column="target" sort={controls.sort} onSort={controls.toggleSort} />
-              <SortableHeader label="Status" column="status" sort={controls.sort} onSort={controls.toggleSort} />
-              <SortableHeader label="New observables" column="observables" sort={controls.sort} onSort={controls.toggleSort} naturalDir="desc" />
-              <SortableHeader label="Started" column="started" sort={controls.sort} onSort={controls.toggleSort} naturalDir="desc" />
-              <SortableHeader label="Duration" column="duration" sort={controls.sort} onSort={controls.toggleSort} naturalDir="desc" />
+              <th scope="col">{t('col.run')}</th>
+              <SortableHeader label={t('col.target')} column="target" sort={controls.sort} onSort={controls.toggleSort} />
+              <SortableHeader label={t('col.status')} column="status" sort={controls.sort} onSort={controls.toggleSort} />
+              <SortableHeader label={t('col.newObservables')} column="observables" sort={controls.sort} onSort={controls.toggleSort} naturalDir="desc" />
+              <SortableHeader label={t('col.started')} column="started" sort={controls.sort} onSort={controls.toggleSort} naturalDir="desc" />
+              <SortableHeader label={t('col.duration')} column="duration" sort={controls.sort} onSort={controls.toggleSort} naturalDir="desc" />
             </tr>
           </thead>
           <tbody>
@@ -152,11 +147,11 @@ export function RunsPage() {
                     {run.error ? <small className="error-text"> {run.error}</small> : null}
                   </td>
                   <td>{run.new_observables}</td>
-                  <td>{formatDateTime(run.started_at)}</td>
+                  <td>{formatDateTime(run.started_at, locale)}</td>
                   <td>
                     {active ? (
                       <>
-                        {formatDuration(run.started_at, now.toISOString())} <small className="muted">so far</small>
+                        {formatDuration(run.started_at, now.toISOString())} <small className="muted">{t('soFar')}</small>
                       </>
                     ) : (
                       formatDuration(run.started_at, run.finished_at)

@@ -48,12 +48,12 @@ export function parseApiDate(value: string): Date {
   return new Date(isDateTime && !HAS_OFFSET.test(trimmed) ? `${trimmed}Z` : trimmed);
 }
 
-export function formatDateTime(value: string | null | undefined): string {
+export function formatDateTime(value: string | null | undefined, locale?: string): string {
   if (!value) {
     return '—';
   }
   const date = parseApiDate(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString(locale);
 }
 
 export function formatDuration(startedAt: string, finishedAt: string | null): string {
@@ -64,10 +64,11 @@ export function formatDuration(startedAt: string, finishedAt: string | null): st
   if (!Number.isFinite(ms) || ms < 0) {
     return '—';
   }
+  // SI symbols (s, min), the same in Spanish and English; "m" would read as metres.
   const seconds = Math.round(ms / 1000);
   if (seconds < 60) {
-    return `${seconds}s`;
+    return `${seconds} s`;
   }
   const minutes = Math.floor(seconds / 60);
-  return `${minutes}m ${seconds % 60}s`;
+  return `${minutes} min ${seconds % 60} s`;
 }

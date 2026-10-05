@@ -38,6 +38,24 @@ The page is served with `script-src 'self'; style-src 'self'`: nothing inline,
 nothing from another origin. CI fails the build if `index.html` gains an inline
 script.
 
+## Languages
+
+Operator-facing text lives in `src/i18n.tsx`, Spanish and English side by
+side; `src/i18n.test.ts` fails when a key misses a language or the two
+languages disagree on placeholders. The locale is the stored choice
+(`osint-operator-locale` in localStorage), else a supported browser language,
+else Spanish. Persisted identifiers (run status, risk, relevance) keep their
+English value in the data and are only labelled for display, as ADR-004 asks.
+
+## Accessibility
+
+`src/a11y.test.tsx` runs axe-core over every main view (WCAG 2.1 A/AA and
+best-practice rules; colour contrast is skipped because jsdom has no layout
+engine) and fails on any violation. Tables carry sortable headers with
+`aria-sort`, filters are labelled search regions, live counts use
+`aria-live="polite"`, failures use `role="alert"`, and the run tabs follow the
+tablist pattern.
+
 ## Access
 
 Access follows ADR-005: one static API key, the same one every API client uses.

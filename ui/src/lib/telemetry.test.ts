@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { setCurrentLocale } from './locale';
 import { reportUiError, trackUiTelemetry, uiTelemetry } from './telemetry';
 
 describe('frontend telemetry', () => {
@@ -33,5 +34,33 @@ describe('frontend telemetry', () => {
     expect(infoSpy).toHaveBeenCalledWith('ui-telemetry', expect.objectContaining({ event: 'ui_error' }));
 
     infoSpy.mockRestore();
+  });
+
+  describe('language field', () => {
+    afterEach(() => {
+      setCurrentLocale(null);
+      document.documentElement.lang = '';
+    });
+
+    it('uses the resolved locale, then the document language, then a last-resort marker', () => {
+      const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+
+      // Before the provider commits (an error boundary on the first render):
+      // the document language index.html declares.
+      document.documentElement.lang = 'es';
+      reportUiError(new Error('early crash'));
+      expect(uiTelemetry[uiTelemetry.length - 1]?.language).toBe('es');
+
+      setCurrentLocale('en');
+      trackUiTelemetry('after_commit');
+      expect(uiTelemetry[uiTelemetry.length - 1]?.language).toBe('en');
+
+      setCurrentLocale(null);
+      document.documentElement.lang = '';
+      trackUiTelemetry('nothing_known');
+      expect(uiTelemetry[uiTelemetry.length - 1]?.language).toBe('unset');
+
+      infoSpy.mockRestore();
+    });
   });
 });

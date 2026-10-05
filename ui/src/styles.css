@@ -601,3 +601,32 @@ a {
   gap: 4px;
   margin-top: 6px;
 }
+
+/* Language switcher: two toggles, the active one pressed. */
+.lang-switch {
+  display: inline-flex;
+  gap: 4px;
+  padding: 2px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 999px;
+}
+
+.lang-switch button {
+  all: unset;
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #cbd5e1;
+}
+
+.lang-switch button[aria-pressed='true'] {
+  background: rgba(59, 130, 246, 0.3);
+  color: #e5eef9;
+}
+
+.lang-switch button:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 1px;
+}
