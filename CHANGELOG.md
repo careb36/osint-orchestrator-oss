@@ -99,6 +99,20 @@ from [SECURITY.md](SECURITY.md).
 
 ### Fixed
 
+- A run keeps `running` until it is sealed (ADR-007). The final status was
+  written before synthesis, the report and the manifest, so a second run of
+  the same target was admitted meanwhile; whichever sealed last pointed to the
+  wrong predecessor and `chain/verify` reported a false `chain_link` break. An
+  error after sealing no longer turns a final status into `failed`; it is
+  appended to the run's error instead.
+- Retention no longer deletes the `daily_reports/<date>` directory of a run it
+  keeps. Rows expire by their exact `finished_at` and directories went by date
+  alone, so every purge removed the report and manifest of the cutoff day's
+  later runs (404 on `/runs/{id}/report`, `manifest_missing` on
+  `chain/verify`). Only whole days before the cutoff that no remaining run
+  points to are deleted, and none when the remaining runs cannot be read.
+- Retention purges `evidence_qualifications` with the runs they belong to; the
+  qualified URLs and rationales were kept forever.
 - Evidence qualification asks once more for the items an answer left out and
   uses batches of 5: live, a 10-item answer was truncated and none of its items
   were qualified.

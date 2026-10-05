@@ -20,6 +20,7 @@ from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 import orchestrator.pipeline as pipeline_module
+import orchestrator.run_control as run_control_module
 from orchestrator.config import settings
 from orchestrator.evidence import (
     build_manifest,
@@ -35,7 +36,7 @@ from orchestrator.models import (
     RunStatus,
     Target,
 )
-from orchestrator.pipeline import _artefacts_for_manifest, run_target_pipeline
+from orchestrator.pipeline import _artefacts_for_manifest, _mark_run_failed, run_target_pipeline
 
 KEY = "test-key"
 
@@ -92,6 +93,7 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     class _Harness:
         session = staticmethod(_session)
+        target_id = target.id
 
         async def setup(self) -> None:
             async with engine.begin() as conn:
@@ -280,6 +282,63 @@ async def test_retention_of_the_oldest_runs_is_not_tampering(harness) -> None:
     assert result["checked"] == 2
     assert result["anchor_run_id"] == kept.id
     assert result["anchor_previous_manifest_sha256"] == oldest.manifest_sha256
+
+
+async def test_run_stays_running_until_sealed_so_no_second_run_is_admitted(
+    harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A run admitted during synthesis would seal first and break the chain link."""
+    await harness.setup()
+    first = await harness.run(0)
+    monkeypatch.setattr(run_control_module, "get_session", harness.session)
+    seen: dict[str, object] = {}
+
+    async def _synthesize(target, run_id, report_data):
+        async with harness.session() as session:
+            seen["status"] = (await session.get(Run, run_id)).status
+        seen["admitted"] = await run_control_module.create_pending_run(target.id)
+        return None, "skipped"
+
+    monkeypatch.setattr(pipeline_module, "synthesize", _synthesize)
+    second = await harness.run(1)
+
+    assert seen == {"status": RunStatus.RUNNING, "admitted": None}
+    assert second.status == RunStatus.SUCCESS
+    assert _manifest(second)["previous_manifest_sha256"] == first.manifest_sha256
+    assert (await harness.verify())["ok"] is True
+
+
+async def test_late_failure_after_sealing_keeps_the_final_status(harness) -> None:
+    await harness.setup()
+    run = await harness.run(0)
+
+    await _mark_run_failed(run.id, "pipeline: late", {})
+
+    async with harness.session() as session:
+        after = await session.get(Run, run.id)
+    assert after.status == RunStatus.SUCCESS
+    assert after.error == "pipeline: late"
+    assert (await harness.verify())["ok"] is True
+
+
+async def test_unhandled_error_before_sealing_marks_the_run_failed(harness) -> None:
+    await harness.setup()
+    async with harness.session() as session:
+        run = Run(
+            target_id=harness.target_id,
+            started_at=datetime(2026, 9, 8, 12, 0, tzinfo=UTC),
+            status=RunStatus.RUNNING,
+        )
+        session.add(run)
+        await session.commit()
+        await session.refresh(run)
+
+    await _mark_run_failed(run.id, "pipeline: boom", {})
+
+    async with harness.session() as session:
+        after = await session.get(Run, run.id)
+    assert (after.status, after.error) == (RunStatus.FAILED, "pipeline: boom")
+    assert after.finished_at is not None
 
 
 # ─── Unsealed runs and versions ───────────────────────────────────────────────

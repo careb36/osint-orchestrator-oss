@@ -619,9 +619,15 @@ async def _mark_run_failed(run_id: int, error: str, log_ctx: dict) -> None:
             run = await session.get(Run, run_id)
             if run is None:
                 return
-            run.status = RunStatus.FAILED
-            run.finished_at = datetime.now(UTC)
-            run.error = error
+            if run.status in (RunStatus.PENDING, RunStatus.RUNNING):
+                run.status = RunStatus.FAILED
+                run.finished_at = datetime.now(UTC)
+                run.error = error
+            else:
+                # Already sealed with its final status (a late step such as
+                # the alert bookkeeping failed): keep the status and the
+                # earlier errors that the signed manifest refers to.
+                run.error = f"{run.error}; {error}" if run.error else error
             session.add(run)
             await session.commit()
     except Exception:  # noqa: BLE001 — never mask the original failure
@@ -843,7 +849,11 @@ async def _run_target_pipeline(target: Target, run_id: int, log_ctx: dict) -> Ru
             run_started_at = run.started_at
             run.finished_at = datetime.now(UTC)
             run_finished_at = run.finished_at
-            run.status = final_status
+            # The status stays RUNNING until the run is sealed below. It is the
+            # per-target admission guard (run_control.create_pending_run): a
+            # final status written here would admit a second run of this target
+            # during synthesis, and whichever sealed first would make the other
+            # chain to the wrong predecessor (a false "chain_link" break).
             run.collectors_run = ",".join(collectors_run)
             run.new_observables = len(new_stix_ids)
             run.error = "; ".join(errors) or None
@@ -943,6 +953,7 @@ async def _run_target_pipeline(target: Target, run_id: int, log_ctx: dict) -> Ru
                         run_id,
                         extra=log_ctx,
                     )
+            run.status = final_status
             # Read before the commit: a session that expires attributes on
             # commit would otherwise lazy-load here, which is sync IO.
             manifest_sha256 = run.manifest_sha256

@@ -22,11 +22,13 @@ from orchestrator.database import get_session
 from orchestrator.models import (
     AlertDelivery,
     AlertRecord,
+    EvidenceQualification,
     FindingRecord,
     OpenCTIOutbox,
     Run,
     RunObservable,
 )
+from orchestrator.reports import _bundle_date
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +49,7 @@ class RetentionSummary:
     alerts_deleted: int = 0
     alert_deliveries_deleted: int = 0
     opencti_outbox_deleted: int = 0
+    evidence_qualifications_deleted: int = 0
     report_dirs_deleted: int = 0
     errors: list[str] = field(default_factory=list)
 
@@ -97,6 +100,11 @@ async def purge_expired(now: datetime | None = None) -> RetentionSummary:
                     (AlertRecord, AlertRecord.run_id, "alerts_deleted"),
                     (FindingRecord, FindingRecord.run_id, "findings_deleted"),
                     (RunObservable, RunObservable.run_id, "run_observables_deleted"),
+                    (
+                        EvidenceQualification,
+                        EvidenceQualification.run_id,
+                        "evidence_qualifications_deleted",
+                    ),
                 ]:
                     deleted = 0
                     for i in range(0, len(expired_ids), _BATCH_SIZE):
@@ -119,8 +127,21 @@ async def purge_expired(now: datetime | None = None) -> RetentionSummary:
         summary.errors.append("database")
 
     # ── Report directory purge ────────────────────────────────────────────────
-    # Collect the distinct report_dir values from settings / targets.
-    report_dirs: set[str] = _collect_report_dirs()
+    # A directory is named after the UTC start date of its runs, while a run row
+    # expires by its exact finished_at. Deleting by date alone would remove the
+    # directory of a run kept in the database (any run of the cutoff day that
+    # finished after the purge time), leaving its report and manifest missing
+    # and the evidence chain broken. So only whole days before the cutoff are
+    # removed, and never a day that a surviving run still points to.
+    try:
+        kept_dates = await _surviving_run_dates(cutoff)
+    except Exception:
+        logger.exception("Retention: could not read surviving runs; report directories kept")
+        summary.errors.append("report_dirs")
+        report_dirs: set[str] = set()
+    else:
+        # Collect the distinct report_dir values from settings / targets.
+        report_dirs = _collect_report_dirs()
 
     for root in report_dirs:
         root_path = Path(root)
@@ -136,8 +157,10 @@ async def purge_expired(now: datetime | None = None) -> RetentionSummary:
             except ValueError:
                 continue  # leave non-date directories untouched
 
-            if dir_date >= cutoff:
-                continue  # directory is within the retention window
+            if dir_date + timedelta(days=1) > cutoff:
+                continue  # part of the day is within the retention window
+            if entry.name in kept_dates:
+                continue  # a run kept in the database still points here
 
             try:
                 shutil.rmtree(entry)
@@ -157,11 +180,20 @@ async def purge_expired(now: datetime | None = None) -> RetentionSummary:
             "alerts_deleted": summary.alerts_deleted,
             "alert_deliveries_deleted": summary.alert_deliveries_deleted,
             "opencti_outbox_deleted": summary.opencti_outbox_deleted,
+            "evidence_qualifications_deleted": summary.evidence_qualifications_deleted,
             "report_dirs_deleted": summary.report_dirs_deleted,
             "errors": summary.errors,
         },
     )
     return summary
+
+
+async def _surviving_run_dates(cutoff: datetime) -> set[str]:
+    """Directory names (UTC start dates) of runs still in the database that
+    started before *cutoff*; later dates are never purge candidates."""
+    async with get_session() as session:
+        result = await session.exec(select(Run.started_at).where(col(Run.started_at) < cutoff))
+        return {_bundle_date(started_at) for started_at in result.scalars().all()}
 
 
 def _collect_report_dirs() -> set[str]:
