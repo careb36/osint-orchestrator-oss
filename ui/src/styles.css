@@ -216,6 +216,58 @@ a {
   color: #9bb0c9;
 }
 
+.list-card a,
+.workspace-actions a {
+  color: #7dd3fc;
+  text-decoration: none;
+}
+
+.workspace-shell {
+  display: grid;
+  gap: 16px;
+}
+
+.artifact-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.artifact-tabs button {
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.8);
+  color: #dfeaf9;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+.artifact-tabs button.active {
+  background: rgba(56, 189, 248, 0.18);
+  border-color: rgba(125, 211, 252, 0.8);
+}
+
+.artifact-panel {
+  padding: 24px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 18px;
+  background: rgba(15, 23, 42, 0.8);
+}
+
+.artifact-panel pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+}
+
+.workspace-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+}
+
 @media (max-width: 720px) {
   .topbar {
     flex-direction: column;

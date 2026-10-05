@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { EmptyState, ErrorState, LoadingState, PageLayout } from '../components/PageState';
+import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 
 export function TargetsPage() {
@@ -41,7 +42,10 @@ export function TargetsPage() {
               <strong>{target.fqdn}</strong>
               <small>{target.id}</small>
             </div>
-            <span>{target.enabled ? 'Enabled' : 'Disabled'}</span>
+            <div>
+              <span>{target.enabled ? 'Enabled' : 'Disabled'}</span>
+              <Link to={`/targets/${target.id}`}>Open workspace</Link>
+            </div>
           </li>
         ))}
       </ul>

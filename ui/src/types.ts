@@ -16,3 +16,13 @@ export type RunSummary = {
   status: string;
   createdAt: string;
 };
+
+export type ArtifactKind = 'report' | 'finding' | 'evidence' | 'manifest';
+
+export type RunDetail = {
+  id: string;
+  targetId: string;
+  status: string;
+  createdAt: string;
+  summary?: string;
+};

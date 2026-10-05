@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { EmptyState, ErrorState, LoadingState, PageLayout } from '../components/PageState';
+import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 
 export function RunsPage() {
@@ -41,7 +42,10 @@ export function RunsPage() {
               <strong>{run.targetId}</strong>
               <small>{run.id}</small>
             </div>
-            <span>{run.status}</span>
+            <div>
+              <span>{run.status}</span>
+              <Link to={`/runs/${run.id}`}>Open workspace</Link>
+            </div>
           </li>
         ))}
       </ul>

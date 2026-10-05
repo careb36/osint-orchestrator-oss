@@ -68,6 +68,33 @@ describe('App shell', () => {
     expect(screen.queryByRole('link', { name: /targets/i })).not.toBeInTheDocument();
   });
 
+  it('renders the run workspace navigation path for a run detail route', () => {
+    window.sessionStorage.setItem(
+      'osint-operator-session',
+      JSON.stringify({ username: 'operator', role: 'operator', displayName: 'Operator' }),
+    );
+
+    renderWithProviders(<App />, ['/runs/run-42']);
+
+    expect(screen.getByRole('heading', { name: /run detail/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /report/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /finding/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /evidence/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /manifest/i })).toBeInTheDocument();
+  });
+
+  it('renders the target workspace route with run context', () => {
+    window.sessionStorage.setItem(
+      'osint-operator-session',
+      JSON.stringify({ username: 'operator', role: 'operator', displayName: 'Operator' }),
+    );
+
+    renderWithProviders(<App />, ['/targets/target-7']);
+
+    expect(screen.getByRole('heading', { name: /target-7/i })).toBeInTheDocument();
+    expect(screen.getByText(/review the active investigation context/i)).toBeInTheDocument();
+  });
+
   it('renders the global error boundary fallback for broken children', () => {
     const BrokenComponent = () => {
       throw new Error('Boom');
