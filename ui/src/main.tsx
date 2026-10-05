@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App';
-import { AuthProvider } from './auth';
+import { ApiKeyProvider } from './auth';
 import './styles.css';
 
 const queryClient = new QueryClient({
@@ -15,13 +15,16 @@ const queryClient = new QueryClient({
   },
 });
 
+// Vite's BASE_URL is "/console/"; the router wants it without the slash.
+const basename = import.meta.env.BASE_URL.replace(/\/$/, '');
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <AuthProvider>
+      <BrowserRouter basename={basename}>
+        <ApiKeyProvider>
           <App />
-        </AuthProvider>
+        </ApiKeyProvider>
       </BrowserRouter>
     </QueryClientProvider>
   </React.StrictMode>,

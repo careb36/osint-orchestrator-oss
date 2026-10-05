@@ -1,140 +1,105 @@
 /* eslint-disable react-refresh/only-export-components */
-import { createContext, useContext, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { api, ApiError, clearApiKey, readApiKey, storeApiKey, UNAUTHORIZED_EVENT } from './lib/api';
 
-export type AuthRole = 'viewer' | 'operator' | 'admin';
+/**
+ * Access to the dashboard follows ADR-005: a static API key, the same one
+ * every API client uses. There are no users or roles in the backend, so
+ * there are none here either.
+ *
+ * - `checking`: probing whether the API needs a key.
+ * - `open`:     the API answers without a key (ORCHESTRATOR_API_KEY empty).
+ * - `locked`:   a key is required and none (or a wrong one) is stored.
+ * - `ready`:    the stored key is accepted.
+ */
+export type AccessMode = 'checking' | 'open' | 'locked' | 'ready';
 
-export type AuthSession = {
-  username: string;
-  role: AuthRole;
-  displayName: string;
+type ApiKeyContextValue = {
+  mode: AccessMode;
+  hasKey: boolean;
+  /** Validate the key against the API and store it on success. */
+  submitKey: (key: string, remember: boolean) => Promise<{ ok: boolean; message?: string }>;
+  forgetKey: () => void;
 };
 
-export const DEMO_USERS: Record<string, { password: string; role: AuthRole; displayName: string }> = {
-  viewer: { password: 'viewer', role: 'viewer', displayName: 'Viewer' },
-  operator: { password: 'operator', role: 'operator', displayName: 'Operator' },
-  admin: { password: 'admin', role: 'admin', displayName: 'Administrator' },
-};
+const ApiKeyContext = createContext<ApiKeyContextValue | undefined>(undefined);
 
-export const ROUTE_ACCESS: Record<AuthRole, string[]> = {
-  viewer: ['/', '/login'],
-  operator: ['/', '/targets', '/runs', '/login'],
-  admin: ['/', '/targets', '/runs', '/login'],
-};
-
-const SESSION_STORAGE_KEY = 'osint-operator-session';
-const API_KEY_STORAGE_KEY = 'osint-operator-api-key';
-
-function readSession(): AuthSession | null {
-  const raw = window.sessionStorage.getItem(SESSION_STORAGE_KEY);
-  if (!raw) {
-    return null;
-  }
-
+async function probe(key: string | null): Promise<AccessMode> {
   try {
-    const parsed = JSON.parse(raw) as AuthSession;
-    if (!parsed.username || !parsed.role) {
-      return null;
+    await api.getTargets({ apiKey: key, quiet: true });
+    return key ? 'ready' : 'open';
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) {
+      return 'locked';
     }
-    return parsed;
-  } catch {
-    return null;
+    // Backend down or other error: let the pages show it; do not ask for a key.
+    return key ? 'ready' : 'open';
   }
 }
 
-function readLegacyApiKey(): string | null {
-  return window.sessionStorage.getItem(API_KEY_STORAGE_KEY);
-}
+export function ApiKeyProvider({ children }: { children: ReactNode }) {
+  const [mode, setMode] = useState<AccessMode>('checking');
+  const [hasKey, setHasKey] = useState<boolean>(() => Boolean(readApiKey()));
 
-export function persistLegacyApiKey(key: string) {
-  if (!key.trim()) {
-    window.sessionStorage.removeItem(API_KEY_STORAGE_KEY);
-    return;
-  }
-
-  window.sessionStorage.setItem(API_KEY_STORAGE_KEY, key.trim());
-}
-
-export function hasAccess(role: AuthRole, path: string) {
-  const normalized = path === '' ? '/' : path;
-  return ROUTE_ACCESS[role].includes(normalized);
-}
-
-type AuthContextValue = {
-  session: AuthSession | null;
-  isAuthenticated: boolean;
-  signIn: (username: string, password: string) => { ok: boolean; message?: string };
-  signOut: () => void;
-  legacyApiKey: string | null;
-  setLegacyApiKey: (key: string) => void;
-  canAccess: (path: string) => boolean;
-};
-
-const AuthContext = createContext<AuthContextValue | undefined>(undefined);
-
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<AuthSession | null>(() => readSession());
-  const [legacyApiKey, setLegacyApiKeyState] = useState<string | null>(() => readLegacyApiKey());
-
-  const signIn = (username: string, password: string) => {
-    const account = DEMO_USERS[username.toLowerCase()];
-    if (!account || account.password !== password) {
-      return { ok: false, message: 'Invalid username or password.' };
-    }
-
-    const nextSession = {
-      username: username.toLowerCase(),
-      role: account.role,
-      displayName: account.displayName,
+  useEffect(() => {
+    let cancelled = false;
+    probe(readApiKey()).then((result) => {
+      if (!cancelled) {
+        if (result === 'locked') {
+          clearApiKey();
+          setHasKey(false);
+        }
+        setMode(result);
+      }
+    });
+    return () => {
+      cancelled = true;
     };
+  }, []);
 
-    window.sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(nextSession));
-    setSession(nextSession);
-    return { ok: true };
-  };
+  useEffect(() => {
+    const onUnauthorized = () => {
+      clearApiKey();
+      setHasKey(false);
+      setMode('locked');
+    };
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+  }, []);
 
-  const signOut = () => {
-    window.sessionStorage.removeItem(SESSION_STORAGE_KEY);
-    setSession(null);
-  };
-
-  const setLegacyApiKey = (key: string) => {
-    persistLegacyApiKey(key);
-    setLegacyApiKeyState(readLegacyApiKey());
-  };
-
-  const canAccess = (path: string) => {
-    if (!session) {
-      return false;
+  const submitKey = useCallback(async (key: string, remember: boolean) => {
+    const candidate = key.trim();
+    if (!candidate) {
+      return { ok: false, message: 'Enter the API key.' };
     }
-    return hasAccess(session.role, path);
-  };
+    const result = await probe(candidate);
+    if (result === 'locked') {
+      return { ok: false, message: 'The API rejected this key.' };
+    }
+    storeApiKey(candidate, remember);
+    setHasKey(true);
+    setMode('ready');
+    return { ok: true };
+  }, []);
 
-  const value: AuthContextValue = {
-    session,
-    isAuthenticated: Boolean(session),
-    signIn,
-    signOut,
-    legacyApiKey,
-    setLegacyApiKey,
-    canAccess,
-  };
+  const forgetKey = useCallback(() => {
+    clearApiKey();
+    setHasKey(false);
+    setMode('locked');
+  }, []);
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  const value = useMemo(
+    () => ({ mode, hasKey, submitKey, forgetKey }),
+    [mode, hasKey, submitKey, forgetKey],
+  );
+
+  return <ApiKeyContext.Provider value={value}>{children}</ApiKeyContext.Provider>;
 }
 
-export function useAuth() {
-  const context = useContext(AuthContext);
+export function useApiKey() {
+  const context = useContext(ApiKeyContext);
   if (!context) {
-    throw new Error('useAuth must be used within AuthProvider');
+    throw new Error('useApiKey must be used within ApiKeyProvider');
   }
   return context;
-}
-
-export function getLegacyApiKeyForRequest() {
-  return window.sessionStorage.getItem(API_KEY_STORAGE_KEY) ?? undefined;
-}
-
-export function clearSessionState() {
-  window.sessionStorage.removeItem(SESSION_STORAGE_KEY);
-  window.sessionStorage.removeItem(API_KEY_STORAGE_KEY);
 }
