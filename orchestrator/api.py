@@ -654,10 +654,14 @@ async def operator_console_asset(asset_path: str) -> FileResponse:
     )
 
 
-# File extensions a browser or a stale link asks for under /console; a last
-# segment ending in one of these is a miss, not a client route. Deliberately a
-# short list: target ids may contain dots (``example.com`` is a valid id and a
-# valid ``/console/targets/{id}`` deep link).
+# First path segments the React router owns (ui/src/App.tsx): anything under
+# them is a view, whatever its spelling, because the segments that follow are
+# route parameters and target ids may contain dots (``example.com``,
+# ``notes.md`` are valid ids and valid ``/console/targets/{id}`` deep links).
+_CLIENT_ROUTE_PREFIXES = frozenset({"targets", "runs"})
+
+# File extensions a browser or a stale link asks for under /console outside
+# those prefixes; a last segment ending in one of these is a miss, not a view.
 _STATIC_FILE_SUFFIXES = frozenset(
     {
         ".js",
@@ -697,16 +701,19 @@ async def operator_console_client_route(request: Request, client_path: str) -> H
 
     The React router owns everything under ``/console``; a deep link or a
     reload gets the same shell and the router renders the view. Without a
-    build these paths are unknown, as they were before. A last segment that
-    ends in a static-file extension is a file name, not a view (a stale or
-    mistyped asset link, a ``favicon.ico`` probe): it gets a 404 so monitors
-    and caches see the miss instead of a 200 shell.
+    build these paths are unknown, as they were before. Outside the router's
+    own prefixes, a last segment that ends in a static-file extension is a
+    file name, not a view (a stale or mistyped asset link, a ``favicon.ico``
+    probe): it gets a 404 so monitors and caches see the miss instead of a
+    200 shell.
     """
     if _ui_dist_index() is None:
         raise HTTPException(status_code=404, detail="Not Found")
-    last_segment = client_path.rstrip("/").rsplit("/", 1)[-1].lower()
-    if any(last_segment.endswith(suffix) for suffix in _STATIC_FILE_SUFFIXES):
-        raise HTTPException(status_code=404, detail="Not Found")
+    segments = client_path.strip("/").split("/")
+    if segments[0] not in _CLIENT_ROUTE_PREFIXES:
+        last_segment = segments[-1].lower()
+        if any(last_segment.endswith(suffix) for suffix in _STATIC_FILE_SUFFIXES):
+            raise HTTPException(status_code=404, detail="Not Found")
     return _ui_shell_response(request)
 
 

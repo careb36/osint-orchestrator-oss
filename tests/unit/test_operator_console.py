@@ -327,13 +327,20 @@ def test_console_catch_all_refuses_file_like_paths(ui_build: Path) -> None:
         typo_dir = client.get("/console/asset/index-abc123.js")
         typo_file = client.get("/console/i18n.jso")
         favicon = client.get("/console/favicon.ico")
-        nested = client.get("/console/runs/42/report.md")
-        view = client.get("/console/targets/example.com")
+        stray = client.get("/console/report.md")
+        views = [
+            client.get("/console/targets/example.com"),
+            client.get("/console/targets/notes.md"),
+            client.get("/console/targets/logo.svg/runs/3"),
+            client.get("/console/runs/42"),
+        ]
     assert typo_dir.status_code == 404
     assert typo_file.status_code == 404
     assert favicon.status_code == 404
-    assert nested.status_code == 404
-    # Target ids may contain dots (orchestrator/models.py::_TARGET_ID_RE), so a
-    # deep link to such a target is a view, not a file.
-    assert view.status_code == 200
-    assert '<div id="root"></div>' in view.text
+    assert stray.status_code == 404
+    # Under the router's own prefixes everything is a view: target ids may end
+    # in what looks like a file extension (orchestrator/models.py::_TARGET_ID_RE
+    # allows ``notes.md``), so the suffix check must not apply there.
+    for view in views:
+        assert view.status_code == 200, view.url
+        assert '<div id="root"></div>' in view.text
