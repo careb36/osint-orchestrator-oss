@@ -1,4 +1,5 @@
-import { useQueries, useQuery } from '@tanstack/react-query';
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { EmptyState, ErrorState, LoadingState, PageLayout } from '../components/PageState';
 import { RunNotice } from '../components/RunNotice';
@@ -34,14 +35,33 @@ export function HomePage() {
   });
   const trends = useQuery({ queryKey: ['risk-trends'], queryFn: api.getRiskTrends });
   const { start, isPending, notice } = useStartRun();
+  const queryClient = useQueryClient();
 
   const runList = runs.data ?? [];
+
+  // When a run leaves the active set it has a terminal status, a possible
+  // finding and a new place in the risk trend: refresh what depends on it.
+  const activeIds = runList.filter((run) => isActiveStatus(run.status)).map((run) => run.id);
+  const activeKey = activeIds.join(',');
+  const previousActive = useRef<Set<number> | null>(null);
+  useEffect(() => {
+    const current = new Set(activeIds);
+    const previous = previousActive.current;
+    previousActive.current = current;
+    if (previous && [...previous].some((id) => !current.has(id))) {
+      void queryClient.invalidateQueries({ queryKey: ['risk-trends'] });
+      void queryClient.invalidateQueries({ queryKey: ['finding'] });
+    }
+    // activeKey is the stable serialisation of activeIds.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeKey, queryClient]);
   const recentTerminal = runList.filter((run) => !isActiveStatus(run.status)).slice(0, RECENT_FINDINGS);
   // One bounded request per recent run; a 404 means the run has no finding.
   const findings = useQueries({
     queries: recentTerminal.map((run) => ({
       queryKey: ['finding', run.id],
-      queryFn: () => api.getRunFinding(run.id),
+      // A 404 is the normal answer for a run without synthesis: not an error to log.
+      queryFn: () => api.getRunFinding(run.id, { optional: true }),
       retry: false,
       staleTime: Infinity,
     })),
@@ -85,38 +105,53 @@ export function HomePage() {
         <h2 id="kpi-title" className="section-title">
           Key figures
         </h2>
+        <p className="helper-text">
+          Run-based figures come from the {kpis.runsLoaded} most recent runs the API returns (at most 100).
+        </p>
         <dl className="kpi-grid">
-          <div className={`kpi ${kpis.activeRuns ? 'muted' : ''}`.trim()}>
-            <dt>Active runs</dt>
+          <div className="kpi">
+            <dt>
+              Active runs
+              <small>pending or running now</small>
+            </dt>
             <dd>{kpis.activeRuns}</dd>
-            <small>pending or running now</small>
           </div>
           <div className="kpi">
-            <dt>Runs in 24 h</dt>
+            <dt>
+              Runs in 24 h
+              <small>started in the last day, within the runs loaded</small>
+            </dt>
             <dd>{kpis.runsLast24h}</dd>
-            <small>started in the last day</small>
           </div>
           <div className={`kpi ${kpis.successRate !== null && kpis.successRate < 0.8 ? 'warning' : ''}`.trim()}>
-            <dt>Success rate</dt>
+            <dt>
+              Success rate
+              <small>of {kpis.terminalRuns} finished runs loaded</small>
+            </dt>
             <dd>{formatPercent(kpis.successRate)}</dd>
-            <small>of {kpis.terminalRuns} finished runs loaded</small>
           </div>
           <div className="kpi">
-            <dt>Median run time</dt>
+            <dt>
+              Median run time
+              <small>task completion time, start to final status</small>
+            </dt>
             <dd>{formatMinutes(kpis.medianRunMinutes)}</dd>
-            <small>task completion time, start to final status</small>
           </div>
           <div className={`kpi ${kpis.targetsAtRisk ? 'error' : ''}`.trim()}>
-            <dt>Targets at risk</dt>
+            <dt>
+              Targets at risk
+              <small>latest finding high or critical</small>
+            </dt>
             <dd>{kpis.targetsAtRisk}</dd>
-            <small>latest finding high or critical</small>
           </div>
           <div className={`kpi ${kpis.enabledTargets && kpis.coveredTargets < kpis.enabledTargets ? 'warning' : ''}`.trim()}>
-            <dt>Coverage, 7 days</dt>
+            <dt>
+              Coverage, 7 days
+              <small>enabled targets with a run this week, within the runs loaded</small>
+            </dt>
             <dd>
               {kpis.coveredTargets}/{kpis.enabledTargets}
             </dd>
-            <small>enabled targets with a run this week</small>
           </div>
         </dl>
       </section>
@@ -148,7 +183,7 @@ export function HomePage() {
             </thead>
             <tbody>
               {rows.map(({ target, lastRun, latestRisk, peakRisk, active }) => (
-                <tr key={target.id} data-attention={active ? 'active' : latestRisk}>
+                <tr key={target.id}>
                   <td>
                     <Link to={`/targets/${encodeURIComponent(target.id)}`}>
                       <strong>{target.fqdn}</strong>
@@ -235,7 +270,7 @@ export function HomePage() {
         </h2>
         {findingsLoading ? <LoadingState message="Loading findings…" /> : null}
         {findingsFailed.length > 0 ? <ErrorState description={`${findingsFailed.length} finding(s) could not be loaded.`} /> : null}
-        {!findingsLoading && recentTerminal.length === 0 ? (
+        {!runs.error && !findingsLoading && recentTerminal.length === 0 ? (
           <EmptyState
             title="No runs yet"
             description="Findings appear here once a run finishes with a model synthesis."

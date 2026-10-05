@@ -18,6 +18,7 @@ export function useStartRun() {
     onSuccess: (accepted) => {
       setNotice({ tone: 'ok', text: `Run #${accepted.run_id} accepted for ${accepted.target_id}.` });
       void queryClient.invalidateQueries({ queryKey: ['runs'] });
+      void queryClient.invalidateQueries({ queryKey: ['risk-trends'] });
     },
     onError: (error) => {
       const message = error instanceof ApiError ? error.message : 'The run could not be started.';

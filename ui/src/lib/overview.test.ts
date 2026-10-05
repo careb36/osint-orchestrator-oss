@@ -1,4 +1,4 @@
-import { buildTargetRows, computeKpis, median } from './overview';
+import { ATTENTION, attentionTier, buildTargetRows, computeKpis, median } from './overview';
 import { sampleRuns, sampleTargets, sampleTrends } from '../test/mockApi';
 import type { RunSummary, TargetSummary } from '../types';
 
@@ -44,7 +44,21 @@ describe('buildTargetRows', () => {
     ];
     const [row] = buildTargetRows([target('a')], runs, []);
     expect(row.lastRun?.id).toBe(2);
-    expect(row.attention).toBe(5);
+    expect(row.attention).toBe(ATTENTION.calm);
+  });
+
+  it('never ranks a disabled target above an enabled one, unless it is running', () => {
+    const failed = run(1, 'off', 'failed', '2026-10-01T06:00:00', '2026-10-01T06:01:00');
+    expect(attentionTier(target('off', false), failed, 'critical')).toBe(ATTENTION.disabled);
+    expect(attentionTier(target('off', false), run(2, 'off', 'running', '2026-10-01T06:00:00', null), 'unknown')).toBe(
+      ATTENTION.active,
+    );
+    expect(attentionTier(target('new'), null, 'unknown')).toBe(ATTENTION.neverCollected);
+
+    const rows = buildTargetRows([target('off', false), target('new')], [failed], [
+      { ...sampleTrends[0], target_id: 'off', latest_risk_level: 'critical' },
+    ]);
+    expect(rows.map((row) => row.target.id)).toEqual(['new', 'off']);
   });
 });
 
@@ -64,6 +78,7 @@ describe('computeKpis', () => {
       { ...sampleTrends[0], target_id: 'b', latest_risk_level: 'low' },
     ];
     const kpis = computeKpis(targets, runs, trends, now);
+    expect(kpis.runsLoaded).toBe(4);
     expect(kpis.activeRuns).toBe(1);
     expect(kpis.runsLast24h).toBe(2);
     expect(kpis.terminalRuns).toBe(3);

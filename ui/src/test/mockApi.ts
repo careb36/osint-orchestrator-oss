@@ -89,8 +89,8 @@ export const sampleTrends: RiskTrend[] = [
 ];
 
 export const sampleFinding: Finding = {
-  run_id: 42,
-  target_id: 'example-corp',
+  run_id: sampleRuns[0].id,
+  target_id: sampleRuns[0].target_id,
   summary: 'Two new subdomains expose an outdated login portal; one leaked credential pair was found in a paste.',
   risk_level: 'high',
   risk_justification: 'Exposed authentication surface plus leaked credentials.',
@@ -123,7 +123,8 @@ export const defaultRoutes: Route[] = [
   },
   { pattern: /^\/runs(\?.*)?$/, body: sampleRuns },
   { pattern: /^\/runs\/\d+$/, body: sampleRunDetail },
-  { pattern: /^\/runs\/42\/finding$/, body: sampleFinding },
+  // The finding fixture belongs to the first sample run; every other run has none.
+  { pattern: new RegExp(`^/runs/${sampleFinding.run_id}/finding$`), body: sampleFinding },
   { pattern: /^\/runs\/\d+\/finding$/, status: 404, body: { detail: 'No finding for this run' } },
   { pattern: /^\/runs\/\d+\/evidence$/, body: [] },
   { pattern: /^\/runs\/\d+\/delta$/, body: [] },

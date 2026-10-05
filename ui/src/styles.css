@@ -492,7 +492,8 @@ a {
   gap: 0.75rem;
 }
 
-/* Overview KPI cards: a definition list, one figure per card. */
+/* Overview KPI cards: a definition list, one figure per card. Same dark
+   palette as .state-card; the figure inherits the page text colour. */
 .kpi-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
@@ -506,15 +507,23 @@ a {
   gap: 0.15rem;
   padding: 0.9rem 1rem;
   border-radius: 0.75rem;
-  background: var(--surface, #fff);
-  border: 1px solid var(--border, #d9dee7);
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.18);
 }
 
 .kpi dt {
   font-size: 0.78rem;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted, #5b6472);
+  letter-spacing: 0.06em;
+  color: #9bb0c9;
+}
+
+.kpi dt small {
+  display: block;
+  margin-top: 0.15rem;
+  text-transform: none;
+  letter-spacing: 0;
+  color: #94a3b8;
 }
 
 .kpi dd {
@@ -522,19 +531,10 @@ a {
   font-size: 1.6rem;
   font-weight: 700;
   line-height: 1.2;
+  color: #e5eef9;
 }
 
-.kpi small {
-  color: var(--muted, #5b6472);
-}
-
-.kpi.warning {
-  border-color: #d9a400;
-}
-
-.kpi.error {
-  border-color: #c0392b;
-}
+/* .kpi.warning and .kpi.error take the shared .warning / .error borders. */
 
 .finding-list {
   list-style: none;
@@ -553,7 +553,7 @@ a {
 
 .finding-head small {
   margin-left: auto;
-  color: var(--muted, #5b6472);
+  color: #94a3b8;
 }
 
 .finding-list p {

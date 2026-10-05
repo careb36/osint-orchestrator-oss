@@ -8,6 +8,17 @@ export function isActiveStatus(status: RunStatus): boolean {
   return status === 'pending' || status === 'running';
 }
 
+/** Attention tiers, lowest first; a disabled target sits last unless it is running. */
+export const ATTENTION = {
+  active: 0,
+  atRisk: 1,
+  lastRunFailed: 2,
+  neverCollected: 3,
+  calm: 4,
+  disabled: 5,
+} as const;
+export type AttentionTier = (typeof ATTENTION)[keyof typeof ATTENTION];
+
 export type TargetRow = {
   target: TargetSummary;
   lastRun: RunSummary | null;
@@ -16,14 +27,23 @@ export type TargetRow = {
   peakRisk: string;
   active: boolean;
   /** Lower sorts first: what needs attention leads the table. */
-  attention: number;
+  attention: AttentionTier;
 };
+
+export function attentionTier(target: TargetSummary, lastRun: RunSummary | null, latestRisk: string): AttentionTier {
+  if (lastRun && isActiveStatus(lastRun.status)) return ATTENTION.active;
+  // Nothing can be done about a disabled target from the overview, so it
+  // never outranks an enabled one, whatever its last run said.
+  if (!target.enabled) return ATTENTION.disabled;
+  if ((RISK_RANK[latestRisk] ?? 0) >= RISK_RANK.high) return ATTENTION.atRisk;
+  if (lastRun && (lastRun.status === 'failed' || lastRun.status === 'partial')) return ATTENTION.lastRunFailed;
+  if (!lastRun) return ATTENTION.neverCollected;
+  return ATTENTION.calm;
+}
 
 /**
  * One row per target joining the inventory, the newest run and the risk
- * trend. Ordered by attention: running first, then high or critical risk,
- * then a failed or partial last run, then targets never collected, then the
- * rest; ties keep the inventory order.
+ * trend, ordered by ATTENTION tier; ties keep the inventory order.
  */
 export function buildTargetRows(targets: TargetSummary[], runs: RunSummary[], trends: RiskTrend[]): TargetRow[] {
   const lastRunByTarget = new Map<string, RunSummary>();
@@ -41,12 +61,7 @@ export function buildTargetRows(targets: TargetSummary[], runs: RunSummary[], tr
     const latestRisk = trend?.latest_risk_level ?? 'unknown';
     const peakRisk = trend?.peak_risk_level ?? 'unknown';
     const active = lastRun ? isActiveStatus(lastRun.status) : false;
-    let attention = 5;
-    if (active) attention = 0;
-    else if ((RISK_RANK[latestRisk] ?? 0) >= RISK_RANK.high) attention = 1;
-    else if (lastRun && (lastRun.status === 'failed' || lastRun.status === 'partial')) attention = 2;
-    else if (!lastRun && target.enabled) attention = 3;
-    else if (!target.enabled) attention = 6;
+    const attention = attentionTier(target, lastRun, latestRisk);
     return { target, lastRun, latestRisk, peakRisk, active, attention, index };
   });
 
@@ -63,6 +78,8 @@ export function buildTargetRows(targets: TargetSummary[], runs: RunSummary[], tr
 }
 
 export type Kpis = {
+  /** Size of the window every run-based figure is computed from (GET /runs returns at most 100). */
+  runsLoaded: number;
   activeRuns: number;
   runsLast24h: number;
   /** Success share of terminal runs in the loaded window, null without any. */
@@ -102,6 +119,7 @@ export function computeKpis(targets: TargetSummary[], runs: RunSummary[], trends
   const medianMinutes = median(durations);
 
   return {
+    runsLoaded: runs.length,
     activeRuns: runs.filter((run) => isActiveStatus(run.status)).length,
     runsLast24h: runs.filter((run) => parseApiDate(run.started_at).getTime() >= dayAgo).length,
     successRate: terminal.length ? terminal.filter((run) => run.status === 'success').length / terminal.length : null,

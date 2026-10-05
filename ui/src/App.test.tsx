@@ -185,10 +185,11 @@ describe('App shell', () => {
 
     const kpis = within((await screen.findByRole('heading', { name: /key figures/i })).closest('section') as HTMLElement);
     // KPI cards computed from the mocked runs, targets and trends.
-    expect(kpis.getByText(/active runs/i).nextElementSibling).toHaveTextContent('0');
-    expect(kpis.getByText(/success rate/i).nextElementSibling).toHaveTextContent('50%');
-    expect(kpis.getByText(/median run time/i).nextElementSibling).toHaveTextContent('2.5 min');
-    expect(kpis.getByText(/targets at risk/i).nextElementSibling).toHaveTextContent('1');
+    const figure = (term: RegExp) => kpis.getByText(term, { selector: 'dt' }).nextElementSibling;
+    expect(figure(/^active runs/i)).toHaveTextContent('0');
+    expect(figure(/^success rate/i)).toHaveTextContent('50%');
+    expect(figure(/^median run time/i)).toHaveTextContent('2.5 min');
+    expect(figure(/^targets at risk/i)).toHaveTextContent('1');
 
     // example-corp has a high latest risk, so it leads the attention table.
     const rows = within(screen.getAllByRole('table')[0]).getAllByRole('row').slice(1);
@@ -231,10 +232,20 @@ describe('App shell', () => {
     renderApp();
 
     const kpis = within((await screen.findByRole('heading', { name: /key figures/i })).closest('section') as HTMLElement);
-    expect(kpis.getByText(/success rate/i).nextElementSibling).toHaveTextContent('—');
+    expect(kpis.getByText(/^success rate/i, { selector: 'dt' }).nextElementSibling).toHaveTextContent('—');
     expect(screen.getByRole('heading', { name: /nothing running/i })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /^no runs yet$/i })).toBeInTheDocument();
     expect(screen.getAllByText(/never/i).length).toBeGreaterThan(0);
+  });
+
+  it('does not claim "no runs yet" when the run history failed to load', async () => {
+    installFetchMock({ routes: [{ pattern: /^\/runs(\?.*)?$/, status: 500, body: { detail: 'db locked' } }] });
+    renderApp();
+
+    await screen.findByRole('heading', { name: /key figures/i });
+    expect(screen.getAllByText(/run history is unavailable/i).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('heading', { name: /^no runs yet$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /nothing running/i })).not.toBeInTheDocument();
   });
 
   it('shows the three top-level sections in the navigation', async () => {
