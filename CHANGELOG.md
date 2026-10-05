@@ -18,6 +18,12 @@ from [SECURITY.md](SECURITY.md).
   (ADR-005): the mock login and roles are gone. Without a build `/console`
   serves the server-rendered console, which stays at `/console/legacy`. New CI
   job `frontend` (lint, tests, build, inline-script check).
+- Dashboard overview (`/console`): key figures computed from the API (active
+  runs, runs in 24 h, success rate, median run time as task completion time,
+  targets at high or critical risk, 7-day coverage), targets ordered by
+  attention with latest and peak risk from `/analytics/risk-trends` and a
+  Start-run action, active runs with elapsed time that refresh themselves,
+  the findings of the latest runs, and empty states for each block.
 - Demo mode (`DEMO_MODE=true`, `Dockerfile.demo`, `docker-compose.demo.yml`):
   public `/demo` page and routes restricted to an allowlist
   (`demo/targets.demo.yaml`), per-visitor and global daily run limits, daily

@@ -17,12 +17,12 @@ Definition of done for Phase 1: the shell is stable enough to ship to operators 
 
 The goal of this phase is to make the running system legible to an analyst without deep investigation work.
 
-- [ ] Dashboard with target health, current runs, and recent findings.
-- [ ] Alert and issue overview with priority cues and triage affordances.
+- [x] Dashboard with target health, current runs, and recent findings.
+- [ ] Alert and issue overview with priority cues and triage affordances. *Deferred: the API exposes alert deliveries per run only (`GET /runs/{id}`), not an alert list or acknowledgement state, so there is nothing to triage from the UI yet.*
 - [ ] Search and filtering across targets and recent investigations.
-- [ ] Status cues that distinguish queued, in progress, completed, and failed states.
-- [ ] Empty-state guidance when no runs or findings are present.
-- [ ] Core KPI cards and a review path that surfaces the baseline metrics described in the KPI document.
+- [x] Status cues that distinguish queued, in progress, completed, and failed states.
+- [x] Empty-state guidance when no runs or findings are present.
+- [x] Core KPI cards and a review path that surfaces the baseline metrics described in the KPI document. *Task completion time is shown as the median run time; adoption and MTTR need telemetry the backend does not emit and are left out per the KPI guardrail.*
 
 Definition of done for Phase 2: an analyst can open the dashboard and determine what needs attention without navigating across multiple disconnected tools.
 
