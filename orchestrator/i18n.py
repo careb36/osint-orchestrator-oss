@@ -268,6 +268,10 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "es": "Salud",
         "en": "Health",
     },
+    "console_health_action": {
+        "es": "Acción recomendada",
+        "en": "Recommended action",
+    },
     "console_risk": {
         "es": "Riesgo y tendencias",
         "en": "Risk & trends",
@@ -533,6 +537,7 @@ _CONSOLE_I18N_KEYS = (
     "console_key_cleared",
     "console_summary",
     "console_health",
+    "console_health_action",
     "console_risk",
     "console_runs",
     "console_detail",

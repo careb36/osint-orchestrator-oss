@@ -263,6 +263,72 @@ app.add_middleware(RequestContextMiddleware)
 # ─── Public: health & metrics ────────────────────────────────────────────────
 
 
+def _health_hint(component: str, status: str, detail: str) -> tuple[str, str]:
+    """Return a user-facing recovery hint plus a compact action label."""
+    hints = {
+        "api": {
+            "ok": (
+                "API is responding normally.",
+                "Monitor the endpoint and keep the API key current.",
+            ),
+            "degraded": (
+                "The API is unhealthy; check the process logs and recent errors.",
+                "Review service logs and restart the API if needed.",
+            ),
+            "offline": (
+                "The API is not responding.",
+                "Restart the orchestrator process and confirm it is listening on the configured port.",
+            ),
+        },
+        "database": {
+            "ok": (
+                "Database connection is healthy.",
+                "Continue monitoring for slow queries or lock contention.",
+            ),
+            "degraded": (
+                "Database latency or availability is degraded.",
+                "Check connectivity and review the database service for lock contention.",
+            ),
+            "offline": (
+                "Database connectivity check failed.",
+                "Verify the database URI, credentials, and service availability before retrying.",
+            ),
+        },
+        "scheduler": {
+            "ok": (
+                "Scheduler is running and dispatching jobs.",
+                "Keep the target schedule and job reloads under observation.",
+            ),
+            "degraded": (
+                "The scheduler is not active.",
+                "Restart the scheduler or reload the target schedule from the control plane.",
+            ),
+            "offline": (
+                "The scheduler is unavailable.",
+                "Inspect the scheduler process and restart it before triggering runs.",
+            ),
+        },
+        "opencti": {
+            "ok": (
+                "OpenCTI ingestion is enabled.",
+                "Continue monitoring for sink lag or ingestion errors.",
+            ),
+            "degraded": (
+                "OpenCTI ingest is disabled or not reachable.",
+                "Enable OPENCTI_ENABLED or repair the OpenCTI connection before scheduled runs.",
+            ),
+            "offline": (
+                "OpenCTI ingestion is failing.",
+                "Check the OpenCTI endpoint, credentials, and broker connectivity before retrying.",
+            ),
+        },
+    }
+    compact = hints.get(component, {}).get(
+        status, (detail, "Check the service diagnostics and retry.")
+    )
+    return compact[0], compact[1]
+
+
 @app.get("/health", tags=["public"])
 async def health() -> dict[str, Any]:
     """Liveness probe and small service health snapshot for the dashboard."""
@@ -291,6 +357,14 @@ async def health() -> dict[str, Any]:
 
     if not settings.opencti_enabled:
         checks["opencti"] = {"status": "degraded", "detail": "OpenCTI sink disabled"}
+
+    for component, payload in checks.items():
+        status = payload["status"]
+        detail = payload["detail"]
+        hint, action = _health_hint(component, status, detail)
+        payload["hint"] = hint
+        payload["action"] = action
+        payload["recovery"] = hint
 
     if any(payload["status"] == "offline" for payload in checks.values()):
         overall = "offline"
