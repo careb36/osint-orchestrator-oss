@@ -9,10 +9,12 @@ daily budget. Public views never carry the model's synthesis: no summary, no
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
 import logging
+import weakref
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
@@ -174,6 +176,22 @@ def seconds_until_reset() -> int:
     return max(1, int((midnight - now).total_seconds()))
 
 
+_usage_locks: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _usage_lock() -> asyncio.Lock:
+    """Serialise every read-modify-write of the usage counters (ADR-005: one
+    instance). Without it two concurrent budget checks both read "4 of 5" and
+    both make the call, and on a new day each inserts its own global row."""
+    loop = asyncio.get_running_loop()
+    lock = _usage_locks.get(loop)
+    if lock is None:
+        lock = _usage_locks[loop] = asyncio.Lock()
+    return lock
+
+
 async def _row(session: Any, day: str, scope: str, ip_hash: str) -> DemoDailyUsage:
     result = await session.exec(
         select(DemoDailyUsage).where(
@@ -198,7 +216,7 @@ async def claim_run(raw_ip: str) -> str | None:
     """
     day = _today()
     cutoff = (datetime.now(UTC) - timedelta(days=_COUNTER_RETENTION_DAYS)).strftime("%Y-%m-%d")
-    async with get_session() as session:
+    async with _usage_lock(), get_session() as session:
         await session.exec(delete(DemoDailyUsage).where(DemoDailyUsage.day < cutoff))
         total = await _row(session, day, _GLOBAL, _GLOBAL)
         mine = await _row(session, day, "ip", hash_client_ip(raw_ip))
@@ -218,7 +236,7 @@ async def claim_run(raw_ip: str) -> str | None:
 
 async def release_run(raw_ip: str) -> None:
     """Give back a run claimed by ``claim_run`` that did not start (409)."""
-    async with get_session() as session:
+    async with _usage_lock(), get_session() as session:
         for scope, ip_hash in ((_GLOBAL, _GLOBAL), ("ip", hash_client_ip(raw_ip))):
             row = await _row(session, _today(), scope, ip_hash)
             row.run_count = max(0, row.run_count - 1)
@@ -236,7 +254,7 @@ async def consume_budget(kind: BudgetKind) -> bool:
         settings.demo_tavily_calls_per_day if kind == "tavily" else settings.demo_llm_calls_per_day
     )
     column = "tavily_calls" if kind == "tavily" else "llm_calls"
-    async with get_session() as session:
+    async with _usage_lock(), get_session() as session:
         total = await _row(session, _today(), _GLOBAL, _GLOBAL)
         used = getattr(total, column)
         allowed = used < limit
@@ -296,18 +314,18 @@ def public_finding(record: FindingRecord) -> dict[str, Any]:
 
 
 def _without_synthesis(markdown: str, notice: str) -> str:
-    """The report with its synthesis section replaced by *notice*."""
+    """The report with its synthesis section replaced by *notice*.
+
+    The synthesis is the report's last section (reports._markdown_content), so
+    everything from its heading on is dropped. Looking for the next heading
+    instead would let model text that spells one end the redaction early.
+    """
     kept: list[str] = []
-    skipping = False
     for line in markdown.splitlines():
         if line.startswith(_SYNTHESIS_HEADINGS):
-            skipping = True
             kept.extend([line, notice])
-            continue
-        if skipping and line.startswith("## "):
-            skipping = False
-        if not skipping:
-            kept.append(line)
+            break
+        kept.append(line)
     return "\n".join(kept) + "\n"
 
 

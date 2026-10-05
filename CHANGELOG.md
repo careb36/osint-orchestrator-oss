@@ -113,6 +113,16 @@ from [SECURITY.md](SECURITY.md).
   points to are deleted, and none when the remaining runs cannot be read.
 - Retention purges `evidence_qualifications` with the runs they belong to; the
   qualified URLs and rationales were kept forever.
+- Demo mode: the public report no longer leaks the synthesis. Model text that
+  put `## ` after a line separator other than `\n` (`\r`, `\u2028`, `\x85`…)
+  escaped the heading neutralisation and ended the redaction early, exposing
+  the risk level, justification and pivots. Everything from the synthesis
+  heading on (the report's last section) is now withheld, and
+  `neutralise_markdown` normalises every line break to `\n` first.
+- Demo mode: concurrent calls can no longer overspend the daily Tavily and LLM
+  budgets or the run limits. The counters were read and written without a
+  lock, so 20 concurrent checks against a limit of 5 all passed; every update
+  is now serialised in-process (single instance, ADR-005).
 - Evidence qualification asks once more for the items an answer left out and
   uses batches of 5: live, a 10-item answer was truncated and none of its items
   were qualified.
