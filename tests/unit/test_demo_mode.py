@@ -721,6 +721,16 @@ def test_every_cloud_provider_a_demo_target_uses_needs_its_key(
         demo.validate_demo_mode()
 
 
+def test_local_targets_need_no_cloud_key_whatever_the_global_provider(
+    demo_settings: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A target without ``llm:`` defaults to ``local`` and always gets Ollama
+    # (providers.get_client), so a cloud LLM_PROVIDER must not demand its key.
+    monkeypatch.setattr(settings, "llm_provider", "anthropic")
+    monkeypatch.setattr(settings, "anthropic_api_key", "")
+    demo.validate_demo_mode()  # the fixture's targets carry no ``llm:``
+
+
 def test_demo_page_has_the_console_security_headers(client: TestClient) -> None:
     resp = client.get("/demo")
     csp = resp.headers["Content-Security-Policy"]

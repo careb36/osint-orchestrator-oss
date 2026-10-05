@@ -90,9 +90,11 @@ Guards:
 - **Startup check.** With `DEMO_MODE=true` the service refuses to start unless
   `OPENCTI_ENABLED=false`, the API key and the signing key are set,
   `TAVILY_API_KEY` is set, every allowlisted target enables the Tavily
-  collector and nothing else, and, for targets with `llm: nebius`,
-  `NEBIUS_API_KEY`, `LLM_MODEL_REASONING` and `LLM_MODEL_FAST` are set. Nothing
-  runs on a schedule.
+  collector and nothing else, and, for each target, the key of the provider
+  its synthesis would use is set (`llm: nebius` → `NEBIUS_API_KEY` plus both
+  `LLM_MODEL_*` ids; `llm: anthropic` → `ANTHROPIC_API_KEY`; `llm: openai` →
+  `OPENAI_API_KEY`, or `NEBIUS_API_KEY` when `LLM_PROVIDER=nebius`; `llm:
+  local` and `LLM_PROVIDER=none` need no key). Nothing runs on a schedule.
 - **Local demo.** `docker-compose.demo.yml` sets `DEMO_TRUSTED_PROXY_HOPS=0`
   and, unless `.env` sets it, raises `DEMO_MAX_RUNS_PER_IP_PER_DAY` to the
   global cap: behind Docker's port mapping every browser on the machine shares
