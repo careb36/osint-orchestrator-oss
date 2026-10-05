@@ -986,12 +986,17 @@ async def demo_verify_chain(target_id: str) -> dict[str, Any]:
         if cached is not None and now - cached[0] < _DEMO_VERIFY_CACHE_SECONDS:
             result = dict(cached[1])
         else:
-            async with get_session() as session:
-                result = await verify_target_chain(
-                    target_id=target_id,
-                    secret_key=settings.orchestrator_secret_key,
-                    session=session,
-                )
+            try:
+                async with get_session() as session:
+                    result = await verify_target_chain(
+                        target_id=target_id,
+                        secret_key=settings.orchestrator_secret_key,
+                        session=session,
+                    )
+            except Exception:
+                # Metric parity with the protected route.
+                metrics.evidence_chain_verify_total.labels(target_id, "error").inc()
+                raise
             _demo_verify_cache[target_id] = (now, dict(result))
             metrics.evidence_chain_verify_total.labels(
                 target_id, "ok" if result["ok"] else "broken"

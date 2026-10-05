@@ -181,6 +181,34 @@ def test_demo_page_language_follows_query_then_accept_language(client: TestClien
     assert '<html lang="en">' in unknown.text  # falls back to the global setting
 
 
+def test_unsupported_visitor_locale_falls_back_without_a_warning(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Visitor input must not become log noise on a public page.
+    with caplog.at_level("WARNING", logger="orchestrator.i18n"):
+        resp = client.get("/demo", headers={"Accept-Language": "fr-FR,fr;q=0.9"})
+    assert resp.status_code == 200 and '<html lang="en">' in resp.text
+    assert not [r for r in caplog.records if r.name == "orchestrator.i18n"]
+
+
+def test_public_chain_verify_counts_errors_like_the_protected_route(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from orchestrator import metrics
+
+    api_module._demo_verify_cache.clear()
+
+    async def _boom(**kwargs):
+        raise RuntimeError("disk gone")
+
+    monkeypatch.setattr(api_module, "verify_target_chain", _boom)
+    labels = {"target_id": "demo-corp", "outcome": "error"}
+    before = metrics.sample("osint_orchestrator_evidence_chain_verify_total", labels) or 0.0
+    with pytest.raises(RuntimeError):
+        client.get("/demo/targets/demo-corp/chain/verify")
+    assert metrics.sample("osint_orchestrator_evidence_chain_verify_total", labels) - before == 1
+
+
 def test_health_is_ok_in_demo_mode_with_the_sink_off_by_design(client: TestClient) -> None:
     payload = client.get("/health").json()
     assert payload["status"] == "ok"
