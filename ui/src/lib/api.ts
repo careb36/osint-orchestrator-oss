@@ -66,10 +66,14 @@ export function isKeyRemembered(): boolean {
   return storage('local')?.getItem(API_KEY_REMEMBER_KEY) === '1';
 }
 
+/**
+ * Drop the key everywhere. The "remember" preference stays: it holds no
+ * secret, and the gate uses it to pre-tick the checkbox for the next key.
+ * Only `storeApiKey(key, false)` clears it.
+ */
 export function clearApiKey(): void {
   storage('session')?.removeItem(API_KEY_STORAGE_KEY);
   storage('local')?.removeItem(API_KEY_STORAGE_KEY);
-  storage('local')?.removeItem(API_KEY_REMEMBER_KEY);
 }
 
 type RequestOptions = {

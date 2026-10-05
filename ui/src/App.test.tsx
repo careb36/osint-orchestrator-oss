@@ -145,6 +145,31 @@ describe('App shell', () => {
     expect(window.sessionStorage.getItem(API_KEY_STORAGE_KEY)).toBeNull();
   });
 
+  it('keeps the remember preference after the key is forgotten', async () => {
+    installFetchMock({ requireKey: 'test-key' });
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.type(await screen.findByLabelText(/^api key$/i), 'test-key');
+    await user.click(screen.getByRole('checkbox', { name: /remember/i }));
+    await user.click(screen.getByRole('button', { name: /use key/i }));
+    await screen.findByRole('heading', { name: /^overview$/i });
+
+    await user.click(screen.getByRole('button', { name: /forget key/i }));
+    await screen.findByRole('heading', { name: /api key required/i });
+    expect(window.localStorage.getItem(API_KEY_STORAGE_KEY)).toBeNull();
+    expect(screen.getByRole('checkbox', { name: /remember/i })).toBeChecked();
+
+    // Submitting without "remember" clears the preference.
+    await user.click(screen.getByRole('checkbox', { name: /remember/i }));
+    await user.type(screen.getByLabelText(/^api key$/i), 'test-key');
+    await user.click(screen.getByRole('button', { name: /use key/i }));
+    await screen.findByRole('heading', { name: /^overview$/i });
+    await user.click(screen.getByRole('button', { name: /forget key/i }));
+    await screen.findByRole('heading', { name: /api key required/i });
+    expect(screen.getByRole('checkbox', { name: /remember/i })).not.toBeChecked();
+  });
+
   it('locks when a stored key stops being accepted', async () => {
     window.sessionStorage.setItem(API_KEY_STORAGE_KEY, 'stale-key');
     installFetchMock({ requireKey: 'test-key' });

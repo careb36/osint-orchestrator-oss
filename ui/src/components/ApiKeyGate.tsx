@@ -6,8 +6,8 @@ import { isKeyRemembered } from '../lib/api';
 export function ApiKeyGate() {
   const { submitKey } = useApiKey();
   const [key, setKey] = useState('');
-  // Pre-tick when a key was remembered on this browser (it was just rejected
-  // or forgotten; the operator most likely wants the new one kept too).
+  // Pre-tick when the last key was remembered on this browser: clearApiKey()
+  // keeps that preference, so a rejected or forgotten key leaves it in place.
   const [remember, setRemember] = useState(() => isKeyRemembered());
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
