@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="{{ language }}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ title }}</title>
+    <style nonce="{{ csp_nonce }}">
+      body { font-family: system-ui, sans-serif; margin: 3rem auto; max-width: 48rem; line-height: 1.5; padding: 0 1rem; color: #e5eef9; background: #07131f; }
+      a { color: #7cb3ff; }
+      code, pre { background: #10253c; padding: 0.1rem 0.35rem; border-radius: 0.25rem; }
+      pre { padding: 0.75rem 1rem; overflow-x: auto; }
+    </style>
+  </head>
+  <body>
+    <h1>{{ title }}</h1>
+    <p>{{ body }}</p>
+    <pre>cd ui &amp;&amp; npm ci &amp;&amp; npm run build &amp;&amp; cd ..
+mkdir -p orchestrator/static &amp;&amp; rm -rf orchestrator/static/ui-dist
+cp -r ui/dist orchestrator/static/ui-dist</pre>
+    <p><a href="/">{{ back }}</a></p>
+  </body>
+</html>

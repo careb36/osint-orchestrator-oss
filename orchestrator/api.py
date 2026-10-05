@@ -33,7 +33,7 @@ from fastapi import (
     Request,
     Response,
 )
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func
 from sqlmodel import select
@@ -43,7 +43,7 @@ from orchestrator.auth import log_auth_status, log_secret_key_status, require_ap
 from orchestrator.config import NEBIUS_DEFAULT_BASE_URL, settings
 from orchestrator.database import create_db_and_tables, get_session
 from orchestrator.evidence import load_manifest_file, manifest_path_for_report, verify_target_chain
-from orchestrator.i18n import SUPPORTED_LANGUAGES, console_i18n_catalogue, resolve_language, t
+from orchestrator.i18n import SUPPORTED_LANGUAGES, resolve_language, t
 from orchestrator.logging_config import configure_logging, request_id_var
 from orchestrator.models import AlertRecord, EvidenceQualification, FindingRecord, Run, Target
 from orchestrator.pipeline import (
@@ -210,8 +210,8 @@ app = FastAPI(
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 # Production build of the React dashboard (ui/, `npm run build`). The Docker
-# images copy ui/dist here; a source checkout without the build falls back to
-# the server-rendered console.html so /console always answers.
+# images copy ui/dist here; a source checkout without the build gets a 503
+# page from /console that says how to build it.
 UI_DIST_DIR = Path(__file__).parent / "static" / "ui-dist"
 
 
@@ -553,61 +553,76 @@ def _ui_dist_index() -> Path | None:
     return index if index.is_file() else None
 
 
+# Directives every /console response shares: same-origin connections, images
+# and fonts, no base/form/frame tricks. The script and style sources differ
+# per page and are prepended below.
+_CONSOLE_CSP_TAIL = (
+    "connect-src 'self'; img-src 'self' data:; font-src 'self'; base-uri 'none'; "
+    "form-action 'none'; frame-ancestors 'none'"
+)
 # The React dashboard is one bundled script and one stylesheet, both served
 # from this origin under /console/assets/. Nothing inline, nothing remote: a
 # string that reaches the DOM from a collector or a model cannot execute.
-_UI_CSP = (
-    "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
-    "img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'; "
-    "frame-ancestors 'none'"
-)
-_UI_SHELL_HEADERS = {
-    "Content-Security-Policy": _UI_CSP,
+_UI_CSP = f"default-src 'none'; script-src 'self'; style-src 'self'; {_CONSOLE_CSP_TAIL}"
+# Hardening headers every /console HTML response carries, shell or 503 alike.
+_CONSOLE_HARDENING_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
     "Cache-Control": "no-store",
 }
+_UI_SHELL_HEADERS = {**_CONSOLE_HARDENING_HEADERS, "Content-Security-Policy": _UI_CSP}
 
 
-def _legacy_console_response(request: Request) -> HTMLResponse:
-    """The server-rendered console.html with its per-response nonce CSP."""
-    # The console renders API data — including run.error, which quotes
-    # collector and OpenCTI exception text that can carry internet-derived
-    # strings — into the same origin that holds the operator's API key. The
-    # template escapes every interpolation; the CSP is the second line: only
-    # this response's inline script/style (by nonce) may execute, nothing may
-    # be fetched from elsewhere, and the page cannot be framed.
+def _dashboard_missing_response(request: Request) -> HTMLResponse:
+    """
+    503 with build instructions when orchestrator/static/ui-dist is absent.
+
+    A deployment without the dashboard is a deployment error, so the status
+    is one a probe notices; the page itself carries no data and no script.
+    It shares ``_CONSOLE_HARDENING_HEADERS`` with the shell and differs from
+    it on purpose in two places: the CSP allows no script at all and styles
+    only by nonce (the page has no bundle), and ``Retry-After`` tells the
+    probe when to look again.
+    """
     nonce = secrets.token_urlsafe(16)
-    csp = (
-        f"default-src 'none'; script-src 'nonce-{nonce}'; style-src 'nonce-{nonce}'; "
-        "connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; "
-        "frame-ancestors 'none'"
-    )
+    language = resolve_language(None)
     return templates.TemplateResponse(
         request=request,
-        name="console.html",
-        context={"default_language": resolve_language(None), "csp_nonce": nonce},
+        name="dashboard_missing.html",
+        context={
+            "language": language,
+            "title": t("dashboard_missing_title", language=language),
+            "body": t("dashboard_missing_body", language=language),
+            "back": t("dashboard_missing_back", language=language),
+            "csp_nonce": nonce,
+        },
+        status_code=503,
         headers={
-            "Content-Security-Policy": csp,
-            "X-Content-Type-Options": "nosniff",
-            "Referrer-Policy": "no-referrer",
-            "Cache-Control": "no-store",
+            **_CONSOLE_HARDENING_HEADERS,
+            "Content-Security-Policy": f"default-src 'none'; style-src 'nonce-{nonce}'; {_CONSOLE_CSP_TAIL}",
+            "Retry-After": "60",
         },
     )
 
 
 def _ui_shell_response(request: Request) -> HTMLResponse:
-    """The React dashboard's index.html, or the legacy console without a build."""
+    """
+    The React dashboard's index.html, or the 503 build notice without a build.
+
+    Both branches carry ``_CONSOLE_HARDENING_HEADERS``; only the CSP (bundle
+    vs. no script) and the 503's ``Retry-After`` differ, as documented on
+    ``_dashboard_missing_response``.
+    """
     index = _ui_dist_index()
     if index is None:
-        return _legacy_console_response(request)
+        return _dashboard_missing_response(request)
     return HTMLResponse(index.read_text(encoding="utf-8"), headers=_UI_SHELL_HEADERS)
 
 
 @app.get("/console", response_class=HTMLResponse, include_in_schema=False)
 async def operator_console(request: Request) -> HTMLResponse:
     """
-    Operator dashboard shell (React build when installed, console.html otherwise).
+    Operator dashboard shell (the React build; translations ship inside it).
 
     Mounted on ``app``, not ``router``: the shell carries no target or run
     data — every fetch it makes (/runs, /targets, /analytics/...) goes through
@@ -615,22 +630,6 @@ async def operator_console(request: Request) -> HTMLResponse:
     key, a browser could never reach the page that asks for the key.
     """
     return _ui_shell_response(request)
-
-
-@app.get("/console/legacy", response_class=HTMLResponse, include_in_schema=False)
-async def operator_console_legacy(request: Request) -> HTMLResponse:
-    """
-    The server-rendered console, kept while the React dashboard catches up.
-
-    Same public-shell / protected-data split as ``/console``.
-    """
-    return _legacy_console_response(request)
-
-
-@app.get("/console/i18n.json", include_in_schema=False)
-async def operator_console_i18n() -> JSONResponse:
-    """Translations used by the operator console frontend."""
-    return JSONResponse(console_i18n_catalogue())
 
 
 @app.get("/console/assets/{asset_path:path}", include_in_schema=False)
@@ -692,8 +691,8 @@ _STATIC_FILE_SUFFIXES = frozenset(
 
 # Starlette matches routes in registration order: this catch-all must stay the
 # last ``/console/...`` route of the module, or it shadows whatever is added
-# after it (tests/unit/test_operator_console.py checks the fixed routes keep
-# their own content type).
+# after it (tests/unit/test_operator_console.py checks the assets route keeps
+# its own content type).
 @app.get("/console/{client_path:path}", response_class=HTMLResponse, include_in_schema=False)
 async def operator_console_client_route(request: Request, client_path: str) -> HTMLResponse:
     """

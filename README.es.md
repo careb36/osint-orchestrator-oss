@@ -92,6 +92,12 @@ visitante y por día.
 de RAM): `docker compose up -d --build`; ver [operación](docs/operations.md) y
 [configuración](docs/configuration.md) (en inglés).
 
+**Panel del operador:** <http://localhost:8000/console>, en español o inglés.
+Cifras clave, objetivos ordenados por lo que requiere atención, corridas
+activas, hallazgos, evidencia con búsqueda y filtros, y un botón para iniciar
+corridas; pide `ORCHESTRATOR_API_KEY` al abrirlo. Código en
+[`ui/`](ui/README.md) (en inglés); las imágenes lo construyen solas.
+
 ## Construido durante el hackathon
 
 El commit `Baseline: pre-hackathon snapshot` marca lo que existía antes: el

@@ -16,7 +16,6 @@ from orchestrator.i18n import (
     _MESSAGES,
     DEFAULT_LANGUAGE,
     SUPPORTED_LANGUAGES,
-    console_i18n_catalogue,
     resolve_language,
     t,
 )
@@ -192,10 +191,3 @@ def test_risk_level_is_not_localised() -> None:
     finding = Finding(target_id="t1", run_id=1, summary="resumen en español")
     assert finding.risk_level == "unknown"
     assert finding.risk_level not in {"desconocido", "desconocida"}
-
-
-def test_console_i18n_catalogue_uses_supported_languages_only() -> None:
-    catalogue = console_i18n_catalogue()
-    assert set(catalogue) == SUPPORTED_LANGUAGES
-    assert catalogue["es"]["pageTitle"]
-    assert catalogue["en"]["pageTitle"]

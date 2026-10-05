@@ -15,9 +15,8 @@ from [SECURITY.md](SECURITY.md).
   stage of both Dockerfiles and served by the orchestrator at `/console`
   (client routes, `/console/assets/*` with immutable caching,
   `script-src 'self'` CSP). Access uses the API key as every other client does
-  (ADR-005): the mock login and roles are gone. Without a build `/console`
-  serves the server-rendered console, which stays at `/console/legacy`. New CI
-  job `frontend` (lint, tests, build, inline-script check).
+  (ADR-005): the mock login and roles are gone. New CI job `frontend` (lint,
+  tests, build, inline-script check).
 - Dashboard overview (`/console`): key figures computed from the API (active
   runs, runs in 24 h, success rate, median run time as task completion time,
   targets at high or critical risk, 7-day coverage), targets ordered by
@@ -125,6 +124,12 @@ from [SECURITY.md](SECURITY.md).
 
 ### Removed
 
+- The server-rendered operator console (`orchestrator/templates/console.html`)
+  and its routes `/console/legacy` and `/console/i18n.json`: the React
+  dashboard covers every view it had (health, risk, runs, run detail with
+  evidence search, filters and sort, artefact download) in both languages.
+  Without a dashboard build `/console` now answers `503` with the build steps
+  instead of falling back; the Docker images always ship the build.
 - Dead `SPIDERFOOT_CORRELATION` key from `.env.example` (read by nothing).
 
 ### Fixed

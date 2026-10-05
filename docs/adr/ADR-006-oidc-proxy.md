@@ -61,9 +61,10 @@ default compose network and talks to the orchestrator by service name
 A browser cannot attach `X-API-Key` to its first navigation, and the OIDC
 bearer token oauth2-proxy forwards is not an API key. So:
 
-- `GET /console` and `GET /console/i18n.json` are **public**: they serve the
-  console shell and its translations, which contain no target or run data.
-  Every request the console then makes (`/runs`, `/targets`,
+- `GET /console` (with its client routes and `/console/assets/*`) is
+  **public**: it serves the dashboard shell, which contains no target or run
+  data and ships its own translations.
+  Every request the dashboard then makes (`/runs`, `/targets`,
   `/analytics/...`, report and finding downloads) goes to the protected
   router with the key the operator types into the page (kept in
   `sessionStorage`, never in a cookie).

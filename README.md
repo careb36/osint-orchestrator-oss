@@ -89,6 +89,12 @@ visitor and per day.
 `docker compose up -d --build`, then see [operations](docs/operations.md) and
 [configuration](docs/configuration.md).
 
+**Operator dashboard:** <http://localhost:8000/console>, in Spanish or English.
+Key figures, targets ordered by what needs attention, active runs, findings,
+evidence with search and filters, and a Start-run action; it asks for
+`ORCHESTRATOR_API_KEY` on first load. Source in [`ui/`](ui/README.md); the
+images build it, so nothing else is needed.
+
 ## Built during the hackathon
 
 The commit `Baseline: pre-hackathon snapshot` marks what existed before: the

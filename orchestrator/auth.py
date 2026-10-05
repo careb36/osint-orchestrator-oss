@@ -19,13 +19,13 @@ Rules:
     without a cut-over window.
   - Always public: GET /health and GET /metrics (probe/scraper endpoints); the
     documentation/landing endpoints GET /, GET /docs (and /docs/*), GET
-    /openapi.json, GET /redoc; and the console shell, GET /console and GET
-    /console/i18n.json, which carry no target or run data — a browser cannot
-    attach a header to its first navigation, so the page that asks for the
-    key must itself be open. With DEMO_MODE=true the /demo routes are public
+    /openapi.json, GET /redoc; and the dashboard shell, GET /console with its
+    client routes and assets, which carries no target or run data — a browser
+    cannot attach a header to its first navigation, so the page that asks for
+    the key must itself be open. With DEMO_MODE=true the /demo routes are public
     too: allowlisted targets, rate-limited runs and views without the model's
     synthesis (see orchestrator/demo.py). Every data and control endpoint,
-    including everything the console fetches, remains protected.
+    including everything the dashboard fetches, remains protected.
   - Comparison is constant-time (hmac.compare_digest) and every configured
     key is checked so timing does not reveal which slot matched.
   - When a request carries both headers, either one matching is enough: a

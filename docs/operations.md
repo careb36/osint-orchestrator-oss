@@ -17,7 +17,7 @@ docker compose up -d --build
 
 | Service | Address |
 | --- | --- |
-| Orchestrator API and console | <http://localhost:8000> (`/docs`, `/console`) |
+| Orchestrator API and dashboard | <http://localhost:8000> (`/docs`, `/console`) |
 | OpenCTI | <http://localhost:8080> (2–3 minutes to become healthy) |
 | SpiderFoot | <http://localhost:5001> |
 
@@ -121,23 +121,21 @@ scheduler): one replica, `Recreate` strategy, one `ReadWriteOnce` volume
 
 Interactive reference: `/docs` (OpenAPI at `/openapi.json`). Public routes are
 `/`, `/health`, `/metrics`, `/docs`, `/redoc`, `/openapi.json`, `/console`
-(and its client routes and `/console/assets/*`), `/console/legacy`,
-`/console/i18n.json` and, with `DEMO_MODE=true`, the `/demo` routes listed
+(with its client routes and `/console/assets/*`) and, with `DEMO_MODE=true`,
+the `/demo` routes listed
 under [Demo mode](#demo-mode); every other route needs `X-API-Key: <key>` or
 `Authorization: Bearer <key>`.
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `GET` | `/` | Landing page with links to console, docs and health (no API key) |
+| `GET` | `/` | Landing page with links to the dashboard, docs and health (no API key) |
 | `GET` | `/health` | Liveness check (no API key) |
 | `GET` | `/metrics` | Prometheus metrics (no API key) |
-| `GET` | `/console/i18n.json` | Console translation catalogue (public; no target/run data) |
-| `GET` | `/console` | Operator dashboard shell (public, no data; every call it makes needs the API key, entered on the page). Serves the React build from `orchestrator/static/ui-dist` when present, otherwise the server-rendered console |
+| `GET` | `/console` | Operator dashboard shell (public, no data; every call it makes needs the API key, entered on the page). Serves the React build from `orchestrator/static/ui-dist`; without a build it answers `503` with build instructions |
 | `GET` | `/console/{route}` | Client-side routes of the dashboard (`/console/targets`, `/console/runs/{id}`): same shell, the router renders the view. `404` without a build |
 | `GET` | `/console/assets/{file}` | Hashed script and stylesheet of the dashboard build (immutable cache; no path traversal) |
-| `GET` | `/console/legacy` | The server-rendered console, kept until the dashboard covers every view |
-| `GET` | `/health` | Service health snapshot (`ok`, `degraded`, `offline`) used by the console health cards |
-| `GET` | `/analytics/risk-trends` | Per-target risk and new-observable trends for the console risk view |
+| `GET` | `/health` | Service health snapshot (`ok`, `degraded`, `offline`) shown on the dashboard overview |
+| `GET` | `/analytics/risk-trends` | Per-target risk and new-observable trends for the dashboard's risk columns and target detail |
 | `GET` | `/targets` | List configured targets |
 | `GET` | `/targets/{id}` | Get a single target |
 | `POST` | `/targets/{id}/run` | Trigger a collection run — `202`, returns `run_id`, runs in background |
@@ -158,12 +156,13 @@ Errors carry a `detail` string in the operator language: `404` unknown target,
 run, report or finding; `400` disabled target; `401` missing or wrong key; `409`
 a run is already active for the target.
 
-### Health dashboard polling and retry behaviour
+### Dashboard refresh and health values
 
-The console health tab polls `/health` every 15 seconds when the tab is open and
-re-renders the status cards without losing the current page selection. The status
-payload is deterministic and intentionally limited to three values so the UI can
-render every state without guessing:
+The dashboard loads `/health` with the overview and re-fetches `/runs` every
+10 seconds while a run is pending or running; when a run reaches a terminal
+status it also refreshes the risk trends and the findings. The health payload
+is deterministic and intentionally limited to three overall values so the UI
+can render every state without guessing:
 
 - `ok`: all core checks are healthy
 - `degraded`: the app is still serving requests, but a dependency is degraded
@@ -311,13 +310,13 @@ changing a model: `alembic upgrade head`, then
 
 ## UI operations runbook
 
-### Console smoke checks
+### Dashboard smoke checks
 
 `/console` is the UI's production entry point. The Docker images build the React
 dashboard (`ui/`) in a Node stage and copy the output to
-`orchestrator/static/ui-dist`; a source checkout without that directory serves
-the server-rendered console at `/console` instead, and `/console/legacy` always
-does. To run the dashboard from a checkout:
+`orchestrator/static/ui-dist`; a source checkout without that directory gets a
+`503` page from `/console` with the build steps. To run the dashboard from a
+checkout:
 
 ```bash
 cd ui && npm ci && npm run build && cd ..
@@ -334,13 +333,15 @@ cd ui && npm run lint && npm run test:run && npm run build
 
 The Python suite covers the shell contract: `/console` is reachable without a
 key, protected API calls still answer `401`, the dashboard build is served with
-a `script-src 'self'` CSP and immutable assets, and `/console/legacy` keeps its
-nonce CSP. The UI suite covers the operator journey against a mocked API: key
-prompt on `401`, key validation and storage, navigation, run detail.
+a `script-src 'self'` CSP and immutable assets, and a missing build answers
+`503` without a script. The UI suite covers the operator journey against a
+mocked API (key prompt on `401`, key validation and storage, navigation,
+filters, run detail), the Spanish/English catalogue, and an axe-core
+accessibility check of every main view.
 
 ### Frontend telemetry and error tracking
 
-The console logs browser-side events to the developer console with structured
+The dashboard logs browser-side events to the developer console with structured
 context (`event`, `path`, `language`, `message`, `stack`). This is intentionally
 low-volume and bounded: the last 25 events are retained in memory for the active
 page and every error is stamped with enough detail to distinguish auth issues,
@@ -352,7 +353,8 @@ API failures and unhandled client exceptions without exposing raw API keys.
 | --- | --- | --- |
 | `/console` loads but all data calls return `401` | API key missing or stale | Verify the stored key, clear/re-enter it, check the service's `ORCHESTRATOR_API_KEY` value |
 | `/console` fails in-browser with a JS error | Frontend regression or malformed API payload | Open the browser console, inspect the last `ui-telemetry` event, and compare it with the failing route and payload |
-| `/console/i18n.json` or static shell fails to load | Deployment problem or CSP regression | Confirm the app is healthy, the page loads with the expected nonce-based CSP, and the asset is served without redirect |
+| `/console` answers `503` | The image or checkout has no dashboard build | Build `ui/` and copy `ui/dist` to `orchestrator/static/ui-dist` (the Docker images do this in their Node stage) |
+| `/console/assets/*` fails to load | Deployment problem or CSP regression | Confirm the page loads with the `script-src 'self'` CSP and the hashed asset is served with `200` and an immutable cache header |
 | Data loads but a target or run view is empty | API/auth issue or empty database | Check `/targets`, `/runs` and `/analytics/risk-trends` with the same key; if empty, verify scheduler and database state |
 
 Rollback steps:
@@ -360,8 +362,8 @@ Rollback steps:
 1. Stop the change by reverting the release commit or image tag.
 2. Restore the previous deployment and confirm that the prior API key and
    ingress/auth settings still match the running service.
-3. Re-run the console smoke checks and verify the shell and data endpoints work
-   before reopening traffic.
+3. Re-run the dashboard smoke checks and verify the shell and data endpoints
+   work before reopening traffic.
 4. Capture the browser console telemetry and the failing API response in the
    incident log so the underlying cause is fixed before a new rollout.
 
@@ -369,17 +371,17 @@ Rollback steps:
 
 Before a UI release, confirm all of the following:
 
-- [ ] The console smoke checks pass in CI (`pytest tests/unit/test_operator_console.py -v`)
+- [ ] The dashboard smoke checks pass in CI (`pytest tests/unit/test_operator_console.py -v` and the `frontend` job)
 - [ ] CSP and X-Content-Type-Options hardening remain intact for the shell
 - [ ] Error telemetry includes `event`, `path`, `message`, and a stack when available
 - [ ] A stale or missing API key is clearly surfaced to the operator and the key remains in session storage only
-- [ ] The release notes mention any API contract or auth changes that affect console users
+- [ ] The release notes mention any API contract or auth changes that affect dashboard users
 - [ ] A rollback plan and owner are recorded for the release window
 
 Support SOP:
 
-- Check the operator console logs first for `ui-telemetry` and any `console_error`
-  events; these isolate browser regressions from backend run failures.
+- Check the browser's developer console first for `ui-telemetry` events; they
+  isolate browser regressions from backend run failures.
 - If the backend API is healthy but the UI is not, verify the browser is not
   holding a stale key and that the CSP still matches the new shell.
 - If the issue is systemic, revert to the last known-good image, restore the
