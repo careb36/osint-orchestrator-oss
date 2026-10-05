@@ -4,10 +4,13 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import App from './App';
 import { ApiKeyProvider } from './auth';
+import { LOCALE_STORAGE_KEY, LocaleProvider, type Locale } from './i18n';
 import { API_KEY_STORAGE_KEY } from './lib/api';
 import { installFetchMock } from './test/mockApi';
 
-const renderApp = (initialEntries = ['/']) => {
+// The assertions below read the English catalogue; Spanish is the default
+// for operators and has its own tests at the end of this file.
+const renderApp = (initialEntries = ['/'], locale: Locale = 'en') => {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -19,9 +22,11 @@ const renderApp = (initialEntries = ['/']) => {
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={initialEntries}>
-        <ApiKeyProvider>
-          <App />
-        </ApiKeyProvider>
+        <LocaleProvider initialLocale={locale}>
+          <ApiKeyProvider>
+            <App />
+          </ApiKeyProvider>
+        </LocaleProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -430,5 +435,39 @@ describe('App shell', () => {
     expect(await screen.findByRole('heading', { name: /run #42/i })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /finding/i })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /report/i })).toBeInTheDocument();
+  });
+
+  it('renders in Spanish and switches language on demand', async () => {
+    installFetchMock();
+    const user = userEvent.setup();
+    renderApp(['/'], 'es');
+
+    expect(await screen.findByRole('heading', { name: /cifras clave/i })).toBeInTheDocument();
+    expect(document.documentElement.lang).toBe('es');
+    const nav = screen.getByRole('navigation', { name: /navegación principal/i });
+    expect(within(nav).getByRole('link', { name: /objetivos/i })).toBeInTheDocument();
+    // Persisted identifiers keep their value in the data and get a Spanish label.
+    const highPill = screen.getAllByText('alto')[0];
+    expect(highPill).toHaveAttribute('data-value', 'high');
+
+    const switcher = screen.getByRole('group', { name: /idioma/i });
+    expect(within(switcher).getByRole('button', { name: 'Español' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(within(switcher).getByRole('button', { name: 'English' }));
+
+    expect(await screen.findByRole('heading', { name: /key figures/i })).toBeInTheDocument();
+    expect(document.documentElement.lang).toBe('en');
+    expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('en');
+    expect(within(switcher).getByRole('button', { name: 'English' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('shows the key gate and its errors in Spanish', async () => {
+    installFetchMock({ requireKey: 'test-key' });
+    const user = userEvent.setup();
+    renderApp(['/'], 'es');
+
+    expect(await screen.findByRole('heading', { name: /se requiere la clave de api/i })).toBeInTheDocument();
+    await user.type(screen.getByLabelText(/^clave de api$/i), 'wrong-key');
+    await user.click(screen.getByRole('button', { name: /usar clave/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/la api rechazó esta clave/i);
   });
 });

@@ -48,12 +48,12 @@ export function parseApiDate(value: string): Date {
   return new Date(isDateTime && !HAS_OFFSET.test(trimmed) ? `${trimmed}Z` : trimmed);
 }
 
-export function formatDateTime(value: string | null | undefined): string {
+export function formatDateTime(value: string | null | undefined, locale?: string): string {
   if (!value) {
     return '—';
   }
   const date = parseApiDate(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString(locale);
 }
 
 export function formatDuration(startedAt: string, finishedAt: string | null): string {

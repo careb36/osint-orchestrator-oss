@@ -6,6 +6,7 @@ import { SearchField } from '../components/SearchField';
 import { SortableHeader } from '../components/SortableHeader';
 import { StatusPill } from '../components/StatusPill';
 import { useListControls } from '../hooks/useListControls';
+import { useLocale, type MessageKey } from '../i18n';
 import { api, downloadArtifact } from '../lib/api';
 import { formatDateTime, formatDuration, riskTone, runStatusTone } from '../lib/format';
 import { distinct, filterDelta, filterEvidence, sortEvidence, type EvidenceSortKey } from '../lib/listing';
@@ -41,6 +42,7 @@ function isHttpUrl(value: string) {
 
 export function RunWorkspacePage() {
   const { runId = '', targetId } = useParams();
+  const { t, tv, locale } = useLocale();
   const [artifact, setArtifact] = useState<ArtifactKind>(() => readStoredArtifact(runId));
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
@@ -77,7 +79,8 @@ export function RunWorkspacePage() {
     : [];
   const deltaRows = delta.data ? filterDelta(delta.data, { query: controls.get('dq'), type: controls.get('type') }) : [];
   const deltaFiltered = controls.isAnySet(DELTA_KEYS);
-  const title = run.data ? `Run #${run.data.id}` : 'Run detail';
+  const artifactName = (kind: ArtifactKind) => t(`artifact.${kind}` as MessageKey);
+  const title = run.data ? t('runDetail.title', { runId: run.data.id }) : t('runDetail.fallbackTitle');
   const backTo = targetId ? `/targets/${encodeURIComponent(targetId)}` : run.data ? `/targets/${encodeURIComponent(run.data.target_id)}` : '/runs';
 
   const handleDownload = async () => {
@@ -85,7 +88,7 @@ export function RunWorkspacePage() {
     try {
       await downloadArtifact(runId, artifact);
     } catch {
-      setDownloadError(`The ${artifact} could not be downloaded.`);
+      setDownloadError(t('runDetail.downloadFailed', { artifact: artifactName(artifact) }));
     }
   };
 
@@ -94,32 +97,36 @@ export function RunWorkspacePage() {
       title={title}
       subtitle={
         run.data
-          ? `${run.data.target_id} · started ${formatDateTime(run.data.started_at)} · ${formatDuration(run.data.started_at, run.data.finished_at)}`
-          : 'Loading run context…'
+          ? t('runDetail.subtitle', {
+              targetId: run.data.target_id,
+              started: formatDateTime(run.data.started_at, locale),
+              duration: formatDuration(run.data.started_at, run.data.finished_at),
+            })
+          : t('runDetail.loadingContext')
       }
-      actions={<Link to={backTo}>Back</Link>}
+      actions={<Link to={backTo}>{t('back')}</Link>}
     >
-      {run.isLoading ? <LoadingState message="Loading run…" /> : null}
-      {run.error ? <ErrorState description={`Run #${runId} could not be loaded.`} /> : null}
+      {run.isLoading ? <LoadingState message={t('runDetail.loading')} /> : null}
+      {run.error ? <ErrorState description={t('runDetail.down', { runId })} /> : null}
 
       {run.data ? (
         <div className="stats-grid">
           <div className="state-card">
-            <span className="label">Status</span>
+            <span className="label">{t('runDetail.status')}</span>
             <StatusPill label={run.data.status} tone={runStatusTone(run.data.status)} />
             {run.data.error ? <small className="error-text">{run.data.error}</small> : null}
           </div>
           <div className="state-card">
-            <span className="label">Collectors</span>
+            <span className="label">{t('runDetail.collectors')}</span>
             <strong>{run.data.collectors_run || '—'}</strong>
           </div>
           <div className="state-card">
-            <span className="label">New observables</span>
+            <span className="label">{t('runDetail.newObservables')}</span>
             <strong>{run.data.new_observables}</strong>
           </div>
           <div className="state-card">
-            <span className="label">Sealed</span>
-            <strong>{run.data.manifest_sha256 ? 'Yes' : 'No'}</strong>
+            <span className="label">{t('runDetail.sealed')}</span>
+            <strong>{run.data.manifest_sha256 ? t('yes') : t('no')}</strong>
             {run.data.manifest_sha256 ? <small className="mono">{run.data.manifest_sha256.slice(0, 16)}…</small> : null}
           </div>
         </div>
@@ -127,7 +134,7 @@ export function RunWorkspacePage() {
 
       <div className="workspace-shell">
         <div className="artifact-toolbar">
-          <div className="artifact-tabs" role="tablist" aria-label="Run artefacts">
+          <div className="artifact-tabs" role="tablist" aria-label={t('runDetail.artefacts')}>
             {ARTIFACTS.map((kind) => (
             <button
               key={kind}
@@ -139,13 +146,13 @@ export function RunWorkspacePage() {
               className={artifact === kind ? 'active' : ''}
               onClick={() => setArtifact(kind)}
             >
-              {kind}
+              {artifactName(kind)}
             </button>
             ))}
           </div>
           {/* Outside the tablist: every child of a tablist must be a tab. */}
           <button type="button" className="ghost-button" onClick={handleDownload} disabled={!run.data}>
-            Download {artifact}
+            {t('runDetail.download', { artifact: artifactName(artifact) })}
           </button>
         </div>
         {downloadError ? (
@@ -155,22 +162,22 @@ export function RunWorkspacePage() {
         ) : null}
 
         <div id={`panel-${artifact}`} className="artifact-panel" role="tabpanel" aria-labelledby={`tab-${artifact}`}>
-          {active.isLoading ? <LoadingState message={`Loading ${artifact}…`} /> : null}
-          {active.error ? <ErrorState title={`No ${artifact} for this run`} description="The artefact is not available (the run may have failed before producing it)." /> : null}
+          {active.isLoading ? <LoadingState message={t('runDetail.loadingArtifact', { artifact: artifactName(artifact) })} /> : null}
+          {active.error ? <ErrorState title={t('runDetail.noArtifact.title', { artifact: artifactName(artifact) })} description={t('runDetail.noArtifact.body')} /> : null}
 
           {artifact === 'finding' && finding.data ? (
             <div className="finding">
               <p>
-                <span className="label">Risk level </span>
+                <span className="label">{t('runDetail.riskLevel')} </span>
                 <StatusPill label={finding.data.risk_level} tone={riskTone(finding.data.risk_level)} />
               </p>
-              <h3>Summary</h3>
+              <h3>{t('runDetail.summary')}</h3>
               <p>{finding.data.summary}</p>
-              <h3>Justification</h3>
+              <h3>{t('runDetail.justification')}</h3>
               <p>{finding.data.risk_justification}</p>
               {finding.data.new_since_last_run.length > 0 ? (
                 <>
-                  <h3>New since the previous run</h3>
+                  <h3>{t('runDetail.newSince')}</h3>
                   <ul>
                     {finding.data.new_since_last_run.map((item) => (
                       <li key={item}>{item}</li>
@@ -180,7 +187,7 @@ export function RunWorkspacePage() {
               ) : null}
               {finding.data.suggested_pivots.length > 0 ? (
                 <>
-                  <h3>Suggested pivots</h3>
+                  <h3>{t('runDetail.pivots')}</h3>
                   <ul>
                     {finding.data.suggested_pivots.map((item) => (
                       <li key={item}>{item}</li>
@@ -196,26 +203,26 @@ export function RunWorkspacePage() {
 
           {artifact === 'evidence' && evidence.data ? (
             evidence.data.length === 0 ? (
-              <p className="muted">No qualified evidence for this run.</p>
+              <p className="muted">{t('runDetail.noEvidence')}</p>
             ) : (
               <>
-                <div className="filters" role="search" aria-label="Filter evidence">
-                  <SearchField label="Search" value={controls.get('q')} onChange={(value) => controls.set('q', value)} placeholder="title, URL, rationale" />
+                <div className="filters" role="search" aria-label={t('runDetail.evidenceFilters')}>
+                  <SearchField label={t('search')} value={controls.get('q')} onChange={(value) => controls.set('q', value)} placeholder={t('runDetail.evidencePlaceholder')} />
                   <label>
-                    <span className="label">Relevance</span>
+                    <span className="label">{t('col.relevance')}</span>
                     <select value={controls.get('relevance')} onChange={(event) => controls.set('relevance', event.target.value)}>
-                      <option value="">Any relevance</option>
+                      <option value="">{t('runDetail.anyRelevance')}</option>
                       {RELEVANCES.map((level) => (
                         <option key={level} value={level}>
-                          {level}
+                          {tv(level)}
                         </option>
                       ))}
                     </select>
                   </label>
                   <label>
-                    <span className="label">Category</span>
+                    <span className="label">{t('col.category')}</span>
                     <select value={controls.get('category')} onChange={(event) => controls.set('category', event.target.value)}>
-                      <option value="">Any category</option>
+                      <option value="">{t('runDetail.anyCategory')}</option>
                       {categories.map((category) => (
                         <option key={category} value={category}>
                           {category}
@@ -224,23 +231,23 @@ export function RunWorkspacePage() {
                     </select>
                   </label>
                   <span className="count" role="status" aria-live="polite">
-                    {evidenceRows.length} of {evidence.data.length}
+                    {t('count.of', { visible: evidenceRows.length, total: evidence.data.length })}
                   </span>
                   {evidenceFiltered ? (
                     <button type="button" className="ghost-button" onClick={() => controls.clearKeys(EVIDENCE_KEYS)}>
-                      Clear filters
+                      {t('clearFilters')}
                     </button>
                   ) : null}
                 </div>
-                {evidenceRows.length === 0 ? <p className="muted">No evidence matches the current filters.</p> : null}
+                {evidenceRows.length === 0 ? <p className="muted">{t('runDetail.noEvidenceMatch')}</p> : null}
               <table className="data-table">
                 <thead>
                   <tr>
-                    <SortableHeader label="Category" column="category" sort={controls.sort} onSort={controls.toggleSort} />
-                    <SortableHeader label="Relevance" column="relevance" sort={controls.sort} onSort={controls.toggleSort} naturalDir="desc" />
-                    <SortableHeader label="Confidence" column="confidence" sort={controls.sort} onSort={controls.toggleSort} naturalDir="desc" />
-                    <SortableHeader label="Source" column="title" sort={controls.sort} onSort={controls.toggleSort} />
-                    <th scope="col">Rationale</th>
+                    <SortableHeader label={t('col.category')} column="category" sort={controls.sort} onSort={controls.toggleSort} />
+                    <SortableHeader label={t('col.relevance')} column="relevance" sort={controls.sort} onSort={controls.toggleSort} naturalDir="desc" />
+                    <SortableHeader label={t('col.confidence')} column="confidence" sort={controls.sort} onSort={controls.toggleSort} naturalDir="desc" />
+                    <SortableHeader label={t('col.source')} column="title" sort={controls.sort} onSort={controls.toggleSort} />
+                    <th scope="col">{t('col.rationale')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -271,15 +278,15 @@ export function RunWorkspacePage() {
 
           {artifact === 'delta' && delta.data ? (
             delta.data.length === 0 ? (
-              <p className="muted">No net-new observables in this run.</p>
+              <p className="muted">{t('runDetail.noDelta')}</p>
             ) : (
               <>
-                <div className="filters" role="search" aria-label="Filter observables">
-                  <SearchField label="Search" value={controls.get('dq')} onChange={(value) => controls.set('dq', value)} placeholder="value" />
+                <div className="filters" role="search" aria-label={t('runDetail.deltaFilters')}>
+                  <SearchField label={t('search')} value={controls.get('dq')} onChange={(value) => controls.set('dq', value)} placeholder={t('runDetail.deltaPlaceholder')} />
                   <label>
-                    <span className="label">Type</span>
+                    <span className="label">{t('col.type')}</span>
                     <select value={controls.get('type')} onChange={(event) => controls.set('type', event.target.value)}>
-                      <option value="">Any type</option>
+                      <option value="">{t('runDetail.anyType')}</option>
                       {types.map((type) => (
                         <option key={type} value={type}>
                           {type}
@@ -288,20 +295,20 @@ export function RunWorkspacePage() {
                     </select>
                   </label>
                   <span className="count" role="status" aria-live="polite">
-                    {deltaRows.length} of {delta.data.length}
+                    {t('count.of', { visible: deltaRows.length, total: delta.data.length })}
                   </span>
                   {deltaFiltered ? (
                     <button type="button" className="ghost-button" onClick={() => controls.clearKeys(DELTA_KEYS)}>
-                      Clear filters
+                      {t('clearFilters')}
                     </button>
                   ) : null}
                 </div>
-                {deltaRows.length === 0 ? <p className="muted">No observables match the current filters.</p> : null}
+                {deltaRows.length === 0 ? <p className="muted">{t('runDetail.noDeltaMatch')}</p> : null}
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th scope="col">Type</th>
-                    <th scope="col">Value</th>
+                    <th scope="col">{t('col.type')}</th>
+                    <th scope="col">{t('col.value')}</th>
                   </tr>
                 </thead>
                 <tbody>

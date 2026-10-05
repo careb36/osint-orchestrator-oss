@@ -19,10 +19,10 @@ export type AccessMode = 'checking' | 'open' | 'locked' | 'ready' | 'unavailable
 type ApiKeyContextValue = {
   mode: AccessMode;
   hasKey: boolean;
-  /** Why the API is `unavailable`, for the error state. */
+  /** HTTP status (or 'network') behind `unavailable`, for the error state. */
   unavailableReason: string | null;
   /** Validate the key against the API and store it on success. */
-  submitKey: (key: string, remember: boolean) => Promise<{ ok: boolean; message?: string }>;
+  submitKey: (key: string, remember: boolean) => Promise<SubmitResult>;
   forgetKey: () => void;
   /** Probe the API again (after `unavailable`). */
   retry: () => void;
@@ -31,6 +31,13 @@ type ApiKeyContextValue = {
 const ApiKeyContext = createContext<ApiKeyContextValue | undefined>(undefined);
 
 type ProbeResult = { mode: 'ready' | 'open' | 'locked' } | { mode: 'unavailable'; reason: string };
+
+/** Outcome of submitKey; `reason` is a catalogue-neutral code the gate translates. */
+export type SubmitResult =
+  | { ok: true }
+  | { ok: false; reason: 'empty' }
+  | { ok: false; reason: 'rejected' }
+  | { ok: false; reason: 'unavailable'; status: string };
 
 /** Only a 2xx proves the key (or its absence) is accepted; only a 401 proves it is not. */
 async function probe(key: string | null): Promise<ProbeResult> {
@@ -41,8 +48,8 @@ async function probe(key: string | null): Promise<ProbeResult> {
     if (error instanceof ApiError && error.status === 401) {
       return { mode: 'locked' };
     }
-    const status = error instanceof ApiError && error.status ? ` (status ${error.status})` : '';
-    return { mode: 'unavailable', reason: `The orchestrator API could not be reached${status}.` };
+    const status = error instanceof ApiError && error.status ? String(error.status) : 'network';
+    return { mode: 'unavailable', reason: status };
   }
 }
 
@@ -81,17 +88,17 @@ export function ApiKeyProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
   }, []);
 
-  const submitKey = useCallback(async (key: string, remember: boolean) => {
+  const submitKey = useCallback(async (key: string, remember: boolean): Promise<SubmitResult> => {
     const candidate = key.trim();
     if (!candidate) {
-      return { ok: false, message: 'Enter the API key.' };
+      return { ok: false, reason: 'empty' };
     }
     const result = await probe(candidate);
     if (result.mode === 'locked') {
-      return { ok: false, message: 'The API rejected this key.' };
+      return { ok: false, reason: 'rejected' };
     }
     if (result.mode === 'unavailable') {
-      return { ok: false, message: `Could not validate the key. ${result.reason}` };
+      return { ok: false, reason: 'unavailable', status: result.reason };
     }
     storeApiKey(candidate, remember);
     setHasKey(true);

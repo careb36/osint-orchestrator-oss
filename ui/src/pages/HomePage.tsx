@@ -5,6 +5,7 @@ import { EmptyState, ErrorState, LoadingState, PageLayout } from '../components/
 import { RunNotice } from '../components/RunNotice';
 import { StatusPill } from '../components/StatusPill';
 import { useStartRun } from '../hooks/useStartRun';
+import { useLocale } from '../i18n';
 import { api, ApiError } from '../lib/api';
 import { formatDateTime, formatDuration, riskTone, runStatusTone } from '../lib/format';
 import { buildTargetRows, computeKpis, formatMinutes, formatPercent, isActiveStatus } from '../lib/overview';
@@ -25,6 +26,7 @@ function hasActive(runs: RunSummary[] | undefined): boolean {
 }
 
 export function HomePage() {
+  const { t, locale } = useLocale();
   const health = useQuery({ queryKey: ['health'], queryFn: api.getHealth });
   const targets = useQuery({ queryKey: ['targets'], queryFn: () => api.getTargets() });
   // While a run is pending or running the list refreshes itself.
@@ -55,6 +57,7 @@ export function HomePage() {
     // activeKey is the stable serialisation of activeIds.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeKey, queryClient]);
+
   const recentTerminal = runList.filter((run) => !isActiveStatus(run.status)).slice(0, RECENT_FINDINGS);
   // One bounded request per recent run; a 404 means the run has no finding.
   const findings = useQueries({
@@ -69,16 +72,16 @@ export function HomePage() {
 
   if (health.isLoading || targets.isLoading || runs.isLoading) {
     return (
-      <PageLayout title="Overview" subtitle="Checking the current operating state.">
-        <LoadingState message="Loading service health, targets and runs…" />
+      <PageLayout title={t('overview.title')} subtitle={t('overview.loadingSubtitle')}>
+        <LoadingState message={t('overview.loading')} />
       </PageLayout>
     );
   }
 
   if (health.error && targets.error) {
     return (
-      <PageLayout title="Overview" subtitle="The orchestrator API could not be reached.">
-        <ErrorState description="Neither the health check nor the target inventory answered. Verify the API is running and reachable from this browser." />
+      <PageLayout title={t('overview.title')} subtitle={t('overview.downSubtitle')}>
+        <ErrorState description={t('overview.down')} />
       </PageLayout>
     );
   }
@@ -98,56 +101,54 @@ export function HomePage() {
   const findingsFailed = findings.filter((query) => query.error && !(query.error instanceof ApiError && query.error.status === 404));
 
   return (
-    <PageLayout title="Overview" subtitle="What needs attention: active runs, risk, failures and coverage at a glance.">
+    <PageLayout title={t('overview.title')} subtitle={t('overview.subtitle')}>
       <RunNotice notice={notice} />
 
       <section aria-labelledby="kpi-title">
         <h2 id="kpi-title" className="section-title">
-          Key figures
+          {t('overview.kpis')}
         </h2>
-        <p className="helper-text">
-          Run-based figures come from the {kpis.runsLoaded} most recent runs the API returns (at most 100).
-        </p>
+        <p className="helper-text">{t('overview.window', { count: kpis.runsLoaded })}</p>
         <dl className="kpi-grid">
           <div className="kpi">
             <dt>
-              Active runs
-              <small>pending or running now</small>
+              {t('kpi.activeRuns')}
+              <small>{t('kpi.activeRuns.caption')}</small>
             </dt>
             <dd>{kpis.activeRuns}</dd>
           </div>
           <div className="kpi">
             <dt>
-              Runs in 24 h
-              <small>started in the last day, within the runs loaded</small>
+              {t('kpi.runs24h')}
+              <small>{t('kpi.runs24h.caption')}</small>
             </dt>
             <dd>{kpis.runsLast24h}</dd>
           </div>
           <div className={`kpi ${kpis.successRate !== null && kpis.successRate < 0.8 ? 'warning' : ''}`.trim()}>
             <dt>
-              Success rate
-              <small>of {kpis.terminalRuns} finished runs loaded</small>
+              {t('kpi.successRate')}
+              <small>{t('kpi.successRate.caption', { count: kpis.terminalRuns })}</small>
             </dt>
             <dd>{formatPercent(kpis.successRate)}</dd>
           </div>
           <div className="kpi">
             <dt>
-              Median run time
-              <small>task completion time, start to final status</small>
+              {t('kpi.medianRun')}
+              <small>{t('kpi.medianRun.caption')}</small>
             </dt>
             <dd>{formatMinutes(kpis.medianRunMinutes)}</dd>
           </div>
           <div className={`kpi ${kpis.targetsAtRisk ? 'error' : ''}`.trim()}>
             <dt>
-              Targets at risk
-              <small>latest finding high or critical</small>
+              {t('kpi.atRisk')}
+              <small>{t('kpi.atRisk.caption')}</small>
             </dt>
             <dd>{kpis.targetsAtRisk}</dd>
           </div>
           <div className={`kpi ${kpis.enabledTargets && kpis.coveredTargets < kpis.enabledTargets ? 'warning' : ''}`.trim()}>
             <dt>
-              Coverage, 7 days
-              <small>enabled targets with a run this week, within the runs loaded</small>
+              {t('kpi.coverage')}
+              <small>{t('kpi.coverage.caption')}</small>
             </dt>
             <dd>
               {kpis.coveredTargets}/{kpis.enabledTargets}
@@ -158,27 +159,22 @@ export function HomePage() {
 
       <section aria-labelledby="targets-title">
         <h2 id="targets-title" className="section-title">
-          Targets by attention
+          {t('overview.targets')}
         </h2>
-        {targets.error ? <ErrorState description="The target inventory is unavailable." /> : null}
-        {trends.error ? <p className="helper-text">Risk levels are unavailable right now; the table shows run status only.</p> : null}
-        {!targets.error && rows.length === 0 ? (
-          <EmptyState
-            title="No targets configured"
-            description="Add a target to targets.yaml and reload the scheduler; it appears here with its runs and risk."
-          />
-        ) : null}
+        {targets.error ? <ErrorState description={t('overview.inventoryDown')} /> : null}
+        {trends.error ? <p className="helper-text">{t('overview.trendsDown')}</p> : null}
+        {!targets.error && rows.length === 0 ? <EmptyState title={t('overview.noTargets.title')} description={t('overview.noTargets.body')} /> : null}
         {rows.length > 0 ? (
           <table className="data-table">
             <thead>
               <tr>
-                <th scope="col">Target</th>
-                <th scope="col">Last run</th>
-                <th scope="col">Status</th>
-                <th scope="col">Risk</th>
-                <th scope="col">Peak risk</th>
-                <th scope="col">New observables</th>
-                <th scope="col">Actions</th>
+                <th scope="col">{t('col.target')}</th>
+                <th scope="col">{t('col.lastRun')}</th>
+                <th scope="col">{t('col.status')}</th>
+                <th scope="col">{t('col.risk')}</th>
+                <th scope="col">{t('col.peakRisk')}</th>
+                <th scope="col">{t('col.newObservables')}</th>
+                <th scope="col">{t('col.actions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -191,11 +187,19 @@ export function HomePage() {
                     <br />
                     <small>
                       {target.id}
-                      {target.enabled ? '' : ' · disabled'}
+                      {target.enabled ? '' : t('disabledSuffix')}
                     </small>
                   </td>
-                  <td>{lastRun ? <Link to={`/runs/${lastRun.id}`}>#{lastRun.id} · {formatDateTime(lastRun.started_at)}</Link> : <span className="muted">never</span>}</td>
-                  <td>{lastRun ? <StatusPill label={lastRun.status} tone={runStatusTone(lastRun.status)} /> : <span className="muted">no runs</span>}</td>
+                  <td>
+                    {lastRun ? (
+                      <Link to={`/runs/${lastRun.id}`}>
+                        #{lastRun.id} · {formatDateTime(lastRun.started_at, locale)}
+                      </Link>
+                    ) : (
+                      <span className="muted">{t('never')}</span>
+                    )}
+                  </td>
+                  <td>{lastRun ? <StatusPill label={lastRun.status} tone={runStatusTone(lastRun.status)} /> : <span className="muted">{t('noRuns')}</span>}</td>
                   <td>
                     <StatusPill label={latestRisk} tone={riskTone(latestRisk)} />
                   </td>
@@ -204,14 +208,9 @@ export function HomePage() {
                   </td>
                   <td>{lastRun ? lastRun.new_observables : '—'}</td>
                   <td>
-                    <button
-                      type="button"
-                      className="ghost-button"
-                      disabled={isPending || active || !target.enabled}
-                      onClick={() => start(target.id)}
-                    >
-                      {active ? 'Running…' : 'Start run'}
-                      <span className="visually-hidden"> for {target.id}</span>
+                    <button type="button" className="ghost-button" disabled={isPending || active || !target.enabled} onClick={() => start(target.id)}>
+                      {active ? t('run.running') : t('run.start')}
+                      <span className="visually-hidden">{t('run.startFor', { targetId: target.id })}</span>
                     </button>
                   </td>
                 </tr>
@@ -223,24 +222,19 @@ export function HomePage() {
 
       <section aria-labelledby="active-title">
         <h2 id="active-title" className="section-title">
-          Active runs
+          {t('overview.active')}
         </h2>
-        {runs.error ? <ErrorState description="Run history is unavailable." /> : null}
-        {!runs.error && activeRuns.length === 0 ? (
-          <EmptyState
-            title="Nothing running"
-            description="No run is pending or in progress. Start one from the table above; this list refreshes itself while it runs."
-          />
-        ) : null}
+        {runs.error ? <ErrorState description={t('overview.runsDown')} /> : null}
+        {!runs.error && activeRuns.length === 0 ? <EmptyState title={t('overview.nothingRunning.title')} description={t('overview.nothingRunning.body')} /> : null}
         {activeRuns.length > 0 ? (
           <table className="data-table">
             <thead>
               <tr>
-                <th scope="col">Run</th>
-                <th scope="col">Target</th>
-                <th scope="col">Status</th>
-                <th scope="col">Started</th>
-                <th scope="col">Elapsed</th>
+                <th scope="col">{t('col.run')}</th>
+                <th scope="col">{t('col.target')}</th>
+                <th scope="col">{t('col.status')}</th>
+                <th scope="col">{t('col.started')}</th>
+                <th scope="col">{t('col.elapsed')}</th>
               </tr>
             </thead>
             <tbody>
@@ -255,7 +249,7 @@ export function HomePage() {
                   <td>
                     <StatusPill label={run.status} tone={runStatusTone(run.status)} />
                   </td>
-                  <td>{formatDateTime(run.started_at)}</td>
+                  <td>{formatDateTime(run.started_at, locale)}</td>
                   <td>{formatDuration(run.started_at, now.toISOString())}</td>
                 </tr>
               ))}
@@ -266,22 +260,19 @@ export function HomePage() {
 
       <section aria-labelledby="findings-title">
         <h2 id="findings-title" className="section-title">
-          Recent findings
+          {t('overview.findings')}
         </h2>
-        {findingsLoading ? <LoadingState message="Loading findings…" /> : null}
-        {findingsFailed.length > 0 ? <ErrorState description={`${findingsFailed.length} finding(s) could not be loaded.`} /> : null}
+        {findingsLoading ? <LoadingState message={t('overview.findingsLoading')} /> : null}
+        {findingsFailed.length > 0 ? <ErrorState description={t('overview.findingsFailed', { count: findingsFailed.length })} /> : null}
         {!runs.error && !findingsLoading && recentTerminal.length === 0 ? (
           <EmptyState
-            title="No runs yet"
-            description="Findings appear here once a run finishes with a model synthesis."
-            action={<Link to="/targets">Go to targets</Link>}
+            title={t('overview.noRuns.title')}
+            description={t('overview.noRuns.body')}
+            action={<Link to="/targets">{t('overview.goToTargets')}</Link>}
           />
         ) : null}
         {!findingsLoading && recentTerminal.length > 0 && recentFindings.length === 0 && findingsFailed.length === 0 ? (
-          <EmptyState
-            title="No findings for the latest runs"
-            description="The recent runs finished without a synthesis (no model configured, or the run failed before it). Open a run to see its evidence and delta."
-          />
+          <EmptyState title={t('overview.noFindings.title')} description={t('overview.noFindings.body')} />
         ) : null}
         {recentFindings.length > 0 ? (
           <ul className="finding-list">
@@ -289,17 +280,11 @@ export function HomePage() {
               <li key={run.id} className="state-card">
                 <div className="finding-head">
                   <StatusPill label={finding.risk_level} tone={riskTone(finding.risk_level)} />
-                  <Link to={`/runs/${run.id}`}>
-                    Run #{run.id} · {run.target_id}
-                  </Link>
-                  <small>{formatDateTime(finding.generated_at ?? run.finished_at ?? run.started_at)}</small>
+                  <Link to={`/runs/${run.id}`}>{t('overview.findingLink', { runId: run.id, targetId: run.target_id })}</Link>
+                  <small>{formatDateTime(finding.generated_at ?? run.finished_at ?? run.started_at, locale)}</small>
                 </div>
                 <p>{finding.summary}</p>
-                {finding.new_since_last_run.length > 0 ? (
-                  <small>
-                    {finding.new_since_last_run.length} new since last run
-                  </small>
-                ) : null}
+                {finding.new_since_last_run.length > 0 ? <small>{t('overview.newSince', { count: finding.new_since_last_run.length })}</small> : null}
               </li>
             ))}
           </ul>
@@ -308,15 +293,16 @@ export function HomePage() {
 
       <section aria-labelledby="health-title">
         <h2 id="health-title" className="section-title">
-          Service health{' '}
-          {health.data ? <StatusPill label={health.data.status} tone={healthTone(health.data.status)} /> : null}
+          {t('overview.health')} {health.data ? <StatusPill label={health.data.status} tone={healthTone(health.data.status)} /> : null}
         </h2>
-        {health.error ? <ErrorState description="The health endpoint did not answer." /> : null}
+        {health.error ? <ErrorState description={t('overview.healthDown')} /> : null}
         <div className="stats-grid">
           {checks.map(([name, check]) => (
             <article key={name} className={`state-card ${healthTone(check.status)}`.trim()} data-status={check.status}>
               <span className="label">{name}</span>
-              <strong>{check.status}</strong>
+              <strong>
+                <StatusPill label={check.status} tone={healthTone(check.status)} />
+              </strong>
               <small>{check.detail}</small>
             </article>
           ))}

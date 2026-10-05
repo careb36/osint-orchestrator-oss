@@ -5,6 +5,7 @@ import { RunNotice } from '../components/RunNotice';
 import { StatusPill } from '../components/StatusPill';
 import { useListControls } from '../hooks/useListControls';
 import { useStartRun } from '../hooks/useStartRun';
+import { useLocale } from '../i18n';
 import { api } from '../lib/api';
 import { formatDateTime, formatDuration, riskTone, runStatusTone } from '../lib/format';
 import { filterRuns, sortRuns, type RunSortKey } from '../lib/listing';
@@ -18,6 +19,7 @@ const ALLOWED = { status: ['', ...STATUSES] };
 
 export function TargetDetailPage() {
   const { targetId = '' } = useParams();
+  const { t, tv, locale } = useLocale();
   const target = useQuery({ queryKey: ['target', targetId], queryFn: () => api.getTarget(targetId), enabled: Boolean(targetId) });
   const runs = useQuery({ queryKey: ['runs', targetId], queryFn: () => api.getRuns(targetId), enabled: Boolean(targetId) });
   const trends = useQuery({ queryKey: ['risk-trends'], queryFn: api.getRiskTrends });
@@ -26,6 +28,7 @@ export function TargetDetailPage() {
 
   const title = target.data?.fqdn ?? targetId;
   const trend = trends.data?.find((row) => row.target_id === targetId);
+  const latestRisk = trend?.latest_risk_level ?? 'unknown';
   const now = new Date();
   const active = (runs.data ?? []).some((run) => isActiveStatus(run.status));
   const visibleRuns = runs.data
@@ -35,46 +38,50 @@ export function TargetDetailPage() {
   return (
     <PageLayout
       title={title}
-      subtitle={target.data ? `${target.data.purpose} · authorisation: ${target.data.authorization}` : 'Target workspace'}
+      subtitle={target.data ? t('target.subtitle', { purpose: target.data.purpose, authorization: target.data.authorization }) : t('target.workspace')}
       actions={
         <>
-          <Link to="/targets">Back to targets</Link>
+          <Link to="/targets">{t('target.back')}</Link>
           {target.data ? (
             <button type="button" className="primary-action" disabled={isPending || active || !target.data.enabled} onClick={() => start(targetId)}>
-              {active ? 'Running…' : 'Start run'}
+              {active ? t('run.running') : t('run.start')}
             </button>
           ) : null}
         </>
       }
     >
       <RunNotice notice={notice} />
-      {target.isLoading ? <LoadingState message="Loading target…" /> : null}
-      {target.error ? <ErrorState description={`Target "${targetId}" could not be loaded.`} /> : null}
+      {target.isLoading ? <LoadingState message={t('target.loading')} /> : null}
+      {target.error ? <ErrorState description={t('target.down', { targetId })} /> : null}
 
       {target.data ? (
         <div className="stats-grid">
           <div className="state-card">
-            <span className="label">Enabled</span>
-            <strong>{target.data.enabled ? 'Yes' : 'No'}</strong>
+            <span className="label">{t('target.enabled')}</span>
+            <strong>{target.data.enabled ? t('yes') : t('no')}</strong>
           </div>
           <div className="state-card">
-            <span className="label">Schedule (UTC cron)</span>
+            <span className="label">{t('target.schedule')}</span>
             <strong>{String(target.data.schedule?.cron ?? '—')}</strong>
           </div>
           <div className="state-card">
-            <span className="label">LLM route</span>
+            <span className="label">{t('target.llm')}</span>
             <strong>{target.data.llm ?? 'local'}</strong>
           </div>
           <div className="state-card">
-            <span className="label">Risk</span>
+            <span className="label">{t('target.risk')}</span>
             <strong>
-              <StatusPill label={trend?.latest_risk_level ?? 'unknown'} tone={riskTone(trend?.latest_risk_level ?? 'unknown')} />
+              <StatusPill label={latestRisk} tone={riskTone(latestRisk)} />
             </strong>
             <small>
-              peak {trend?.peak_risk_level ?? 'unknown'} over {trend?.runs_considered ?? 0} {trend?.runs_considered === 1 ? 'run' : 'runs'}
+              {t('target.peak', {
+                peak: tv(trend?.peak_risk_level ?? 'unknown'),
+                count: trend?.runs_considered ?? 0,
+                runs: trend?.runs_considered === 1 ? t('target.run') : t('target.runs'),
+              })}
             </small>
             {trend && trend.risk_history.length > 1 ? (
-              <div className="risk-history" aria-label="Risk history, oldest first">
+              <div className="risk-history" aria-label={t('target.riskHistory')}>
                 {trend.risk_history.map((level, index) => (
                   <StatusPill key={`${index}-${level}`} label={level} tone={riskTone(level)} />
                 ))}
@@ -84,43 +91,39 @@ export function TargetDetailPage() {
         </div>
       ) : null}
 
-      <h2 className="section-title">Runs</h2>
-      {runs.isLoading ? <LoadingState message="Loading runs…" /> : null}
-      {runs.error ? <ErrorState description="Unable to load this target's runs." /> : null}
-      {runs.data && runs.data.length === 0 ? (
-        <EmptyState title="No runs yet" description="This target has not been collected yet. Use Start run above to collect it now." />
-      ) : null}
+      <h2 className="section-title">{t('target.runsTitle')}</h2>
+      {runs.isLoading ? <LoadingState message={t('target.runsLoading')} /> : null}
+      {runs.error ? <ErrorState description={t('target.runsDown')} /> : null}
+      {runs.data && runs.data.length === 0 ? <EmptyState title={t('target.noRuns.title')} description={t('target.noRuns.body')} /> : null}
       {runs.data && runs.data.length > 0 ? (
-        <div className="filters" role="search" aria-label="Filter runs">
+        <div className="filters" role="search" aria-label={t('runs.filters')}>
           <label>
-            <span className="label">Status</span>
+            <span className="label">{t('col.status')}</span>
             <select value={controls.get('status')} onChange={(event) => controls.set('status', event.target.value)}>
-              <option value="">All statuses</option>
+              <option value="">{t('runs.allStatuses')}</option>
               {STATUSES.map((status) => (
                 <option key={status} value={status}>
-                  {status}
+                  {tv(status)}
                 </option>
               ))}
             </select>
           </label>
           <span className="count" role="status" aria-live="polite">
-            {visibleRuns.length} of {runs.data.length}
+            {t('count.of', { visible: visibleRuns.length, total: runs.data.length })}
           </span>
         </div>
       ) : null}
-      {runs.data && runs.data.length > 0 && visibleRuns.length === 0 ? (
-        <EmptyState title="No runs match" description="Clear the status filter to see every run of this target." />
-      ) : null}
+      {runs.data && runs.data.length > 0 && visibleRuns.length === 0 ? <EmptyState title={t('target.noMatch.title')} description={t('target.noMatch.body')} /> : null}
       {visibleRuns.length > 0 ? (
         <table className="data-table">
           <thead>
             <tr>
-              <th scope="col">Run</th>
-              <th scope="col">Status</th>
-              <th scope="col">Collectors</th>
-              <th scope="col">New observables</th>
-              <th scope="col">Started</th>
-              <th scope="col">Duration</th>
+              <th scope="col">{t('col.run')}</th>
+              <th scope="col">{t('col.status')}</th>
+              <th scope="col">{t('col.collectors')}</th>
+              <th scope="col">{t('col.newObservables')}</th>
+              <th scope="col">{t('col.started')}</th>
+              <th scope="col">{t('col.duration')}</th>
             </tr>
           </thead>
           <tbody>
@@ -134,7 +137,7 @@ export function TargetDetailPage() {
                 </td>
                 <td>{run.collectors_run || '—'}</td>
                 <td>{run.new_observables}</td>
-                <td>{formatDateTime(run.started_at)}</td>
+                <td>{formatDateTime(run.started_at, locale)}</td>
                 <td>{formatDuration(run.started_at, run.finished_at)}</td>
               </tr>
             ))}

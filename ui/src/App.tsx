@@ -4,6 +4,7 @@ import { useApiKey } from './auth';
 import { ApiKeyGate } from './components/ApiKeyGate';
 import { AppErrorBoundary } from './components/ErrorBoundary';
 import { ErrorState, LoadingState } from './components/PageState';
+import { locales, useLocale, type MessageKey } from './i18n';
 import { trackUiTelemetry } from './lib/telemetry';
 import { HomePage } from './pages/HomePage';
 import { NotFoundPage } from './pages/NotFoundPage';
@@ -15,11 +16,12 @@ import { APP_ROUTES } from './routes';
 
 function AppShell() {
   const { mode, hasKey, unavailableReason, forgetKey, retry } = useApiKey();
+  const { locale, setLocale, t } = useLocale();
 
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main-content">
-        Skip to content
+        {t('skipToContent')}
       </a>
       <header className="topbar">
         <div className="brand-block">
@@ -27,38 +29,51 @@ function AppShell() {
             OS
           </span>
           <div>
-            <p className="brand-title">OSINT Orchestrator</p>
-            <p className="brand-subtitle">Operator dashboard</p>
+            <p className="brand-title">{t('appTitle')}</p>
+            <p className="brand-subtitle">{t('appSubtitle')}</p>
           </div>
         </div>
 
-        <nav className="nav" aria-label="Main navigation">
+        <nav className="nav" aria-label={t('mainNavigation')}>
           {APP_ROUTES.filter((route) => route.showInNav).map((route) => (
             <NavLink key={route.path} to={route.path} end={route.path === '/'}>
-              {route.label}
+              {t(route.labelKey as MessageKey)}
             </NavLink>
           ))}
         </nav>
 
-        {hasKey ? (
-          <div className="toolbar">
-            <button className="ghost-button" type="button" onClick={forgetKey}>
-              Forget key
-            </button>
+        <div className="toolbar">
+          <div className="lang-switch" role="group" aria-label={t('languageSwitcher')}>
+            {locales.map((candidate) => (
+              <button
+                key={candidate}
+                type="button"
+                lang={candidate}
+                aria-pressed={locale === candidate}
+                onClick={() => setLocale(candidate)}
+              >
+                {t(`locale.${candidate}` as MessageKey)}
+              </button>
+            ))}
           </div>
-        ) : null}
+          {hasKey ? (
+            <button className="ghost-button" type="button" onClick={forgetKey}>
+              {t('forgetKey')}
+            </button>
+          ) : null}
+        </div>
       </header>
 
       <main id="main-content" className="content">
-        {mode === 'checking' ? <LoadingState message="Checking API access…" /> : null}
+        {mode === 'checking' ? <LoadingState message={t('checkingAccess')} /> : null}
         {mode === 'locked' ? <ApiKeyGate /> : null}
         {mode === 'unavailable' ? (
           <ErrorState
-            title="API unavailable"
-            description={unavailableReason ?? 'The orchestrator API could not be reached.'}
+            title={t('unavailable.title')}
+            description={unavailableReason ? t('unavailable.bodyWithStatus', { status: unavailableReason }) : t('unavailable.body')}
             action={
               <button type="button" className="primary-action" onClick={retry}>
-                Retry
+                {t('retry')}
               </button>
             }
           />

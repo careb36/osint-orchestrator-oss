@@ -35,7 +35,7 @@ export function trackUiTelemetry(event: string, detail: Record<string, unknown> 
     timestamp: new Date().toISOString(),
     event,
     detail: sanitizedDetail,
-    language: 'en',
+    language: typeof document !== 'undefined' && document.documentElement.lang ? document.documentElement.lang : 'en',
     path: window.location.pathname,
   };
 

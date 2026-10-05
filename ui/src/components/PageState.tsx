@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { useLocale } from '../i18n';
 
 type PageLayoutProps = {
   title: string;
@@ -8,11 +9,12 @@ type PageLayoutProps = {
 };
 
 export function PageLayout({ title, subtitle, actions, children }: PageLayoutProps) {
+  const { t } = useLocale();
   return (
     <section className="page">
       <header className="page-header">
         <div>
-          <p className="eyebrow">Operations</p>
+          <p className="eyebrow">{t('eyebrow')}</p>
           <h1>{title}</h1>
           {subtitle ? <p className="lede">{subtitle}</p> : null}
         </div>
@@ -52,6 +54,7 @@ export function EmptyState({ title, description, action }: { title: string; desc
   return <StateCard title={title} description={description} tone="info" action={action} />;
 }
 
-export function ErrorState({ title = 'Unable to load this view', description, action }: { title?: string; description: string; action?: ReactNode }) {
-  return <StateCard title={title} description={description} tone="error" action={action} />;
+export function ErrorState({ title, description, action }: { title?: string; description: string; action?: ReactNode }) {
+  const { t } = useLocale();
+  return <StateCard title={title ?? t('state.unableToLoad')} description={description} tone="error" action={action} />;
 }
