@@ -46,7 +46,7 @@ The goal of this phase is to close the loop between investigation and human-read
 - [ ] Report and export path aligned to the signed-report workflow.
 - [ ] Historical run review with clear state and result transitions.
 - [ ] Handover actions documented and discoverable for operators.
-- [ ] Performance and accessibility pass on the main analyst journeys.
+- [ ] Performance and accessibility pass on the main analyst journeys. *Accessibility: axe-core smoke tests over every main view (`ui/src/a11y.test.tsx`); performance pass still open.*
 - [ ] KPI telemetry confirms the adoption, MTTR, and task completion targets are met or trending toward them.
 
 Definition of done for Phase 4: the UI supports the operational lifecycle from monitoring to investigation to handoff with measurement evidence that the workflow is materially improving analyst speed and clarity.
