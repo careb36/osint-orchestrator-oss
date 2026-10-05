@@ -77,7 +77,8 @@ Before any deployment beyond a laptop:
       not encrypted and not a secret store).
 - [ ] **Public demo** (`DEMO_MODE=true`): only the `/demo` routes are open;
       they serve allowlisted targets, rate-limited runs and views without the
-      model's synthesis, under the same CSP as the console. The service refuses
+      model's synthesis, under a nonce CSP (no inline script without the
+      per-response nonce). The service refuses
       to start with OpenCTI on, without the API/signing keys, or with a target
       that enables any collector other than Tavily. Per-item categories and
       rationales are still model output about a named entity: keep the

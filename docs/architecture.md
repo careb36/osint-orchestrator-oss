@@ -38,7 +38,7 @@ One run, in order (`orchestrator/pipeline.py`):
 
 | Module | Responsibility |
 | --- | --- |
-| `api.py`, `auth.py` | REST API, API-key authentication, operator console |
+| `api.py`, `auth.py` | REST API, API-key authentication, serving of the operator dashboard (`ui/`, React, built into the image) |
 | `scheduler.py` | Cron jobs built from `targets.yaml`, retry workers, retention |
 | `collectors/` | OpenOSINT (in-process), SpiderFoot (HTTP), Tavily (HTTP), Amass and SocialOSINT (opt-in sidecars) |
 | `normalizer/stix.py` | The only place STIX objects are built |

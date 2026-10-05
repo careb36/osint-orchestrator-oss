@@ -116,6 +116,12 @@ from [SECURITY.md](SECURITY.md).
 
 ### Removed
 
+- The server-rendered operator console (`orchestrator/templates/console.html`)
+  and its routes `/console/legacy` and `/console/i18n.json`: the React
+  dashboard covers every view it had (health, risk, runs, run detail with
+  evidence search, filters and sort, artefact download) in both languages.
+  Without a dashboard build `/console` now answers `503` with the build steps
+  instead of falling back; the Docker images always ship the build.
 - Dead `SPIDERFOOT_CORRELATION` key from `.env.example` (read by nothing).
 
 ### Fixed

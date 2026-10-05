@@ -31,8 +31,8 @@ npm run build
 The orchestrator serves the production build under `/console`
 (`orchestrator/api.py`): Vite builds with `base: '/console/'`, the router uses
 that prefix as its basename, and the Dockerfiles copy `ui/dist` to
-`orchestrator/static/ui-dist`. Without that directory the backend falls back to
-the server-rendered console; `/console/legacy` always serves it.
+`orchestrator/static/ui-dist`. Without that directory `/console` answers `503`
+with the build steps.
 
 The page is served with `script-src 'self'; style-src 'self'`: nothing inline,
 nothing from another origin. CI fails the build if `index.html` gains an inline
