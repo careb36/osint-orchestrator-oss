@@ -33,7 +33,6 @@ AUTH_EXEMPT_PATHS = {
     "/openapi.json",
     "/redoc",
     "/console",
-    "/console/i18n.json",
 }
 
 
