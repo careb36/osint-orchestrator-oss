@@ -19,7 +19,7 @@ The goal of this phase is to make the running system legible to an analyst witho
 
 - [x] Dashboard with target health, current runs, and recent findings.
 - [ ] Alert and issue overview with priority cues and triage affordances. *Deferred: the API exposes alert deliveries per run only (`GET /runs/{id}`), not an alert list or acknowledgement state, so there is nothing to triage from the UI yet.*
-- [ ] Search and filtering across targets and recent investigations.
+- [x] Search and filtering across targets and recent investigations.
 - [x] Status cues that distinguish queued, in progress, completed, and failed states.
 - [x] Empty-state guidance when no runs or findings are present.
 - [x] Core KPI cards and a review path that surfaces the baseline metrics described in the KPI document. *Task completion time is shown as the median run time; adoption and MTTR need telemetry the backend does not emit and are left out per the KPI guardrail.*
@@ -30,10 +30,10 @@ Definition of done for Phase 2: an analyst can open the dashboard and determine 
 
 The goal of this phase is to support evidence review and decision-making within the same product flow.
 
-- [ ] Target detail and run detail views with evidence timelines.
-- [ ] Risk summary and supporting facts aligned to the backend report model.
-- [ ] Evidence review controls that show provenance and confidence alongside the result.
-- [ ] Search, filters, and drill-down patterns that support deeper investigation.
+- [x] Target detail and run detail views with evidence timelines. *Run detail: finding, evidence, delta, report and manifest tabs; target detail: risk history and runs.*
+- [x] Risk summary and supporting facts aligned to the backend report model.
+- [x] Evidence review controls that show provenance and confidence alongside the result.
+- [x] Search, filters, and drill-down patterns that support deeper investigation.
 - [ ] Clear handoff from evidence review to report output or follow-up action.
 - [ ] No uncaught runtime errors during a typical analyst investigation path.
 
