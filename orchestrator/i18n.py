@@ -352,6 +352,58 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "es": "Hallazgo",
         "en": "Finding",
     },
+    "console_evidence": {
+        "es": "Evidencia",
+        "en": "Evidence",
+    },
+    "console_manifest": {
+        "es": "Manifiesto",
+        "en": "Manifest",
+    },
+    "console_download": {
+        "es": "Descargar",
+        "en": "Download",
+    },
+    "console_search": {
+        "es": "Buscar",
+        "en": "Search",
+    },
+    "console_all": {
+        "es": "Todo",
+        "en": "All",
+    },
+    "console_category": {
+        "es": "Categoría",
+        "en": "Category",
+    },
+    "console_sort": {
+        "es": "Orden",
+        "en": "Sort",
+    },
+    "console_url": {
+        "es": "URL",
+        "en": "URL",
+    },
+    "console_relevance": {
+        "es": "Relevancia",
+        "en": "Relevance",
+    },
+    "console_confidence": {
+        "es": "Confianza",
+        "en": "Confidence",
+    },
+    "console_rationale": {
+        "es": "Razonamiento",
+        "en": "Rationale",
+    },
+    "console_empty_artifact": {
+        "es": "No hay {artifact} disponible para esta ejecución.",
+        "en": "No {artifact} is available for this run.",
+    },
+    "console_artifact_missing": {
+        "es": "No se encontró {artifact} para esta ejecución. Comprueba que la ejecución haya terminado y que los artefactos estén presentes.",
+        "en": "{artifact} was not found for this run. Check that the run completed and the artifacts are present.",
+    },
     "console_errors": {
         "es": "Errores",
         "en": "Errors",
@@ -478,6 +530,19 @@ _CONSOLE_I18N_KEYS = (
     "console_open_detail",
     "console_report",
     "console_finding",
+    "console_evidence",
+    "console_manifest",
+    "console_download",
+    "console_search",
+    "console_all",
+    "console_category",
+    "console_sort",
+    "console_url",
+    "console_relevance",
+    "console_confidence",
+    "console_rationale",
+    "console_empty_artifact",
+    "console_artifact_missing",
     "console_errors",
     "console_delta_count",
     "console_run_table_caption",
