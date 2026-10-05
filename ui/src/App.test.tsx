@@ -179,6 +179,75 @@ describe('App shell', () => {
     await waitFor(() => expect(window.sessionStorage.getItem(API_KEY_STORAGE_KEY)).toBeNull());
   });
 
+  it('renders the overview with KPIs, targets by attention and recent findings', async () => {
+    installFetchMock();
+    renderApp();
+
+    const kpis = within((await screen.findByRole('heading', { name: /key figures/i })).closest('section') as HTMLElement);
+    // KPI cards computed from the mocked runs, targets and trends.
+    const figure = (term: RegExp) => kpis.getByText(term, { selector: 'dt' }).nextElementSibling;
+    expect(figure(/^active runs/i)).toHaveTextContent('0');
+    expect(figure(/^success rate/i)).toHaveTextContent('50%');
+    expect(figure(/^median run time/i)).toHaveTextContent('2.5 min');
+    expect(figure(/^targets at risk/i)).toHaveTextContent('1');
+
+    // example-corp has a high latest risk, so it leads the attention table.
+    const rows = within(screen.getAllByRole('table')[0]).getAllByRole('row').slice(1);
+    expect(rows[0]).toHaveTextContent('example.com');
+    expect(rows[0]).toHaveTextContent('high');
+    expect(rows[1]).toHaveTextContent('paused.example');
+
+    // The disabled target cannot be started from the overview.
+    expect(screen.getByRole('button', { name: /start run for paused-target/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /start run for example-corp/i })).toBeEnabled();
+
+    // The finding of run 42 is listed; run 43 has none (404) and is skipped.
+    expect(await screen.findByText(/outdated login portal/i)).toBeInTheDocument();
+    expect(screen.getByText(/2 new since last run/i)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /nothing running/i })).toBeInTheDocument();
+  });
+
+  it('starts a run from the overview and reports the accepted run', async () => {
+    const fetchMock = installFetchMock({
+      routes: [{ pattern: /^\/targets\/example-corp\/run$/, body: { run_id: 99, status: 'pending', target_id: 'example-corp' } }],
+    });
+    const user = userEvent.setup();
+    renderApp();
+
+    await screen.findByRole('heading', { name: /key figures/i });
+    await user.click(screen.getByRole('button', { name: /start run for example-corp/i }));
+
+    expect(await screen.findByRole('status')).toHaveTextContent(/run #99 accepted for example-corp/i);
+    const post = fetchMock.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'POST');
+    expect(String(post?.[0])).toMatch(/\/targets\/example-corp\/run$/);
+  });
+
+  it('shows empty states on the overview when nothing has run yet', async () => {
+    installFetchMock({
+      routes: [
+        { pattern: /^\/runs(\?.*)?$/, body: [] },
+        { pattern: /^\/analytics\/risk-trends$/, body: [] },
+      ],
+    });
+    renderApp();
+
+    const kpis = within((await screen.findByRole('heading', { name: /key figures/i })).closest('section') as HTMLElement);
+    expect(kpis.getByText(/^success rate/i, { selector: 'dt' }).nextElementSibling).toHaveTextContent('—');
+    expect(screen.getByRole('heading', { name: /nothing running/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /^no runs yet$/i })).toBeInTheDocument();
+    expect(screen.getAllByText(/never/i).length).toBeGreaterThan(0);
+  });
+
+  it('does not claim "no runs yet" when the run history failed to load', async () => {
+    installFetchMock({ routes: [{ pattern: /^\/runs(\?.*)?$/, status: 500, body: { detail: 'db locked' } }] });
+    renderApp();
+
+    await screen.findByRole('heading', { name: /key figures/i });
+    expect(screen.getAllByText(/run history is unavailable/i).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('heading', { name: /^no runs yet$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /nothing running/i })).not.toBeInTheDocument();
+  });
+
   it('shows the three top-level sections in the navigation', async () => {
     installFetchMock();
     renderApp();

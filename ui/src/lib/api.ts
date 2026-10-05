@@ -84,6 +84,8 @@ type RequestOptions = {
   apiKey?: string | null;
   /** Do not announce a 401 (used by the key gate's own probe). */
   quiet?: boolean;
+  /** A 404 is an expected answer (an artefact the run never produced): not an api_error. */
+  optional?: boolean;
 };
 
 export function authHeaders(apiKey?: string | null): Record<string, string> {
@@ -92,7 +94,7 @@ export function authHeaders(apiKey?: string | null): Record<string, string> {
 }
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', parse = 'json', body, apiKey, quiet = false } = options;
+  const { method = 'GET', parse = 'json', body, apiKey, quiet = false, optional = false } = options;
   const url = `${API_BASE_URL}${path}`;
   const headers: Record<string, string> = {
     Accept: parse === 'json' ? 'application/json' : 'text/plain, application/json',
@@ -122,7 +124,9 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
       if (response.status === 401 && !quiet) {
         window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
       }
-      trackUiTelemetry('api_error', { path, status: response.status, message: detail });
+      if (!(optional && response.status === 404)) {
+        trackUiTelemetry('api_error', { path, status: response.status, message: detail });
+      }
       throw new ApiError(detail, response.status);
     }
 
@@ -156,7 +160,8 @@ export const api = {
   getRun: (runId: string | number) => request<RunDetail>(`/runs/${runId}`),
   getRunDelta: (runId: string | number) => request<DeltaRow[]>(`/runs/${runId}/delta`),
   getRunReport: (runId: string | number) => request<string>(`/runs/${runId}/report`, { parse: 'text' }),
-  getRunFinding: (runId: string | number) => request<Finding>(`/runs/${runId}/finding`),
+  getRunFinding: (runId: string | number, options?: Pick<RequestOptions, 'optional'>) =>
+    request<Finding>(`/runs/${runId}/finding`, options),
   getRunEvidence: (runId: string | number) => request<EvidenceRow[]>(`/runs/${runId}/evidence`),
   getRunManifest: (runId: string | number) => request<Record<string, unknown>>(`/runs/${runId}/manifest`),
   getRiskTrends: () => request<RiskTrend[]>('/analytics/risk-trends'),

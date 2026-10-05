@@ -1,9 +1,10 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { EmptyState, ErrorState, LoadingState, PageLayout } from '../components/PageState';
+import { RunNotice } from '../components/RunNotice';
 import { StatusPill } from '../components/StatusPill';
-import { api, ApiError } from '../lib/api';
+import { useStartRun } from '../hooks/useStartRun';
+import { api } from '../lib/api';
 import { formatDateTime, runStatusTone } from '../lib/format';
 import type { RunSummary, TargetSummary } from '../types';
 
@@ -14,22 +15,9 @@ function enabledCollectors(target: TargetSummary): string[] {
 }
 
 export function TargetsPage() {
-  const queryClient = useQueryClient();
   const targets = useQuery({ queryKey: ['targets'], queryFn: () => api.getTargets() });
   const runs = useQuery({ queryKey: ['runs'], queryFn: () => api.getRuns() });
-  const [notice, setNotice] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
-
-  const trigger = useMutation({
-    mutationFn: (targetId: string) => api.triggerRun(targetId),
-    onSuccess: (accepted) => {
-      setNotice({ tone: 'ok', text: `Run #${accepted.run_id} accepted for ${accepted.target_id}.` });
-      void queryClient.invalidateQueries({ queryKey: ['runs'] });
-    },
-    onError: (error) => {
-      const message = error instanceof ApiError ? error.message : 'The run could not be started.';
-      setNotice({ tone: 'error', text: message });
-    },
-  });
+  const { start, isPending, notice } = useStartRun();
 
   if (targets.isLoading) {
     return (
@@ -64,11 +52,7 @@ export function TargetsPage() {
 
   return (
     <PageLayout title="Targets" subtitle="The target inventory for this operator workspace.">
-      {notice ? (
-        <p className={`state-card ${notice.tone === 'ok' ? 'ok' : 'error'}`} role={notice.tone === 'ok' ? 'status' : 'alert'}>
-          {notice.text}
-        </p>
-      ) : null}
+      <RunNotice notice={notice} />
       <table className="data-table">
         <thead>
           <tr>
@@ -101,8 +85,8 @@ export function TargetsPage() {
                   <button
                     type="button"
                     className="ghost-button"
-                    disabled={trigger.isPending || active}
-                    onClick={() => trigger.mutate(target.id)}
+                    disabled={isPending || active}
+                    onClick={() => start(target.id)}
                   >
                     {active ? 'Running…' : 'Start run'}
                     <span className="visually-hidden"> for {target.id}</span>

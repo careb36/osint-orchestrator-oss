@@ -491,3 +491,71 @@ a {
   justify-content: space-between;
   gap: 0.75rem;
 }
+
+/* Overview KPI cards: a definition list, one figure per card. Same dark
+   palette as .state-card; the figure inherits the page text colour. */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.9rem 1rem;
+  border-radius: 0.75rem;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.kpi dt {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #9bb0c9;
+}
+
+.kpi dt small {
+  display: block;
+  margin-top: 0.15rem;
+  text-transform: none;
+  letter-spacing: 0;
+  color: #94a3b8;
+}
+
+.kpi dd {
+  margin: 0;
+  font-size: 1.6rem;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #e5eef9;
+}
+
+/* .kpi.warning and .kpi.error take the shared .warning / .error borders. */
+
+.finding-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.finding-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.finding-head small {
+  margin-left: auto;
+  color: #94a3b8;
+}
+
+.finding-list p {
+  margin: 0.5rem 0 0.25rem;
+}

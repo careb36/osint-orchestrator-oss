@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import type { HealthStatus, RunDetail, RunSummary, TargetSummary } from '../types';
+import type { Finding, HealthStatus, RiskTrend, RunDetail, RunSummary, TargetSummary } from '../types';
 
 export const sampleHealth: HealthStatus = {
   status: 'ok',
@@ -65,6 +65,43 @@ export const sampleRuns: RunSummary[] = [
 
 export const sampleRunDetail: RunDetail = { ...sampleRuns[0], alerts: [] };
 
+export const sampleTrends: RiskTrend[] = [
+  {
+    target_id: 'example-corp',
+    runs_considered: 1,
+    latest_run_id: 42,
+    latest_status: 'success',
+    latest_risk_level: 'high',
+    peak_risk_level: 'high',
+    risk_history: ['high'],
+    new_observables_history: [3],
+  },
+  {
+    target_id: 'paused-target',
+    runs_considered: 1,
+    latest_run_id: 43,
+    latest_status: 'failed',
+    latest_risk_level: 'unknown',
+    peak_risk_level: 'unknown',
+    risk_history: ['unknown'],
+    new_observables_history: [0],
+  },
+];
+
+export const sampleFinding: Finding = {
+  run_id: sampleRuns[0].id,
+  target_id: sampleRuns[0].target_id,
+  summary: 'Two new subdomains expose an outdated login portal; one leaked credential pair was found in a paste.',
+  risk_level: 'high',
+  risk_justification: 'Exposed authentication surface plus leaked credentials.',
+  new_since_last_run: ['login.example.com', 'vpn.example.com'],
+  suggested_pivots: ['Check the paste source for further dumps.'],
+  provider: 'nebius',
+  model: 'test-model',
+  duration_ms: 1200,
+  generated_at: '2026-10-01T06:05:00',
+};
+
 type Route = {
   pattern: RegExp;
   status?: number;
@@ -86,10 +123,12 @@ export const defaultRoutes: Route[] = [
   },
   { pattern: /^\/runs(\?.*)?$/, body: sampleRuns },
   { pattern: /^\/runs\/\d+$/, body: sampleRunDetail },
+  // The finding fixture belongs to the first sample run; every other run has none.
+  { pattern: new RegExp(`^/runs/${sampleFinding.run_id}/finding$`), body: sampleFinding },
   { pattern: /^\/runs\/\d+\/finding$/, status: 404, body: { detail: 'No finding for this run' } },
   { pattern: /^\/runs\/\d+\/evidence$/, body: [] },
   { pattern: /^\/runs\/\d+\/delta$/, body: [] },
-  { pattern: /^\/analytics\/risk-trends$/, body: [] },
+  { pattern: /^\/analytics\/risk-trends$/, body: sampleTrends },
 ];
 
 function jsonResponse(status: number, body: unknown): Response {
