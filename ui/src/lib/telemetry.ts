@@ -37,7 +37,12 @@ export function trackUiTelemetry(event: string, detail: Record<string, unknown> 
     timestamp: new Date().toISOString(),
     event,
     detail: sanitizedDetail,
-    language: currentLocale() ?? 'unset',
+    // The resolved locale first; before the provider has committed (an error
+    // boundary firing on the very first render) fall back to the document
+    // language index.html declares, so a crash report still carries one.
+    language:
+      (currentLocale() ?? (typeof document !== 'undefined' ? document.documentElement.lang : '')) ||
+      'unset',
     path: window.location.pathname,
   };
 
