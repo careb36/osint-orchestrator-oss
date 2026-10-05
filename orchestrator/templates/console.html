@@ -362,6 +362,65 @@
         `;
       }
 
+      function wireEvidenceTableControls(container, items) {
+        const state = {
+          searchTerm: "",
+          categoryFilter: "",
+          relevanceFilter: "",
+          sortValue: "relevance-desc",
+        };
+
+        const render = (preserveSearchCursor = false) => {
+          let selectionStart = null;
+          let selectionEnd = null;
+          if (preserveSearchCursor) {
+            const currentSearch = container.querySelector("#evidence-search");
+            if (currentSearch) {
+              selectionStart = currentSearch.selectionStart;
+              selectionEnd = currentSearch.selectionEnd;
+            }
+          }
+          container.innerHTML = renderEvidenceTable(items, state);
+          if (preserveSearchCursor) {
+            const nextSearch = container.querySelector("#evidence-search");
+            if (nextSearch) {
+              nextSearch.focus();
+              if (selectionStart != null && selectionEnd != null) {
+                nextSearch.setSelectionRange(selectionStart, selectionEnd);
+              }
+            }
+          }
+          attachHandlers();
+        };
+
+        const attachHandlers = () => {
+          const searchInput = container.querySelector("#evidence-search");
+          const categorySelect = container.querySelector("#evidence-category-filter");
+          const relevanceSelect = container.querySelector("#evidence-relevance-filter");
+          const sortSelect = container.querySelector("#evidence-sort");
+          if (!searchInput || !categorySelect || !relevanceSelect || !sortSelect) return;
+
+          searchInput.addEventListener("input", (event) => {
+            state.searchTerm = event.currentTarget.value || "";
+            render(true);
+          });
+          categorySelect.addEventListener("change", (event) => {
+            state.categoryFilter = event.currentTarget.value || "";
+            render();
+          });
+          relevanceSelect.addEventListener("change", (event) => {
+            state.relevanceFilter = event.currentTarget.value || "";
+            render();
+          });
+          sortSelect.addEventListener("change", (event) => {
+            state.sortValue = event.currentTarget.value || "relevance-desc";
+            render();
+          });
+        };
+
+        render();
+      }
+
       function renderManifest(payload) {
         if (!payload || !Object.keys(payload).length) {
           return `<p class="muted">${esc(t("empty"))}</p>`;
@@ -405,8 +464,12 @@
                 <strong>${artifactTitle(artifactType)}</strong>
                 <button type="button" class="run-artifact-download" data-run-id="${esc(runId)}" data-artifact="${esc(artifactType)}">${t("download")}</button>
               </div>
-              ${renderEvidenceTable(payload)}
+              <div id="evidence-table-wrap"></div>
             `;
+            const evidenceWrap = container.querySelector("#evidence-table-wrap");
+            if (evidenceWrap) {
+              wireEvidenceTableControls(evidenceWrap, payload);
+            }
           } else if (artifactType === "manifest") {
             const payload = await response.json();
             container.innerHTML = `

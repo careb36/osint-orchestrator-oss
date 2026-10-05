@@ -133,10 +133,15 @@ def test_console_run_workspace_supports_evidence_search_filter_and_sort() -> Non
 
     src = Path("orchestrator/templates/console.html").read_text(encoding="utf-8")
     assert "renderEvidenceTable" in src
+    assert "wireEvidenceTableControls" in src
     assert "evidence-search" in src
     assert "evidence-category-filter" in src
     assert "evidence-relevance-filter" in src
     assert "evidence-sort" in src
+    assert 'searchInput.addEventListener("input"' in src
+    assert 'categorySelect.addEventListener("change"' in src
+    assert 'relevanceSelect.addEventListener("change"' in src
+    assert 'sortSelect.addEventListener("change"' in src
     assert "loadRunArtifactPanel" in src
 
 
