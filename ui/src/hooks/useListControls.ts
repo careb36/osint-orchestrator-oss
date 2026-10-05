@@ -63,12 +63,15 @@ export function useListControls<K extends string>({ defaults, defaultSort, sortK
   const raw = params.get('sort');
   const sort = useMemo<Sort<K>>(() => {
     const [rawKey, rawDir] = raw ? raw.split(':') : [];
-    const key = (sortKeys as readonly string[]).includes(rawKey ?? '') ? (rawKey as K) : defaultSort.key;
+    // A column the view does not render means the whole sort is unknown:
+    // fall back to the default order, not to the default column in the URL's
+    // direction (attention descending would put the least urgent first).
+    if (!(sortKeys as readonly string[]).includes(rawKey ?? '')) return defaultSort;
     return {
-      key,
+      key: rawKey as K,
       dir: rawDir === 'asc' || rawDir === 'desc' ? rawDir : defaultSort.dir,
     };
-  }, [raw, sortKeys, defaultSort.key, defaultSort.dir]);
+  }, [raw, sortKeys, defaultSort]);
 
   /** Clicking an active column flips the direction; a new column starts with its natural direction. */
   const toggleSort = useCallback(

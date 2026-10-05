@@ -305,6 +305,12 @@ describe('App shell', () => {
     expect(screen.getByRole('combobox', { name: /enabled/i })).toHaveValue('all');
     expect(screen.getByRole('combobox', { name: /last run/i })).toHaveValue('');
     expect(screen.queryByRole('button', { name: /clear filters/i })).not.toBeInTheDocument();
+    // The unknown sort column is dropped with its direction: default attention
+    // order (the high-risk target first), and no header claims a sort.
+    expect(rows[0]).toHaveTextContent('example.com');
+    for (const header of screen.getAllByRole('columnheader')) {
+      expect(header.getAttribute('aria-sort') ?? 'none').toBe('none');
+    }
   });
 
   it('treats an unknown time window on the runs view as no window', async () => {
