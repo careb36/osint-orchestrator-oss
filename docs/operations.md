@@ -88,9 +88,19 @@ Guards:
   (`DEMO_LLM_CALLS_PER_DAY`). When one is spent the call is not made, the run
   still finishes and its error field says why.
 - **Startup check.** With `DEMO_MODE=true` the service refuses to start unless
-  `OPENCTI_ENABLED=false`, the API key and the signing key are set, and every
-  allowlisted target enables the Tavily collector and nothing else. Nothing
+  `OPENCTI_ENABLED=false`, the API key and the signing key are set,
+  `TAVILY_API_KEY` is set, every allowlisted target enables the Tavily
+  collector and nothing else, and, for targets with `llm: nebius`,
+  `NEBIUS_API_KEY`, `LLM_MODEL_REASONING` and `LLM_MODEL_FAST` are set. Nothing
   runs on a schedule.
+- **Local demo.** `docker-compose.demo.yml` sets `DEMO_TRUSTED_PROXY_HOPS=0`
+  and raises `DEMO_MAX_RUNS_PER_IP_PER_DAY` to the global cap: behind Docker's
+  port mapping every browser on the machine shares one address. The counters
+  live in the `demo-data` volume; `docker compose -f docker-compose.demo.yml
+  down -v` resets them. `/health` reports the OpenCTI sink as `disabled`, not
+  `degraded`, because demo mode turns it off by design.
+- **Page language.** `/demo?lang=es|en` or the browser's `Accept-Language`;
+  the global `ORCHESTRATOR_LANGUAGE` is the fallback.
 
 Runs shown before any visitor starts one are loaded from `demo/seed/` (see its
 [README](../demo/seed/README.md)); deployment: [deploy.md](deploy.md).
@@ -106,8 +116,10 @@ scheduler): one replica, `Recreate` strategy, one `ReadWriteOnce` volume
 ## API
 
 Interactive reference: `/docs` (OpenAPI at `/openapi.json`). Public routes are
-`/`, `/health`, `/metrics`, `/docs`, `/console` and `/console/i18n.json`; every
-other route needs `X-API-Key: <key>` or `Authorization: Bearer <key>`.
+`/`, `/health`, `/metrics`, `/docs`, `/redoc`, `/openapi.json`, `/console`,
+`/console/i18n.json` and, with `DEMO_MODE=true`, the `/demo` routes listed
+under [Demo mode](#demo-mode); every other route needs `X-API-Key: <key>` or
+`Authorization: Bearer <key>`.
 
 | Method | Path | Description |
 | --- | --- | --- |
