@@ -13,10 +13,17 @@ This document captures the top-level route map for the UI2 super-app shell so co
 
 | Path | View | Navigation | Notes |
 | --- | --- | --- | --- |
-| `/` | Overview | Yes | Dashboard health and status snapshot. |
-| `/targets` | Targets | Yes | Inventory and current target state. |
-| `/runs` | Runs | Yes | Recent execution history. |
+| `/` | Overview | Yes | Key figures, targets by attention, active runs, recent findings, service health. |
+| `/targets` | Targets | Yes | Inventory with search, filters and sortable columns; Start run per row. |
+| `/targets/:targetId` | Target detail | No | Target settings, risk trend, Start run, filtered run history. |
+| `/targets/:targetId/runs/:runId` | Run detail | No | Same view as `/runs/:runId`, reached from a target. |
+| `/runs` | Runs | Yes | Recent execution history with search, filters and sortable columns. |
+| `/runs/:runId` | Run detail | No | Finding, evidence (searchable, sortable), delta, report and manifest tabs; artefact download. |
 | `*` | Not found | No | Fallback empty-state view within the shell. |
+
+Search, filter and sort state lives in the URL query string (`useListControls`):
+`?q=…`, one key per filter, and `sort=<column>:<asc|desc>`. A value equal to
+its default is dropped from the URL, so a plain route stays plain.
 
 ## Contributor rules
 

@@ -2,10 +2,22 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ErrorState, LoadingState, PageLayout } from '../components/PageState';
+import { SearchField } from '../components/SearchField';
+import { SortableHeader } from '../components/SortableHeader';
 import { StatusPill } from '../components/StatusPill';
+import { useListControls } from '../hooks/useListControls';
 import { api, downloadArtifact } from '../lib/api';
 import { formatDateTime, formatDuration, riskTone, runStatusTone } from '../lib/format';
+import { distinct, filterDelta, filterEvidence, sortEvidence, type EvidenceSortKey } from '../lib/listing';
 import type { ArtifactKind } from '../types';
+
+const RELEVANCES = ['high', 'medium', 'low'];
+// Evidence and observables keep separate keys: a term typed on one tab must
+// not filter the other, and each tab's Clear filters touches its own keys only.
+const EVIDENCE_KEYS = ['q', 'relevance', 'category'] as const;
+const DELTA_KEYS = ['dq', 'type'] as const;
+const DEFAULTS = { q: '', relevance: '', category: '', dq: '', type: '' };
+const SORT_KEYS: EvidenceSortKey[] = ['relevance', 'confidence', 'category', 'title'];
 
 const STORAGE_PREFIX = 'osint-run-workspace';
 const ARTIFACTS: ArtifactKind[] = ['finding', 'evidence', 'delta', 'report', 'manifest'];
@@ -48,6 +60,23 @@ export function RunWorkspacePage() {
   const manifest = useQuery({ queryKey: ['run', runId, 'manifest'], queryFn: () => api.getRunManifest(runId), enabled: artifact === 'manifest' });
 
   const active = { finding, evidence, delta, report, manifest }[artifact];
+  const categories = distinct(evidence.data ?? [], (row) => row.category);
+  const types = distinct(delta.data ?? [], (row) => row.stix_type);
+  const controls = useListControls<EvidenceSortKey>({
+    defaults: DEFAULTS,
+    defaultSort: { key: 'relevance', dir: 'desc' },
+    sortKeys: SORT_KEYS,
+    allowed: { relevance: ['', ...RELEVANCES], category: ['', ...categories], type: ['', ...types] },
+  });
+  const evidenceFiltered = controls.isAnySet(EVIDENCE_KEYS);
+  const evidenceRows = evidence.data
+    ? sortEvidence(
+        filterEvidence(evidence.data, { query: controls.get('q'), relevance: controls.get('relevance'), category: controls.get('category') }),
+        controls.sort,
+      )
+    : [];
+  const deltaRows = delta.data ? filterDelta(delta.data, { query: controls.get('dq'), type: controls.get('type') }) : [];
+  const deltaFiltered = controls.isAnySet(DELTA_KEYS);
   const title = run.data ? `Run #${run.data.id}` : 'Run detail';
   const backTo = targetId ? `/targets/${encodeURIComponent(targetId)}` : run.data ? `/targets/${encodeURIComponent(run.data.target_id)}` : '/runs';
 
@@ -169,18 +198,53 @@ export function RunWorkspacePage() {
             evidence.data.length === 0 ? (
               <p className="muted">No qualified evidence for this run.</p>
             ) : (
+              <>
+                <div className="filters" role="search" aria-label="Filter evidence">
+                  <SearchField label="Search" value={controls.get('q')} onChange={(value) => controls.set('q', value)} placeholder="title, URL, rationale" />
+                  <label>
+                    <span className="label">Relevance</span>
+                    <select value={controls.get('relevance')} onChange={(event) => controls.set('relevance', event.target.value)}>
+                      <option value="">Any relevance</option>
+                      {RELEVANCES.map((level) => (
+                        <option key={level} value={level}>
+                          {level}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span className="label">Category</span>
+                    <select value={controls.get('category')} onChange={(event) => controls.set('category', event.target.value)}>
+                      <option value="">Any category</option>
+                      {categories.map((category) => (
+                        <option key={category} value={category}>
+                          {category}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <span className="count" role="status" aria-live="polite">
+                    {evidenceRows.length} of {evidence.data.length}
+                  </span>
+                  {evidenceFiltered ? (
+                    <button type="button" className="ghost-button" onClick={() => controls.clearKeys(EVIDENCE_KEYS)}>
+                      Clear filters
+                    </button>
+                  ) : null}
+                </div>
+                {evidenceRows.length === 0 ? <p className="muted">No evidence matches the current filters.</p> : null}
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th scope="col">Category</th>
-                    <th scope="col">Relevance</th>
-                    <th scope="col">Confidence</th>
-                    <th scope="col">Source</th>
+                    <SortableHeader label="Category" column="category" sort={controls.sort} onSort={controls.toggleSort} />
+                    <SortableHeader label="Relevance" column="relevance" sort={controls.sort} onSort={controls.toggleSort} naturalDir="desc" />
+                    <SortableHeader label="Confidence" column="confidence" sort={controls.sort} onSort={controls.toggleSort} naturalDir="desc" />
+                    <SortableHeader label="Source" column="title" sort={controls.sort} onSort={controls.toggleSort} />
                     <th scope="col">Rationale</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {evidence.data.map((row) => (
+                  {evidenceRows.map((row) => (
                     <tr key={row.id ?? row.url}>
                       <td>{row.category}</td>
                       <td>
@@ -201,6 +265,7 @@ export function RunWorkspacePage() {
                   ))}
                 </tbody>
               </table>
+              </>
             )
           ) : null}
 
@@ -208,6 +273,30 @@ export function RunWorkspacePage() {
             delta.data.length === 0 ? (
               <p className="muted">No net-new observables in this run.</p>
             ) : (
+              <>
+                <div className="filters" role="search" aria-label="Filter observables">
+                  <SearchField label="Search" value={controls.get('dq')} onChange={(value) => controls.set('dq', value)} placeholder="value" />
+                  <label>
+                    <span className="label">Type</span>
+                    <select value={controls.get('type')} onChange={(event) => controls.set('type', event.target.value)}>
+                      <option value="">Any type</option>
+                      {types.map((type) => (
+                        <option key={type} value={type}>
+                          {type}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <span className="count" role="status" aria-live="polite">
+                    {deltaRows.length} of {delta.data.length}
+                  </span>
+                  {deltaFiltered ? (
+                    <button type="button" className="ghost-button" onClick={() => controls.clearKeys(DELTA_KEYS)}>
+                      Clear filters
+                    </button>
+                  ) : null}
+                </div>
+                {deltaRows.length === 0 ? <p className="muted">No observables match the current filters.</p> : null}
               <table className="data-table">
                 <thead>
                   <tr>
@@ -216,7 +305,7 @@ export function RunWorkspacePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {delta.data.map((row) => (
+                  {deltaRows.map((row) => (
                     <tr key={row.stix_id}>
                       <td>{row.stix_type}</td>
                       <td className="mono">{row.value}</td>
@@ -224,6 +313,7 @@ export function RunWorkspacePage() {
                   ))}
                 </tbody>
               </table>
+              </>
             )
           ) : null}
 

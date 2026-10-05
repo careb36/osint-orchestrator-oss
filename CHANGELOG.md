@@ -24,6 +24,14 @@ from [SECURITY.md](SECURITY.md).
   attention with latest and peak risk from `/analytics/risk-trends` and a
   Start-run action, active runs with elapsed time that refresh themselves,
   the findings of the latest runs, and empty states for each block.
+- Dashboard triage controls: search, filters and sortable columns on the
+  targets view (text, enabled flag, last-run status, risk), on the runs view
+  (text, target, status, started within 24 h or 7 days) and on a run's
+  evidence (text, relevance, category) and observables (text, type); the
+  state lives in the URL query string so a filtered view survives a reload
+  and can be shared. Target detail gains the risk trend and a Start-run
+  action; a running run shows a distinct in-progress cue and its elapsed
+  time.
 - Demo mode (`DEMO_MODE=true`, `Dockerfile.demo`, `docker-compose.demo.yml`):
   public `/demo` page and routes restricted to an allowlist
   (`demo/targets.demo.yaml`), per-visitor and global daily run limits, daily

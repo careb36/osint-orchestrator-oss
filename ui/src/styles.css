@@ -378,6 +378,12 @@ a {
   color: #cbd5e1;
 }
 
+/* In progress: distinct from queued (muted) and from the terminal tones. */
+.status-pill.info {
+  background: rgba(59, 130, 246, 0.22);
+  color: #bfdbfe;
+}
+
 .state-card[data-status='ok'] {
   border-left: 4px solid #16a34a;
 }
@@ -403,6 +409,7 @@ a {
 }
 
 .filters select,
+.filters input[type='search'],
 .key-form input[type='password'] {
   font: inherit;
   padding: 8px 10px;
@@ -558,4 +565,39 @@ a {
 
 .finding-list p {
   margin: 0.5rem 0 0.25rem;
+}
+
+/* Sortable table headers: the whole header is the button. */
+.sort-button {
+  all: unset;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+}
+
+.sort-button:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.sort-indicator {
+  color: #9bb0c9;
+}
+
+.filters .count {
+  align-self: center;
+  color: #94a3b8;
+}
+
+.filters .ghost-button {
+  align-self: center;
+}
+
+.risk-history {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
 }
