@@ -1,94 +1,79 @@
-import { type ReactNode, useEffect } from 'react';
-import { Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom';
-import { useAuth } from './auth';
+import { useEffect } from 'react';
+import { NavLink, Route, Routes } from 'react-router-dom';
+import { useApiKey } from './auth';
+import { ApiKeyGate } from './components/ApiKeyGate';
 import { AppErrorBoundary } from './components/ErrorBoundary';
+import { ErrorState, LoadingState } from './components/PageState';
 import { trackUiTelemetry } from './lib/telemetry';
 import { HomePage } from './pages/HomePage';
-import { LoginPage } from './pages/LoginPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { RunWorkspacePage } from './pages/RunWorkspacePage';
 import { RunsPage } from './pages/RunsPage';
 import { TargetDetailPage } from './pages/TargetDetailPage';
 import { TargetsPage } from './pages/TargetsPage';
-import { WorkspacePage } from './pages/WorkspacePage';
-import { QUICK_ACTIONS } from './routes';
-
-function ProtectedRoute({ children }: { children: ReactNode }) {
-  const { session, canAccess } = useAuth();
-  const location = useLocation();
-
-  if (!session) {
-    return <Navigate to="/login" replace state={location.pathname} />;
-  }
-
-  if (!canAccess(location.pathname)) {
-    return <Navigate to="/" replace />;
-  }
-
-  return <>{children}</>;
-}
+import { APP_ROUTES } from './routes';
 
 function AppShell() {
-  const { session, signOut } = useAuth();
-  const navItems = [
-    { to: '/', label: 'Overview', roles: ['viewer', 'operator', 'admin'] },
-    { to: '/targets', label: 'Targets', roles: ['operator', 'admin'] },
-    { to: '/runs', label: 'Runs', roles: ['operator', 'admin'] },
-    { to: '/workspace/latest', label: 'Workspace', roles: ['operator', 'admin'] },
-  ].filter(({ roles }) => session && roles.includes(session.role));
+  const { mode, hasKey, unavailableReason, forgetKey, retry } = useApiKey();
 
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#main-content">
+        Skip to content
+      </a>
       <header className="topbar">
         <div className="brand-block">
-          <span className="brand-mark">OS</span>
+          <span className="brand-mark" aria-hidden="true">
+            OS
+          </span>
           <div>
             <p className="brand-title">OSINT Orchestrator</p>
-            <p className="brand-subtitle">Control centre</p>
+            <p className="brand-subtitle">Operator dashboard</p>
           </div>
         </div>
 
-        {session ? (
-          <div className="toolbar">
-            <div className="session-chip" aria-live="polite">
-              <span>{session.displayName}</span>
-              <small>{session.role}</small>
-            </div>
-            <button className="ghost-button" type="button" onClick={signOut}>
-              Sign out
-            </button>
-          </div>
-        ) : null}
-
         <nav className="nav" aria-label="Main navigation">
-          {navItems.map((item) => (
-            <NavLink key={item.to} to={item.to} end={item.to === '/'}>
-              {item.label}
+          {APP_ROUTES.filter((route) => route.showInNav).map((route) => (
+            <NavLink key={route.path} to={route.path} end={route.path === '/'}>
+              {route.label}
             </NavLink>
           ))}
         </nav>
+
+        {hasKey ? (
+          <div className="toolbar">
+            <button className="ghost-button" type="button" onClick={forgetKey}>
+              Forget key
+            </button>
+          </div>
+        ) : null}
       </header>
 
-      <div className="shell-toolbar" aria-label="Quick actions">
-        {QUICK_ACTIONS.map((action) => (
-          <NavLink key={action.to} className="action-chip" to={action.to}>
-            {action.label}
-          </NavLink>
-        ))}
-      </div>
-
-      <main className="content">
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/" element={<ProtectedRoute><HomePage /></ProtectedRoute>} />
-          <Route path="/targets" element={<ProtectedRoute><TargetsPage /></ProtectedRoute>} />
-          <Route path="/targets/:targetId" element={<ProtectedRoute><TargetDetailPage /></ProtectedRoute>} />
-          <Route path="/targets/:targetId/runs/:runId" element={<ProtectedRoute><RunWorkspacePage /></ProtectedRoute>} />
-          <Route path="/runs" element={<ProtectedRoute><RunsPage /></ProtectedRoute>} />
-          <Route path="/runs/:runId" element={<ProtectedRoute><RunWorkspacePage /></ProtectedRoute>} />
-          <Route path="/workspace/:runId" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
-          <Route path="*" element={<ProtectedRoute><NotFoundPage /></ProtectedRoute>} />
-        </Routes>
+      <main id="main-content" className="content">
+        {mode === 'checking' ? <LoadingState message="Checking API access…" /> : null}
+        {mode === 'locked' ? <ApiKeyGate /> : null}
+        {mode === 'unavailable' ? (
+          <ErrorState
+            title="API unavailable"
+            description={unavailableReason ?? 'The orchestrator API could not be reached.'}
+            action={
+              <button type="button" className="primary-action" onClick={retry}>
+                Retry
+              </button>
+            }
+          />
+        ) : null}
+        {mode === 'open' || mode === 'ready' ? (
+          <Routes>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/targets" element={<TargetsPage />} />
+            <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+            <Route path="/targets/:targetId/runs/:runId" element={<RunWorkspacePage />} />
+            <Route path="/runs" element={<RunsPage />} />
+            <Route path="/runs/:runId" element={<RunWorkspacePage />} />
+            <Route path="*" element={<NotFoundPage />} />
+          </Routes>
+        ) : null}
       </main>
     </div>
   );

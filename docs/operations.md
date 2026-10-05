@@ -120,7 +120,8 @@ scheduler): one replica, `Recreate` strategy, one `ReadWriteOnce` volume
 ## API
 
 Interactive reference: `/docs` (OpenAPI at `/openapi.json`). Public routes are
-`/`, `/health`, `/metrics`, `/docs`, `/redoc`, `/openapi.json`, `/console`,
+`/`, `/health`, `/metrics`, `/docs`, `/redoc`, `/openapi.json`, `/console`
+(and its client routes and `/console/assets/*`), `/console/legacy`,
 `/console/i18n.json` and, with `DEMO_MODE=true`, the `/demo` routes listed
 under [Demo mode](#demo-mode); every other route needs `X-API-Key: <key>` or
 `Authorization: Bearer <key>`.
@@ -131,7 +132,10 @@ under [Demo mode](#demo-mode); every other route needs `X-API-Key: <key>` or
 | `GET` | `/health` | Liveness check (no API key) |
 | `GET` | `/metrics` | Prometheus metrics (no API key) |
 | `GET` | `/console/i18n.json` | Console translation catalogue (public; no target/run data) |
-| `GET` | `/console` | Operator console shell (public, no data; every call it makes needs the API key, entered on the page) |
+| `GET` | `/console` | Operator dashboard shell (public, no data; every call it makes needs the API key, entered on the page). Serves the React build from `orchestrator/static/ui-dist` when present, otherwise the server-rendered console |
+| `GET` | `/console/{route}` | Client-side routes of the dashboard (`/console/targets`, `/console/runs/{id}`): same shell, the router renders the view. `404` without a build |
+| `GET` | `/console/assets/{file}` | Hashed script and stylesheet of the dashboard build (immutable cache; no path traversal) |
+| `GET` | `/console/legacy` | The server-rendered console, kept until the dashboard covers every view |
 | `GET` | `/health` | Service health snapshot (`ok`, `degraded`, `offline`) used by the console health cards |
 | `GET` | `/analytics/risk-trends` | Per-target risk and new-observable trends for the console risk view |
 | `GET` | `/targets` | List configured targets |
@@ -307,16 +311,30 @@ changing a model: `alembic upgrade head`, then
 
 ### Console smoke checks
 
-The browser console is the UI's production entry point. Run the CI-safe smoke
-suite before every release:
+`/console` is the UI's production entry point. The Docker images build the React
+dashboard (`ui/`) in a Node stage and copy the output to
+`orchestrator/static/ui-dist`; a source checkout without that directory serves
+the server-rendered console at `/console` instead, and `/console/legacy` always
+does. To run the dashboard from a checkout:
+
+```bash
+cd ui && npm ci && npm run build && cd ..
+mkdir -p orchestrator/static && rm -rf orchestrator/static/ui-dist
+cp -r ui/dist orchestrator/static/ui-dist
+```
+
+Run the CI-safe smoke suites before every release:
 
 ```bash
 pytest tests/unit/test_operator_console.py -v
+cd ui && npm run lint && npm run test:run && npm run build
 ```
 
-The smoke path covers the core operator journey: load `/console`, verify the key
-prompt and CSP hardening, load `/console/i18n.json`, and confirm that protected
-API calls are still rejected without a key while the shell remains reachable.
+The Python suite covers the shell contract: `/console` is reachable without a
+key, protected API calls still answer `401`, the dashboard build is served with
+a `script-src 'self'` CSP and immutable assets, and `/console/legacy` keeps its
+nonce CSP. The UI suite covers the operator journey against a mocked API: key
+prompt on `401`, key validation and storage, navigation, run detail.
 
 ### Frontend telemetry and error tracking
 

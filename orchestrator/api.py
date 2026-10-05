@@ -33,7 +33,7 @@ from fastapi import (
     Request,
     Response,
 )
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func
 from sqlmodel import select
@@ -208,6 +208,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+
+# Production build of the React dashboard (ui/, `npm run build`). The Docker
+# images copy ui/dist here; a source checkout without the build falls back to
+# the server-rendered console.html so /console always answers.
+UI_DIST_DIR = Path(__file__).parent / "static" / "ui-dist"
 
 
 # ─── Request context middleware ──────────────────────────────────────────────
@@ -542,16 +547,30 @@ async def replay_opencti_outbox(
     return {"status": "replayed", **replayed, "processed_now": processed}
 
 
-@app.get("/console", response_class=HTMLResponse, include_in_schema=False)
-async def operator_console(request: Request) -> HTMLResponse:
-    """
-    Minimal read-only operator console backed by existing API endpoints.
+def _ui_dist_index() -> Path | None:
+    """The built dashboard's index.html, or None when no build is installed."""
+    index = UI_DIST_DIR / "index.html"
+    return index if index.is_file() else None
 
-    Mounted on ``app``, not ``router``: the shell carries no target or run
-    data — every fetch it makes (/runs, /targets, /analytics/...) goes through
-    the protected router with the key the operator types into it. Behind the
-    key, a browser could never reach the page that asks for the key.
-    """
+
+# The React dashboard is one bundled script and one stylesheet, both served
+# from this origin under /console/assets/. Nothing inline, nothing remote: a
+# string that reaches the DOM from a collector or a model cannot execute.
+_UI_CSP = (
+    "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
+    "img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'; "
+    "frame-ancestors 'none'"
+)
+_UI_SHELL_HEADERS = {
+    "Content-Security-Policy": _UI_CSP,
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "Cache-Control": "no-store",
+}
+
+
+def _legacy_console_response(request: Request) -> HTMLResponse:
+    """The server-rendered console.html with its per-response nonce CSP."""
     # The console renders API data — including run.error, which quotes
     # collector and OpenCTI exception text that can carry internet-derived
     # strings — into the same origin that holds the operator's API key. The
@@ -577,10 +596,125 @@ async def operator_console(request: Request) -> HTMLResponse:
     )
 
 
+def _ui_shell_response(request: Request) -> HTMLResponse:
+    """The React dashboard's index.html, or the legacy console without a build."""
+    index = _ui_dist_index()
+    if index is None:
+        return _legacy_console_response(request)
+    return HTMLResponse(index.read_text(encoding="utf-8"), headers=_UI_SHELL_HEADERS)
+
+
+@app.get("/console", response_class=HTMLResponse, include_in_schema=False)
+async def operator_console(request: Request) -> HTMLResponse:
+    """
+    Operator dashboard shell (React build when installed, console.html otherwise).
+
+    Mounted on ``app``, not ``router``: the shell carries no target or run
+    data — every fetch it makes (/runs, /targets, /analytics/...) goes through
+    the protected router with the key the operator types into it. Behind the
+    key, a browser could never reach the page that asks for the key.
+    """
+    return _ui_shell_response(request)
+
+
+@app.get("/console/legacy", response_class=HTMLResponse, include_in_schema=False)
+async def operator_console_legacy(request: Request) -> HTMLResponse:
+    """
+    The server-rendered console, kept while the React dashboard catches up.
+
+    Same public-shell / protected-data split as ``/console``.
+    """
+    return _legacy_console_response(request)
+
+
 @app.get("/console/i18n.json", include_in_schema=False)
 async def operator_console_i18n() -> JSONResponse:
     """Translations used by the operator console frontend."""
     return JSONResponse(console_i18n_catalogue())
+
+
+@app.get("/console/assets/{asset_path:path}", include_in_schema=False)
+async def operator_console_asset(asset_path: str) -> FileResponse:
+    """
+    A file of the dashboard build (hashed name, so it can be cached forever).
+
+    Only regular files inside the build's assets directory are served; a path
+    that escapes it (``..``, absolute, symlink out) is a 404, not a traversal.
+    """
+    assets_root = (UI_DIST_DIR / "assets").resolve()
+    candidate = (assets_root / asset_path).resolve()
+    if not candidate.is_relative_to(assets_root) or not candidate.is_file():
+        raise HTTPException(status_code=404, detail="Not Found")
+    return FileResponse(
+        candidate,
+        headers={
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+# First path segments the React router owns (ui/src/App.tsx): anything under
+# them is a view, whatever its spelling, because the segments that follow are
+# route parameters and target ids may contain dots (``example.com``,
+# ``notes.md`` are valid ids and valid ``/console/targets/{id}`` deep links).
+_CLIENT_ROUTE_PREFIXES = frozenset({"targets", "runs"})
+
+# File extensions a browser or a stale link asks for under /console outside
+# those prefixes; a last segment ending in one of these is a miss, not a view.
+_STATIC_FILE_SUFFIXES = frozenset(
+    {
+        ".js",
+        ".mjs",
+        ".css",
+        ".map",
+        ".json",
+        ".jso",
+        ".html",
+        ".htm",
+        ".ico",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".svg",
+        ".webp",
+        ".woff",
+        ".woff2",
+        ".ttf",
+        ".txt",
+        ".md",
+        ".xml",
+        ".webmanifest",
+    }
+)
+
+
+# Starlette matches routes in registration order: this catch-all must stay the
+# last ``/console/...`` route of the module, or it shadows whatever is added
+# after it (tests/unit/test_operator_console.py checks the fixed routes keep
+# their own content type).
+@app.get("/console/{client_path:path}", response_class=HTMLResponse, include_in_schema=False)
+async def operator_console_client_route(request: Request, client_path: str) -> HTMLResponse:
+    """
+    Client-side routes of the dashboard (``/console/targets``, ``/console/runs/42``).
+
+    The React router owns everything under ``/console``; a deep link or a
+    reload gets the same shell and the router renders the view. Without a
+    build these paths are unknown, as they were before. Outside the router's
+    own prefixes, a last segment that ends in a static-file extension is a
+    file name, not a view (a stale or mistyped asset link, a ``favicon.ico``
+    probe): it gets a 404 so monitors and caches see the miss instead of a
+    200 shell.
+    """
+    if _ui_dist_index() is None:
+        raise HTTPException(status_code=404, detail="Not Found")
+    segments = client_path.strip("/").split("/")
+    if segments[0] not in _CLIENT_ROUTE_PREFIXES:
+        last_segment = segments[-1].lower()
+        if any(last_segment.endswith(suffix) for suffix in _STATIC_FILE_SUFFIXES):
+            raise HTTPException(status_code=404, detail="Not Found")
+    return _ui_shell_response(request)
 
 
 @router.get("/analytics/risk-trends", response_model=list[dict[str, Any]], tags=["analytics"])

@@ -23,6 +23,7 @@ on:
       - Dockerfile
       - pyproject.toml
       - orchestrator/**
+      - ui/**
       - .github/workflows/docker-publish.yml
   workflow_dispatch:
 

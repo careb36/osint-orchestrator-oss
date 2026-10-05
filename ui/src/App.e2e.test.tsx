@@ -1,8 +1,10 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
+import { ApiKeyProvider } from './auth';
+import { installFetchMock } from './test/mockApi';
 
 const renderApp = () => {
   const queryClient = new QueryClient({
@@ -16,27 +18,37 @@ const renderApp = () => {
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={['/']}>
-        <App />
+        <ApiKeyProvider>
+          <App />
+        </ApiKeyProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );
 };
 
-describe('production smoke flow', () => {
-  it('navigates from overview to run history to the workspace view', async () => {
+describe('operator smoke flow', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('walks from the overview to a target, its runs and a run detail', async () => {
+    installFetchMock();
     const user = userEvent.setup();
     renderApp();
 
+    await screen.findByRole('heading', { name: /^overview$/i });
     const nav = screen.getByRole('navigation', { name: /main navigation/i });
 
-    expect(screen.getByRole('heading', { name: /osint orchestrator/i })).toBeInTheDocument();
-    expect(within(nav).getByRole('link', { name: /workspace/i })).toBeInTheDocument();
+    await user.click(within(nav).getByRole('link', { name: /targets/i }));
+    expect(await screen.findByRole('heading', { name: /^targets$/i })).toBeInTheDocument();
 
-    await user.click(within(nav).getByRole('link', { name: /workspace/i }));
-    expect(screen.getByText(/run workspace/i)).toBeInTheDocument();
+    await user.click(await screen.findByRole('link', { name: 'example.com' }));
+    expect(await screen.findByRole('heading', { name: 'example.com' })).toBeInTheDocument();
 
-    const runsLink = within(nav).getByRole('link', { name: /runs/i });
-    await user.click(runsLink);
-    expect(screen.getByRole('heading', { name: /^runs$/i })).toBeInTheDocument();
+    await user.click(within(nav).getByRole('link', { name: /runs/i }));
+    expect(await screen.findByRole('heading', { name: /^runs$/i })).toBeInTheDocument();
+
+    await user.click(await screen.findByRole('link', { name: /#42/ }));
+    expect(await screen.findByRole('heading', { name: /run #42/i })).toBeInTheDocument();
   });
 });

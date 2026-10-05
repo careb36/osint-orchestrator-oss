@@ -4,6 +4,15 @@
 # "amass"); the orchestrator only needs the two clients that talk to it.
 FROM owaspamass/amass:v5.1.1 AS amass
 
+# React operator dashboard (ui/). Built here so the runtime image needs no
+# Node: the output is static files the orchestrator serves under /console.
+FROM node:22.12.0-alpine3.20 AS ui-builder
+WORKDIR /ui
+COPY ui/package.json ui/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY ui/ ./
+RUN npm run build
+
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -28,6 +37,9 @@ RUN mkdir -p orchestrator && touch orchestrator/__init__.py
 RUN pip install --no-cache-dir ".[llm]"
 
 COPY orchestrator/ ./orchestrator/
+# Dashboard build: orchestrator/api.py serves it at /console and falls back to
+# the server-rendered console when the directory is missing.
+COPY --from=ui-builder /ui/dist ./orchestrator/static/ui-dist
 
 COPY --from=amass /bin/enum /usr/local/bin/oam_enum
 COPY --from=amass /bin/subs /usr/local/bin/oam_subs

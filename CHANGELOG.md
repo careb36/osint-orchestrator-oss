@@ -11,6 +11,13 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- Operator dashboard foundation (`ui/`): the React app is built in a Node
+  stage of both Dockerfiles and served by the orchestrator at `/console`
+  (client routes, `/console/assets/*` with immutable caching,
+  `script-src 'self'` CSP). Access uses the API key as every other client does
+  (ADR-005): the mock login and roles are gone. Without a build `/console`
+  serves the server-rendered console, which stays at `/console/legacy`. New CI
+  job `frontend` (lint, tests, build, inline-script check).
 - Demo mode (`DEMO_MODE=true`, `Dockerfile.demo`, `docker-compose.demo.yml`):
   public `/demo` page and routes restricted to an allowlist
   (`demo/targets.demo.yaml`), per-visitor and global daily run limits, daily

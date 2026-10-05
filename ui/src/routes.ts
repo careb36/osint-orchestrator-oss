@@ -6,6 +6,7 @@ export type AppRoute = {
   showInNav?: boolean;
 };
 
+// Single source of truth for the top-level navigation (ui/docs/routes.md).
 export const APP_ROUTES: AppRoute[] = [
   {
     path: '/',
@@ -28,9 +29,4 @@ export const APP_ROUTES: AppRoute[] = [
     description: 'Recent execution history and current runs.',
     showInNav: true,
   },
-];
-
-export const QUICK_ACTIONS = [
-  { label: 'Review runs', to: '/runs' },
-  { label: 'Inspect targets', to: '/targets' },
 ];

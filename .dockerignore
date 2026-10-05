@@ -1,0 +1,25 @@
+# Keep the build context to what the Dockerfiles copy. Runtime state, local
+# environments and dependency trees never belong in an image.
+.git
+.github
+**/node_modules
+ui/dist
+orchestrator/static/ui-dist
+**/__pycache__
+*.pyc
+.venv
+venv
+.env
+.env.*
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+daily_reports
+data
+targets.yaml
+amass/datasources.yaml
+docs
+tests
+deploy
+scratchpad

@@ -1,192 +1,236 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { api } from '../lib/api';
-import type { ArtifactKind, RunDetail } from '../types';
+import { useEffect, useState } from 'react';
+import { Link, useParams } from 'react-router-dom';
+import { ErrorState, LoadingState, PageLayout } from '../components/PageState';
+import { StatusPill } from '../components/StatusPill';
+import { api, downloadArtifact } from '../lib/api';
+import { formatDateTime, formatDuration, riskTone, runStatusTone } from '../lib/format';
+import type { ArtifactKind } from '../types';
 
 const STORAGE_PREFIX = 'osint-run-workspace';
+const ARTIFACTS: ArtifactKind[] = ['finding', 'evidence', 'delta', 'report', 'manifest'];
 
-function readStoredArtifact(runId?: string): ArtifactKind {
-  if (!runId) {
-    return 'report';
-  }
-
+function readStoredArtifact(runId: string): ArtifactKind {
   try {
     const raw = window.sessionStorage.getItem(`${STORAGE_PREFIX}:${runId}`);
-    const parsed = raw ? JSON.parse(raw) : null;
-    if (parsed && ['report', 'finding', 'evidence', 'manifest'].includes(parsed.artifact)) {
-      return parsed.artifact;
+    const parsed = raw ? (JSON.parse(raw) as { artifact?: string }) : null;
+    if (parsed?.artifact && (ARTIFACTS as string[]).includes(parsed.artifact)) {
+      return parsed.artifact as ArtifactKind;
     }
   } catch {
-    // Ignore storage issues and fall back to the default artifact.
+    // Storage unavailable: fall back to the default tab.
   }
-
-  return 'report';
+  return 'finding';
 }
 
-function artifactUrl(runId: string, artifact: ArtifactKind) {
-  const base = import.meta.env.VITE_API_BASE_URL ?? '/api';
-  return `${base}/runs/${runId}/${artifact}`;
+function isHttpUrl(value: string) {
+  return /^https?:\/\//i.test(value);
 }
 
 export function RunWorkspacePage() {
-  const { runId, targetId } = useParams();
-  const [selectedArtifact, setSelectedArtifact] = useState<ArtifactKind>(() => readStoredArtifact(runId));
+  const { runId = '', targetId } = useParams();
+  const [artifact, setArtifact] = useState<ArtifactKind>(() => readStoredArtifact(runId));
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!runId) {
-      return;
+    try {
+      window.sessionStorage.setItem(`${STORAGE_PREFIX}:${runId}`, JSON.stringify({ artifact }));
+    } catch {
+      // Storage unavailable: nothing to persist.
     }
+  }, [runId, artifact]);
 
-    window.sessionStorage.setItem(`${STORAGE_PREFIX}:${runId}`, JSON.stringify({ artifact: selectedArtifact }));
-  }, [runId, selectedArtifact]);
+  const run = useQuery({ queryKey: ['run', runId], queryFn: () => api.getRun(runId), enabled: Boolean(runId) });
+  const finding = useQuery({ queryKey: ['run', runId, 'finding'], queryFn: () => api.getRunFinding(runId), enabled: artifact === 'finding' });
+  const evidence = useQuery({ queryKey: ['run', runId, 'evidence'], queryFn: () => api.getRunEvidence(runId), enabled: artifact === 'evidence' });
+  const delta = useQuery({ queryKey: ['run', runId, 'delta'], queryFn: () => api.getRunDelta(runId), enabled: artifact === 'delta' });
+  const report = useQuery({ queryKey: ['run', runId, 'report'], queryFn: () => api.getRunReport(runId), enabled: artifact === 'report' });
+  const manifest = useQuery({ queryKey: ['run', runId, 'manifest'], queryFn: () => api.getRunManifest(runId), enabled: artifact === 'manifest' });
 
-  const runQuery = useQuery({
-    queryKey: ['run', runId],
-    queryFn: () => api.getRun(runId ?? ''),
-    enabled: Boolean(runId),
-  });
+  const active = { finding, evidence, delta, report, manifest }[artifact];
+  const title = run.data ? `Run #${run.data.id}` : 'Run detail';
+  const backTo = targetId ? `/targets/${encodeURIComponent(targetId)}` : run.data ? `/targets/${encodeURIComponent(run.data.target_id)}` : '/runs';
 
-  const run = runQuery.data as RunDetail | undefined;
-
-  const reportQuery = useQuery({
-    queryKey: ['run', runId, 'report'],
-    queryFn: () => api.getRunReport(runId ?? ''),
-    enabled: Boolean(runId),
-    retry: false,
-  });
-
-  const findingQuery = useQuery({
-    queryKey: ['run', runId, 'finding'],
-    queryFn: () => api.getRunFinding(runId ?? ''),
-    enabled: Boolean(runId),
-    retry: false,
-  });
-
-  const evidenceQuery = useQuery({
-    queryKey: ['run', runId, 'evidence'],
-    queryFn: () => api.getRunEvidence(runId ?? ''),
-    enabled: Boolean(runId),
-    retry: false,
-  });
-
-  const manifestQuery = useQuery({
-    queryKey: ['run', runId, 'manifest'],
-    queryFn: () => api.getRunManifest(runId ?? ''),
-    enabled: Boolean(runId),
-    retry: false,
-  });
-
-  const artifactQueries = useMemo(
-    () => ({
-      report: reportQuery,
-      finding: findingQuery,
-      evidence: evidenceQuery,
-      manifest: manifestQuery,
-    }),
-    [evidenceQuery, findingQuery, manifestQuery, reportQuery],
-  );
-
-  const fetchedArtifactQueries = Object.values(artifactQueries).filter((query) => query.isFetched);
-  const degradedState =
-    fetchedArtifactQueries.some((query) => query.error) && fetchedArtifactQueries.some((query) => query.data !== undefined);
-
-  const activeArtifactQuery = artifactQueries[selectedArtifact];
-  const panelTitle = selectedArtifact.charAt(0).toUpperCase() + selectedArtifact.slice(1);
-  const activeTabId = `tab-${selectedArtifact}`;
+  const handleDownload = async () => {
+    setDownloadError(null);
+    try {
+      await downloadArtifact(runId, artifact);
+    } catch {
+      setDownloadError(`The ${artifact} could not be downloaded.`);
+    }
+  };
 
   return (
-    <section className="page">
-      <div className="hero-card">
-        <p className="eyebrow">Run workspace</p>
-        <h1>{run ? `Run ${run.id}` : 'Run detail'}</h1>
-        <p className="lede">
-          {run ? `${run.status} • target ${run.targetId} • ${new Date(run.createdAt).toLocaleString()}` : 'Loading run context...'}
-        </p>
-        <div className="workspace-actions">
-          <Link to={targetId ?? (run?.targetId ? `/targets/${run.targetId}` : '/runs')}>Back to context</Link>
-          {runId ? (
-            <a href={artifactUrl(runId, selectedArtifact)} download>
-              Download {panelTitle}
-            </a>
-          ) : null}
-        </div>
-      </div>
+    <PageLayout
+      title={title}
+      subtitle={
+        run.data
+          ? `${run.data.target_id} · started ${formatDateTime(run.data.started_at)} · ${formatDuration(run.data.started_at, run.data.finished_at)}`
+          : 'Loading run context…'
+      }
+      actions={<Link to={backTo}>Back</Link>}
+    >
+      {run.isLoading ? <LoadingState message="Loading run…" /> : null}
+      {run.error ? <ErrorState description={`Run #${runId} could not be loaded.`} /> : null}
 
-      {degradedState ? (
-        <div className="state-card warning" role="status">
-          Workspace is degraded: some artifacts are temporarily unavailable while others remain accessible.
+      {run.data ? (
+        <div className="stats-grid">
+          <div className="state-card">
+            <span className="label">Status</span>
+            <StatusPill label={run.data.status} tone={runStatusTone(run.data.status)} />
+            {run.data.error ? <small className="error-text">{run.data.error}</small> : null}
+          </div>
+          <div className="state-card">
+            <span className="label">Collectors</span>
+            <strong>{run.data.collectors_run || '—'}</strong>
+          </div>
+          <div className="state-card">
+            <span className="label">New observables</span>
+            <strong>{run.data.new_observables}</strong>
+          </div>
+          <div className="state-card">
+            <span className="label">Sealed</span>
+            <strong>{run.data.manifest_sha256 ? 'Yes' : 'No'}</strong>
+            {run.data.manifest_sha256 ? <small className="mono">{run.data.manifest_sha256.slice(0, 16)}…</small> : null}
+          </div>
         </div>
       ) : null}
 
       <div className="workspace-shell">
-        <div className="artifact-tabs" role="tablist" aria-label="Run artifacts">
-          {(['report', 'finding', 'evidence', 'manifest'] as ArtifactKind[]).map((artifact) => (
+        <div className="artifact-toolbar">
+          <div className="artifact-tabs" role="tablist" aria-label="Run artefacts">
+            {ARTIFACTS.map((kind) => (
             <button
-              key={artifact}
-              id={`tab-${artifact}`}
+              key={kind}
+              id={`tab-${kind}`}
               type="button"
               role="tab"
-              aria-selected={selectedArtifact === artifact}
-              aria-controls={`panel-${artifact}`}
-              className={selectedArtifact === artifact ? 'active' : ''}
-              onClick={() => setSelectedArtifact(artifact)}
+              aria-selected={artifact === kind}
+              aria-controls={`panel-${kind}`}
+              className={artifact === kind ? 'active' : ''}
+              onClick={() => setArtifact(kind)}
             >
-              {artifact}
+              {kind}
             </button>
-          ))}
+            ))}
+          </div>
+          {/* Outside the tablist: every child of a tablist must be a tab. */}
+          <button type="button" className="ghost-button" onClick={handleDownload} disabled={!run.data}>
+            Download {artifact}
+          </button>
         </div>
+        {downloadError ? (
+          <p className="state-card error" role="alert">
+            {downloadError}
+          </p>
+        ) : null}
 
-        <div id={`panel-${selectedArtifact}`} className="artifact-panel" role="tabpanel" aria-labelledby={activeTabId}>
-          {runQuery.isLoading ? <p>Loading run context...</p> : null}
-          {runQuery.error ? <p role="alert">Unable to load run context.</p> : null}
+        <div id={`panel-${artifact}`} className="artifact-panel" role="tabpanel" aria-labelledby={`tab-${artifact}`}>
+          {active.isLoading ? <LoadingState message={`Loading ${artifact}…`} /> : null}
+          {active.error ? <ErrorState title={`No ${artifact} for this run`} description="The artefact is not available (the run may have failed before producing it)." /> : null}
 
-          {!runQuery.isLoading && !runQuery.error && activeArtifactQuery?.isLoading ? (
-            <p>Loading {panelTitle.toLowerCase()}...</p>
-          ) : null}
-
-          {!runQuery.isLoading && !runQuery.error && activeArtifactQuery?.error ? (
-            <div className="state-card error" role="alert">
-              <h2>{panelTitle} unavailable</h2>
-              <p>The selected artifact could not be loaded from the backend.</p>
+          {artifact === 'finding' && finding.data ? (
+            <div className="finding">
+              <p>
+                <span className="label">Risk level </span>
+                <StatusPill label={finding.data.risk_level} tone={riskTone(finding.data.risk_level)} />
+              </p>
+              <h3>Summary</h3>
+              <p>{finding.data.summary}</p>
+              <h3>Justification</h3>
+              <p>{finding.data.risk_justification}</p>
+              {finding.data.new_since_last_run.length > 0 ? (
+                <>
+                  <h3>New since the previous run</h3>
+                  <ul>
+                    {finding.data.new_since_last_run.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+              {finding.data.suggested_pivots.length > 0 ? (
+                <>
+                  <h3>Suggested pivots</h3>
+                  <ul>
+                    {finding.data.suggested_pivots.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+              <p className="muted">
+                {finding.data.provider} · {finding.data.model} · {(finding.data.duration_ms / 1000).toFixed(1)} s
+              </p>
             </div>
           ) : null}
 
-          {!runQuery.isLoading && !runQuery.error && activeArtifactQuery && !activeArtifactQuery.isLoading && !activeArtifactQuery.error ? (
-            <>
-              {selectedArtifact === 'report' ? <pre>{String(activeArtifactQuery.data ?? 'No report available.')}</pre> : null}
-              {selectedArtifact === 'finding' ? <pre>{String(activeArtifactQuery.data ?? 'No finding available.')}</pre> : null}
-              {selectedArtifact === 'evidence' ? (
-                <ul className="list-card">
-                  {Array.isArray(activeArtifactQuery.data) && activeArtifactQuery.data.length > 0 ? (
-                    activeArtifactQuery.data.map((entry, index) => {
-                      const source = String((entry as { source?: string })?.source ?? '');
-                      const key = source || `evidence-${index}`;
-
-                      return (
-                        <li key={key}>
-                          <div>
-                            <strong>{source || `Evidence ${index + 1}`}</strong>
-                            <small>{String((entry as { category?: string })?.category ?? 'general')}</small>
-                          </div>
-                          <span>{String((entry as { confidence?: unknown })?.confidence ?? 'n/a')}</span>
-                        </li>
-                      );
-                    })
-                  ) : (
-                    <li>
-                      <strong>No evidence rows</strong>
-                    </li>
-                  )}
-                </ul>
-              ) : null}
-              {selectedArtifact === 'manifest' ? (
-                <pre>{JSON.stringify(activeArtifactQuery.data ?? { status: 'no manifest available' }, null, 2)}</pre>
-              ) : null}
-            </>
+          {artifact === 'evidence' && evidence.data ? (
+            evidence.data.length === 0 ? (
+              <p className="muted">No qualified evidence for this run.</p>
+            ) : (
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Category</th>
+                    <th scope="col">Relevance</th>
+                    <th scope="col">Confidence</th>
+                    <th scope="col">Source</th>
+                    <th scope="col">Rationale</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {evidence.data.map((row) => (
+                    <tr key={row.id ?? row.url}>
+                      <td>{row.category}</td>
+                      <td>
+                        <StatusPill label={row.relevance} tone={riskTone(row.relevance)} />
+                      </td>
+                      <td>{Number(row.confidence).toFixed(2)}</td>
+                      <td>
+                        {isHttpUrl(row.url) ? (
+                          <a href={row.url} rel="noopener noreferrer nofollow" target="_blank">
+                            {row.title || row.url}
+                          </a>
+                        ) : (
+                          row.title || row.url
+                        )}
+                      </td>
+                      <td>{row.rationale}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )
           ) : null}
+
+          {artifact === 'delta' && delta.data ? (
+            delta.data.length === 0 ? (
+              <p className="muted">No net-new observables in this run.</p>
+            ) : (
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Type</th>
+                    <th scope="col">Value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {delta.data.map((row) => (
+                    <tr key={row.stix_id}>
+                      <td>{row.stix_type}</td>
+                      <td className="mono">{row.value}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )
+          ) : null}
+
+          {artifact === 'report' && report.data !== undefined ? <pre>{report.data}</pre> : null}
+          {artifact === 'manifest' && manifest.data ? <pre>{JSON.stringify(manifest.data, null, 2)}</pre> : null}
         </div>
       </div>
-    </section>
+    </PageLayout>
   );
 }

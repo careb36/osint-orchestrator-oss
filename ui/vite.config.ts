@@ -1,11 +1,36 @@
 import { defineConfig } from 'vitest/config';
+import { loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
+import { API_PATH_PREFIXES } from './src/lib/apiPaths';
 
-export default defineConfig({
-  plugins: [react()],
-  test: {
-    environment: 'jsdom',
-    globals: true,
-    setupFiles: './src/test/setup.ts',
-  },
+// The dashboard is served by the orchestrator under /console (see
+// orchestrator/api.py): assets resolve relative to that prefix and the router
+// uses it as its basename.
+//
+// `npm run dev` serves the app from Vite; the API prefixes it calls
+// (src/lib/apiPaths.ts, checked against api.ts by a test) are proxied to a
+// running orchestrator so the same-origin default of src/lib/api.ts holds in
+// development too (no CORS, X-API-Key travels as is).
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, '.', 'VITE_');
+  const devApiTarget = env.VITE_DEV_API_TARGET || 'http://localhost:8000';
+
+  return {
+    base: '/console/',
+    plugins: [react()],
+    server: {
+      proxy: Object.fromEntries(
+        API_PATH_PREFIXES.map((prefix) => [prefix, { target: devApiTarget, changeOrigin: true }]),
+      ),
+    },
+    build: {
+      // Hashed asset names let the backend serve them with immutable caching.
+      assetsDir: 'assets',
+    },
+    test: {
+      environment: 'jsdom',
+      globals: true,
+      setupFiles: './src/test/setup.ts',
+    },
+  };
 });

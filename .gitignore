@@ -39,6 +39,8 @@ venv/
 # Build directories
 dist/
 build/
+# Dashboard build copied into the image by the Dockerfiles (ui/dist → here)
+orchestrator/static/ui-dist/
 *.egg-info/
 .coverage
 htmlcov/
