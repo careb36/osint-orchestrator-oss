@@ -1,10 +1,9 @@
+import { EmptyState, PageLayout } from '../components/PageState';
+
 export function NotFoundPage() {
   return (
-    <section className="page">
-      <div className="state-card warning">
-        <h1>Page not found</h1>
-        <p>The route you requested does not exist in this shell.</p>
-      </div>
-    </section>
+    <PageLayout title="Page not found" subtitle="The route you requested does not exist in this shell.">
+      <EmptyState title="No matching route" description="Use the navigation above to return to a supported operator view." />
+    </PageLayout>
   );
 }

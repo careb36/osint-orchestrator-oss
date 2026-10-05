@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { ErrorState, LoadingState, PageLayout } from '../components/PageState';
 import { api } from '../lib/api';
 
 export function HomePage() {
@@ -7,11 +8,23 @@ export function HomePage() {
     queryFn: api.getHealth,
   });
 
+  if (isLoading) {
+    return <PageLayout title="Overview" subtitle="Checking the current operating state."><LoadingState message="Loading service health..." /></PageLayout>;
+  }
+
+  if (error) {
+    return (
+      <PageLayout title="Overview" subtitle="The service health check could not be confirmed.">
+        <ErrorState description="Backend health was not reachable from the browser. Verify the local API is running." />
+      </PageLayout>
+    );
+  }
+
   return (
-    <section className="page">
+    <PageLayout title="Overview" subtitle="Monitor active targets, inspect the latest runs and keep the evidence chain visible to the team.">
       <div className="hero-card">
         <p className="eyebrow">Operations overview</p>
-        <h1>OSINT Orchestrator</h1>
+        <h2>OSINT Orchestrator</h2>
         <p className="lede">
           Monitor active targets, inspect the latest runs and keep the evidence chain visible to the team.
         </p>
@@ -20,7 +33,7 @@ export function HomePage() {
       <div className="stats-grid">
         <div className="state-card">
           <span className="label">API status</span>
-          <strong>{isLoading ? 'Checking...' : data?.status ?? 'Unavailable'}</strong>
+          <strong>{data?.status ?? 'Unavailable'}</strong>
         </div>
         <div className="state-card">
           <span className="label">Current version</span>
@@ -31,13 +44,6 @@ export function HomePage() {
           <strong>Discovery first</strong>
         </div>
       </div>
-
-      {error ? (
-        <div className="state-card warning" role="alert">
-          <h2>API unavailable</h2>
-          <p>Backend health was not reachable from the browser. Verify the local API is running.</p>
-        </div>
-      ) : null}
-    </section>
+    </PageLayout>
   );
 }
