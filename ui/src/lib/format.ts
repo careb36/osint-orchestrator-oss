@@ -1,6 +1,6 @@
 import type { RunStatus } from '../types';
 
-export type Tone = '' | 'ok' | 'warning' | 'error' | 'muted';
+export type Tone = '' | 'ok' | 'warning' | 'error' | 'muted' | 'info';
 
 /** Visual tone of a run status: the five persisted values of RunStatus. */
 export function runStatusTone(status: RunStatus): Tone {
@@ -11,8 +11,9 @@ export function runStatusTone(status: RunStatus): Tone {
       return 'warning';
     case 'failed':
       return 'error';
-    case 'pending':
     case 'running':
+      return 'info';
+    case 'pending':
       return 'muted';
     default:
       return '';

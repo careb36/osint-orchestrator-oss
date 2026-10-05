@@ -248,6 +248,113 @@ describe('App shell', () => {
     expect(screen.queryByRole('heading', { name: /nothing running/i })).not.toBeInTheDocument();
   });
 
+  it('searches, filters and sorts targets and keeps the state in the URL', async () => {
+    installFetchMock();
+    const user = userEvent.setup();
+    renderApp(['/targets']);
+
+    await screen.findByRole('table');
+    const rowsOf = () => within(screen.getByRole('table')).getAllByRole('row').slice(1);
+    expect(rowsOf()).toHaveLength(2);
+    expect(screen.getByRole('status')).toHaveTextContent('2 of 2');
+
+    // Search narrows by collector name.
+    await user.type(screen.getByRole('searchbox', { name: /search/i }), 'spiderfoot');
+    expect(rowsOf()).toHaveLength(1);
+    expect(rowsOf()[0]).toHaveTextContent('example.com');
+    expect(screen.getByRole('status')).toHaveTextContent('1 of 2');
+    expect(screen.getByRole('button', { name: /clear filters/i })).toBeInTheDocument();
+
+    // Clearing restores the full table.
+    await user.click(screen.getByRole('button', { name: /clear filters/i }));
+    expect(rowsOf()).toHaveLength(2);
+
+    // A filter with no match shows the empty state with a way out.
+    await user.selectOptions(screen.getByRole('combobox', { name: /last run/i }), 'never');
+    expect(screen.getByRole('heading', { name: /no targets match/i })).toBeInTheDocument();
+    // Both the toolbar and the empty state offer the way out.
+    await user.click(screen.getAllByRole('button', { name: /clear filters/i })[0]);
+
+    // Sorting by target name flips on a second click; aria-sort follows.
+    const targetHeader = screen.getByRole('columnheader', { name: /^target/i });
+    await user.click(within(targetHeader).getByRole('button'));
+    expect(targetHeader).toHaveAttribute('aria-sort', 'ascending');
+    expect(rowsOf()[0]).toHaveTextContent('example.com');
+    await user.click(within(targetHeader).getByRole('button'));
+    expect(targetHeader).toHaveAttribute('aria-sort', 'descending');
+    expect(rowsOf()[0]).toHaveTextContent('paused.example');
+  });
+
+  it('restores target filters from the URL query string', async () => {
+    installFetchMock();
+    renderApp(['/targets?enabled=disabled&sort=target:desc']);
+
+    const rows = within(await screen.findByRole('table')).getAllByRole('row').slice(1);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toHaveTextContent('paused.example');
+    expect(screen.getByRole('combobox', { name: /enabled/i })).toHaveValue('disabled');
+    expect(screen.getByRole('columnheader', { name: /^target/i })).toHaveAttribute('aria-sort', 'descending');
+  });
+
+  it('searches runs by error text and filters them by status', async () => {
+    installFetchMock();
+    const user = userEvent.setup();
+    renderApp(['/runs']);
+
+    await screen.findByRole('table');
+    const rowsOf = () => within(screen.getByRole('table')).getAllByRole('row').slice(1);
+    expect(rowsOf()).toHaveLength(2);
+
+    await user.type(screen.getByRole('searchbox', { name: /search/i }), 'timeout');
+    expect(rowsOf()).toHaveLength(1);
+    expect(rowsOf()[0]).toHaveTextContent('#43');
+
+    await user.selectOptions(screen.getByRole('combobox', { name: /status/i }), 'success');
+    expect(screen.getByRole('heading', { name: /no runs match/i })).toBeInTheDocument();
+    await user.click(screen.getAllByRole('button', { name: /clear filters/i })[0]);
+    expect(rowsOf()).toHaveLength(2);
+
+    // Default order is newest first; sorting by observables puts run 42 (3) first.
+    expect(rowsOf()[0]).toHaveTextContent('#43');
+    await user.click(within(screen.getByRole('columnheader', { name: /new observables/i })).getByRole('button'));
+    expect(rowsOf()[0]).toHaveTextContent('#42');
+  });
+
+  it('filters and sorts the evidence of a run', async () => {
+    installFetchMock();
+    const user = userEvent.setup();
+    renderApp(['/runs/42']);
+
+    await screen.findByRole('heading', { name: /run #42/i });
+    await user.click(screen.getByRole('tab', { name: /evidence/i }));
+    const table = await screen.findByRole('table');
+    const rowsOf = () => within(table).getAllByRole('row').slice(1);
+    // Default: relevance descending.
+    expect(rowsOf().map((row) => row.textContent)).toEqual([
+      expect.stringContaining('Leaked credential pair'),
+      expect.stringContaining('Forum thread'),
+      expect.stringContaining('Regional outage'),
+    ]);
+
+    await user.selectOptions(screen.getByRole('combobox', { name: /relevance/i }), 'low');
+    expect(rowsOf()).toHaveLength(1);
+    expect(rowsOf()[0]).toHaveTextContent('Regional outage');
+    await user.click(screen.getByRole('button', { name: /clear filters/i }));
+
+    await user.type(screen.getByRole('searchbox', { name: /search/i }), 'portal');
+    expect(rowsOf()).toHaveLength(1);
+    expect(rowsOf()[0]).toHaveTextContent('Forum thread');
+  });
+
+  it('shows the risk trend and a start-run action on the target detail', async () => {
+    installFetchMock();
+    renderApp(['/targets/example-corp']);
+
+    await screen.findByRole('heading', { name: 'example.com' });
+    expect(screen.getByText(/peak high over 1 runs/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /start run/i })).toBeEnabled();
+  });
+
   it('shows the three top-level sections in the navigation', async () => {
     installFetchMock();
     renderApp();

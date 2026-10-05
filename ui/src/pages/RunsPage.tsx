@@ -1,26 +1,27 @@
 import { useQuery } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { EmptyState, ErrorState, LoadingState, PageLayout } from '../components/PageState';
+import { SearchField } from '../components/SearchField';
+import { SortableHeader } from '../components/SortableHeader';
 import { StatusPill } from '../components/StatusPill';
+import { useListControls } from '../hooks/useListControls';
 import { api } from '../lib/api';
 import { formatDateTime, formatDuration, runStatusTone } from '../lib/format';
+import { distinct, filterRuns, sortRuns, type RunSortKey, type SinceFilter } from '../lib/listing';
+import { isActiveStatus } from '../lib/overview';
+import type { RunStatus } from '../types';
 
-const STATUSES = ['pending', 'running', 'success', 'partial', 'failed'] as const;
+const STATUSES: RunStatus[] = ['running', 'pending', 'failed', 'partial', 'success'];
+const DEFAULTS = { q: '', target: '', status: '', since: '' };
+const ACTIVE_REFRESH_MS = 10_000;
 
 export function RunsPage() {
-  const runs = useQuery({ queryKey: ['runs'], queryFn: () => api.getRuns() });
-  const [targetFilter, setTargetFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-
-  const targetIds = useMemo(() => Array.from(new Set((runs.data ?? []).map((run) => run.target_id))).sort(), [runs.data]);
-  const visible = useMemo(
-    () =>
-      (runs.data ?? []).filter(
-        (run) => (!targetFilter || run.target_id === targetFilter) && (!statusFilter || run.status === statusFilter),
-      ),
-    [runs.data, targetFilter, statusFilter],
-  );
+  const runs = useQuery({
+    queryKey: ['runs'],
+    queryFn: () => api.getRuns(),
+    refetchInterval: (query) => ((query.state.data ?? []).some((run) => isActiveStatus(run.status)) ? ACTIVE_REFRESH_MS : false),
+  });
+  const controls = useListControls<RunSortKey>(DEFAULTS, { key: 'started', dir: 'desc' });
 
   if (runs.isLoading) {
     return (
@@ -46,12 +47,30 @@ export function RunsPage() {
     );
   }
 
+  const now = new Date();
+  const targetIds = distinct(runs.data, (run) => run.target_id);
+  const visible = sortRuns(
+    filterRuns(
+      runs.data,
+      {
+        query: controls.get('q'),
+        target: controls.get('target'),
+        status: controls.get('status') as RunStatus | '',
+        since: controls.get('since') as SinceFilter,
+      },
+      now,
+    ),
+    controls.sort,
+    now,
+  );
+
   return (
-    <PageLayout title="Runs" subtitle="The last 100 runs, newest first.">
-      <div className="filters" role="group" aria-label="Filters">
+    <PageLayout title="Runs" subtitle={`The ${runs.data.length} most recent runs the API returns (at most 100).`}>
+      <div className="filters" role="search" aria-label="Filter runs">
+        <SearchField label="Search" value={controls.get('q')} onChange={(value) => controls.set('q', value)} placeholder="run id, target, collector or error" />
         <label>
           <span className="label">Target</span>
-          <select value={targetFilter} onChange={(event) => setTargetFilter(event.target.value)}>
+          <select value={controls.get('target')} onChange={(event) => controls.set('target', event.target.value)}>
             <option value="">All targets</option>
             {targetIds.map((id) => (
               <option key={id} value={id}>
@@ -62,7 +81,7 @@ export function RunsPage() {
         </label>
         <label>
           <span className="label">Status</span>
-          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+          <select value={controls.get('status')} onChange={(event) => controls.set('status', event.target.value)}>
             <option value="">All statuses</option>
             {STATUSES.map((status) => (
               <option key={status} value={status}>
@@ -71,42 +90,74 @@ export function RunsPage() {
             ))}
           </select>
         </label>
-        <span className="muted" aria-live="polite">
+        <label>
+          <span className="label">Started</span>
+          <select value={controls.get('since')} onChange={(event) => controls.set('since', event.target.value)}>
+            <option value="">Any time</option>
+            <option value="24h">Last 24 hours</option>
+            <option value="7d">Last 7 days</option>
+          </select>
+        </label>
+        <span className="count" role="status" aria-live="polite">
           {visible.length} of {runs.data.length}
         </span>
+        {controls.isFiltered ? (
+          <button type="button" className="ghost-button" onClick={controls.clear}>
+            Clear filters
+          </button>
+        ) : null}
       </div>
       {visible.length === 0 ? (
-        <EmptyState title="No runs match" description="Clear a filter to see more runs." />
+        <EmptyState
+          title="No runs match"
+          description="Clear a filter or widen the search to see more runs."
+          action={
+            <button type="button" className="ghost-button" onClick={controls.clear}>
+              Clear filters
+            </button>
+          }
+        />
       ) : (
         <table className="data-table">
           <thead>
             <tr>
               <th scope="col">Run</th>
-              <th scope="col">Target</th>
-              <th scope="col">Status</th>
-              <th scope="col">New observables</th>
-              <th scope="col">Started</th>
-              <th scope="col">Duration</th>
+              <SortableHeader label="Target" column="target" sort={controls.sort} onSort={controls.toggleSort} />
+              <SortableHeader label="Status" column="status" sort={controls.sort} onSort={controls.toggleSort} />
+              <SortableHeader label="New observables" column="observables" sort={controls.sort} onSort={controls.toggleSort} naturalDir="desc" />
+              <SortableHeader label="Started" column="started" sort={controls.sort} onSort={controls.toggleSort} naturalDir="desc" />
+              <SortableHeader label="Duration" column="duration" sort={controls.sort} onSort={controls.toggleSort} naturalDir="desc" />
             </tr>
           </thead>
           <tbody>
-            {visible.map((run) => (
-              <tr key={run.id}>
-                <td>
-                  <Link to={`/runs/${run.id}`}>#{run.id}</Link>
-                </td>
-                <td>
-                  <Link to={`/targets/${encodeURIComponent(run.target_id)}`}>{run.target_id}</Link>
-                </td>
-                <td>
-                  <StatusPill label={run.status} tone={runStatusTone(run.status)} />
-                  {run.error ? <small className="error-text"> {run.error}</small> : null}
-                </td>
-                <td>{run.new_observables}</td>
-                <td>{formatDateTime(run.started_at)}</td>
-                <td>{formatDuration(run.started_at, run.finished_at)}</td>
-              </tr>
-            ))}
+            {visible.map((run) => {
+              const active = isActiveStatus(run.status);
+              return (
+                <tr key={run.id}>
+                  <td>
+                    <Link to={`/runs/${run.id}`}>#{run.id}</Link>
+                  </td>
+                  <td>
+                    <Link to={`/targets/${encodeURIComponent(run.target_id)}`}>{run.target_id}</Link>
+                  </td>
+                  <td>
+                    <StatusPill label={run.status} tone={runStatusTone(run.status)} />
+                    {run.error ? <small className="error-text"> {run.error}</small> : null}
+                  </td>
+                  <td>{run.new_observables}</td>
+                  <td>{formatDateTime(run.started_at)}</td>
+                  <td>
+                    {active ? (
+                      <>
+                        {formatDuration(run.started_at, now.toISOString())} <small className="muted">so far</small>
+                      </>
+                    ) : (
+                      formatDuration(run.started_at, run.finished_at)
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}

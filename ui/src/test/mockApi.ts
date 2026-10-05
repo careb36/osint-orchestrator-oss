@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import type { Finding, HealthStatus, RiskTrend, RunDetail, RunSummary, TargetSummary } from '../types';
+import type { DeltaRow, EvidenceRow, Finding, HealthStatus, RiskTrend, RunDetail, RunSummary, TargetSummary } from '../types';
 
 export const sampleHealth: HealthStatus = {
   status: 'ok',
@@ -102,6 +102,54 @@ export const sampleFinding: Finding = {
   generated_at: '2026-10-01T06:05:00',
 };
 
+export const sampleEvidence: EvidenceRow[] = [
+  {
+    id: 1,
+    run_id: sampleRuns[0].id,
+    target_id: sampleRuns[0].target_id,
+    url: 'https://paste.example/abc',
+    title: 'Leaked credential pair',
+    category: 'credential-leak',
+    relevance: 'high',
+    confidence: 0.91,
+    rationale: 'Matches the target domain and a current employee handle.',
+    provider: 'nebius',
+    model: 'test-model',
+  },
+  {
+    id: 2,
+    run_id: sampleRuns[0].id,
+    target_id: sampleRuns[0].target_id,
+    url: 'https://news.example/outage',
+    title: 'Regional outage report',
+    category: 'news',
+    relevance: 'low',
+    confidence: 0.35,
+    rationale: 'Mentions the sector, not the target.',
+    provider: 'nebius',
+    model: 'test-model',
+  },
+  {
+    id: 3,
+    run_id: sampleRuns[0].id,
+    target_id: sampleRuns[0].target_id,
+    url: 'https://forum.example/thread/9',
+    title: 'Forum thread naming the login portal',
+    category: 'exposure',
+    relevance: 'medium',
+    confidence: 0.6,
+    rationale: 'Discusses an exposed subdomain of the target.',
+    provider: 'nebius',
+    model: 'test-model',
+  },
+];
+
+export const sampleDelta: DeltaRow[] = [
+  { stix_id: 'domain-name--1', stix_type: 'domain-name', value: 'login.example.com' },
+  { stix_id: 'domain-name--2', stix_type: 'domain-name', value: 'vpn.example.com' },
+  { stix_id: 'url--1', stix_type: 'url', value: 'https://paste.example/abc' },
+];
+
 type Route = {
   pattern: RegExp;
   status?: number;
@@ -126,6 +174,8 @@ export const defaultRoutes: Route[] = [
   // The finding fixture belongs to the first sample run; every other run has none.
   { pattern: new RegExp(`^/runs/${sampleFinding.run_id}/finding$`), body: sampleFinding },
   { pattern: /^\/runs\/\d+\/finding$/, status: 404, body: { detail: 'No finding for this run' } },
+  { pattern: new RegExp(`^/runs/${sampleRuns[0].id}/evidence$`), body: sampleEvidence },
+  { pattern: new RegExp(`^/runs/${sampleRuns[0].id}/delta$`), body: sampleDelta },
   { pattern: /^\/runs\/\d+\/evidence$/, body: [] },
   { pattern: /^\/runs\/\d+\/delta$/, body: [] },
   { pattern: /^\/analytics\/risk-trends$/, body: sampleTrends },
