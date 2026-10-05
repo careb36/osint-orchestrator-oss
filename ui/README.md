@@ -47,5 +47,9 @@ again. The key lives in `sessionStorage` under `osint-operator-api-key`, and in
 `localStorage` too when the operator ticks "Remember on this browser". Every
 request sends it as `X-API-Key`.
 
-The API is same-origin by default. `VITE_API_BASE_URL` points the dev server at
-another origin (`npm run dev` against a running orchestrator).
+The API is same-origin by default. `npm run dev` keeps that: the Vite server
+proxies `/health`, `/targets`, `/runs` and `/analytics` to the orchestrator at
+`http://localhost:8000` (`VITE_DEV_API_TARGET` changes the target). Start the
+orchestrator first (`uvicorn orchestrator.api:app --reload`), then
+`npm run dev` and open `http://localhost:5173/console/`. `VITE_API_BASE_URL`
+remains for calling another origin directly, which needs CORS on that origin.

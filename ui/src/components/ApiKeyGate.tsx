@@ -1,11 +1,14 @@
 import { type FormEvent, useState } from 'react';
 import { useApiKey } from '../auth';
+import { isKeyRemembered } from '../lib/api';
 
 /** Asks for the operator's API key; shown while the API answers 401. */
 export function ApiKeyGate() {
   const { submitKey } = useApiKey();
   const [key, setKey] = useState('');
-  const [remember, setRemember] = useState(false);
+  // Pre-tick when a key was remembered on this browser (it was just rejected
+  // or forgotten; the operator most likely wants the new one kept too).
+  const [remember, setRemember] = useState(() => isKeyRemembered());
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 

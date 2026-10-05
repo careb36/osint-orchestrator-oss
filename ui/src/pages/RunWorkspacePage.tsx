@@ -97,8 +97,9 @@ export function RunWorkspacePage() {
       ) : null}
 
       <div className="workspace-shell">
-        <div className="artifact-tabs" role="tablist" aria-label="Run artefacts">
-          {ARTIFACTS.map((kind) => (
+        <div className="artifact-toolbar">
+          <div className="artifact-tabs" role="tablist" aria-label="Run artefacts">
+            {ARTIFACTS.map((kind) => (
             <button
               key={kind}
               id={`tab-${kind}`}
@@ -111,7 +112,9 @@ export function RunWorkspacePage() {
             >
               {kind}
             </button>
-          ))}
+            ))}
+          </div>
+          {/* Outside the tablist: every child of a tablist must be a tab. */}
           <button type="button" className="ghost-button" onClick={handleDownload} disabled={!run.data}>
             Download {artifact}
           </button>

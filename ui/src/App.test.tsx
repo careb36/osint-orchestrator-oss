@@ -99,6 +99,39 @@ describe('App shell', () => {
     }
   });
 
+  it('does not accept a key the API could not validate', async () => {
+    installFetchMock({
+      requireKey: 'test-key',
+      routes: [{ pattern: /^\/targets$/, status: 500, body: { detail: 'boom' } }],
+    });
+    const user = userEvent.setup();
+    renderApp();
+
+    // The 500 route sits behind the key check, so the first probe still sees 401.
+    await user.type(await screen.findByLabelText(/^api key$/i), 'test-key');
+    await user.click(screen.getByRole('button', { name: /use key/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/could not validate.*status 500/i);
+    expect(window.sessionStorage.getItem(API_KEY_STORAGE_KEY)).toBeNull();
+  });
+
+  it('shows the API as unavailable, not as open, when it does not answer 2xx or 401', async () => {
+    const fetchMock = installFetchMock({
+      routes: [{ pattern: /^\/targets$/, status: 503, body: { detail: 'maintenance' } }],
+    });
+    const user = userEvent.setup();
+    renderApp();
+
+    expect(await screen.findByRole('heading', { name: /api unavailable/i })).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(/status 503/);
+    expect(screen.queryByRole('heading', { name: /^overview$/i })).not.toBeInTheDocument();
+
+    // Recovery: the next probe succeeds and the dashboard renders.
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    await user.click(screen.getByRole('button', { name: /retry/i }));
+    expect(await screen.findByRole('heading', { name: /^overview$/i })).toBeInTheDocument();
+  });
+
   it('forgets the key and locks the dashboard again', async () => {
     window.sessionStorage.setItem(API_KEY_STORAGE_KEY, 'test-key');
     installFetchMock({ requireKey: 'test-key' });

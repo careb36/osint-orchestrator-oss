@@ -12,7 +12,9 @@ import type {
 import { reportUiError, trackUiTelemetry } from './telemetry';
 
 // Same origin by default: the orchestrator serves this app under /console and
-// the API at the root. VITE_API_BASE_URL exists for a split dev setup only.
+// the API at the root. In `npm run dev` the Vite server proxies the API paths
+// to the orchestrator (ui/vite.config.ts), so the default holds there too;
+// VITE_API_BASE_URL exists only to point at another origin explicitly.
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
 
 export const API_KEY_STORAGE_KEY = 'osint-operator-api-key';
@@ -57,6 +59,11 @@ export function storeApiKey(key: string, remember: boolean): void {
     storage('local')?.removeItem(API_KEY_STORAGE_KEY);
     storage('local')?.removeItem(API_KEY_REMEMBER_KEY);
   }
+}
+
+/** True when the operator asked to keep the key on this browser. */
+export function isKeyRemembered(): boolean {
+  return storage('local')?.getItem(API_KEY_REMEMBER_KEY) === '1';
 }
 
 export function clearApiKey(): void {
@@ -168,5 +175,7 @@ export async function downloadArtifact(runId: string | number, artifact: 'report
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
-  URL.revokeObjectURL(url);
+  // Revoking in the same task as click() can abort the transfer (Firefox,
+  // some Safari versions): let the browser start reading the blob first.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }

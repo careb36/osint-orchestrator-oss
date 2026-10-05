@@ -3,7 +3,7 @@ import { NavLink, Route, Routes } from 'react-router-dom';
 import { useApiKey } from './auth';
 import { ApiKeyGate } from './components/ApiKeyGate';
 import { AppErrorBoundary } from './components/ErrorBoundary';
-import { LoadingState } from './components/PageState';
+import { ErrorState, LoadingState } from './components/PageState';
 import { trackUiTelemetry } from './lib/telemetry';
 import { HomePage } from './pages/HomePage';
 import { NotFoundPage } from './pages/NotFoundPage';
@@ -14,7 +14,7 @@ import { TargetsPage } from './pages/TargetsPage';
 import { APP_ROUTES } from './routes';
 
 function AppShell() {
-  const { mode, hasKey, forgetKey } = useApiKey();
+  const { mode, hasKey, unavailableReason, forgetKey, retry } = useApiKey();
 
   return (
     <div className="app-shell">
@@ -52,6 +52,17 @@ function AppShell() {
       <main id="main-content" className="content">
         {mode === 'checking' ? <LoadingState message="Checking API access…" /> : null}
         {mode === 'locked' ? <ApiKeyGate /> : null}
+        {mode === 'unavailable' ? (
+          <ErrorState
+            title="API unavailable"
+            description={unavailableReason ?? 'The orchestrator API could not be reached.'}
+            action={
+              <button type="button" className="primary-action" onClick={retry}>
+                Retry
+              </button>
+            }
+          />
+        ) : null}
         {mode === 'open' || mode === 'ready' ? (
           <Routes>
             <Route path="/" element={<HomePage />} />

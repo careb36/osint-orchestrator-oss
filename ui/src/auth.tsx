@@ -7,55 +7,69 @@ import { api, ApiError, clearApiKey, readApiKey, storeApiKey, UNAUTHORIZED_EVENT
  * every API client uses. There are no users or roles in the backend, so
  * there are none here either.
  *
- * - `checking`: probing whether the API needs a key.
- * - `open`:     the API answers without a key (ORCHESTRATOR_API_KEY empty).
- * - `locked`:   a key is required and none (or a wrong one) is stored.
- * - `ready`:    the stored key is accepted.
+ * - `checking`:    probing whether the API needs a key.
+ * - `open`:        the API answers without a key (ORCHESTRATOR_API_KEY empty).
+ * - `locked`:      a key is required and none (or a wrong one) is stored.
+ * - `ready`:       the stored key is accepted.
+ * - `unavailable`: the API did not answer 2xx or 401; nothing can be told
+ *                  about the key, so the shell shows the error and a retry.
  */
-export type AccessMode = 'checking' | 'open' | 'locked' | 'ready';
+export type AccessMode = 'checking' | 'open' | 'locked' | 'ready' | 'unavailable';
 
 type ApiKeyContextValue = {
   mode: AccessMode;
   hasKey: boolean;
+  /** Why the API is `unavailable`, for the error state. */
+  unavailableReason: string | null;
   /** Validate the key against the API and store it on success. */
   submitKey: (key: string, remember: boolean) => Promise<{ ok: boolean; message?: string }>;
   forgetKey: () => void;
+  /** Probe the API again (after `unavailable`). */
+  retry: () => void;
 };
 
 const ApiKeyContext = createContext<ApiKeyContextValue | undefined>(undefined);
 
-async function probe(key: string | null): Promise<AccessMode> {
+type ProbeResult = { mode: 'ready' | 'open' | 'locked' } | { mode: 'unavailable'; reason: string };
+
+/** Only a 2xx proves the key (or its absence) is accepted; only a 401 proves it is not. */
+async function probe(key: string | null): Promise<ProbeResult> {
   try {
     await api.getTargets({ apiKey: key, quiet: true });
-    return key ? 'ready' : 'open';
+    return { mode: key ? 'ready' : 'open' };
   } catch (error) {
     if (error instanceof ApiError && error.status === 401) {
-      return 'locked';
+      return { mode: 'locked' };
     }
-    // Backend down or other error: let the pages show it; do not ask for a key.
-    return key ? 'ready' : 'open';
+    const status = error instanceof ApiError && error.status ? ` (status ${error.status})` : '';
+    return { mode: 'unavailable', reason: `The orchestrator API could not be reached${status}.` };
   }
 }
 
 export function ApiKeyProvider({ children }: { children: ReactNode }) {
   const [mode, setMode] = useState<AccessMode>('checking');
   const [hasKey, setHasKey] = useState<boolean>(() => Boolean(readApiKey()));
+  const [unavailableReason, setUnavailableReason] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
+    setMode('checking');
     probe(readApiKey()).then((result) => {
-      if (!cancelled) {
-        if (result === 'locked') {
-          clearApiKey();
-          setHasKey(false);
-        }
-        setMode(result);
+      if (cancelled) {
+        return;
       }
+      if (result.mode === 'locked') {
+        clearApiKey();
+        setHasKey(false);
+      }
+      setUnavailableReason(result.mode === 'unavailable' ? result.reason : null);
+      setMode(result.mode);
     });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [attempt]);
 
   useEffect(() => {
     const onUnauthorized = () => {
@@ -73,8 +87,11 @@ export function ApiKeyProvider({ children }: { children: ReactNode }) {
       return { ok: false, message: 'Enter the API key.' };
     }
     const result = await probe(candidate);
-    if (result === 'locked') {
+    if (result.mode === 'locked') {
       return { ok: false, message: 'The API rejected this key.' };
+    }
+    if (result.mode === 'unavailable') {
+      return { ok: false, message: `Could not validate the key. ${result.reason}` };
     }
     storeApiKey(candidate, remember);
     setHasKey(true);
@@ -88,9 +105,11 @@ export function ApiKeyProvider({ children }: { children: ReactNode }) {
     setMode('locked');
   }, []);
 
+  const retry = useCallback(() => setAttempt((n) => n + 1), []);
+
   const value = useMemo(
-    () => ({ mode, hasKey, submitKey, forgetKey }),
-    [mode, hasKey, submitKey, forgetKey],
+    () => ({ mode, hasKey, unavailableReason, submitKey, forgetKey, retry }),
+    [mode, hasKey, unavailableReason, submitKey, forgetKey, retry],
   );
 
   return <ApiKeyContext.Provider value={value}>{children}</ApiKeyContext.Provider>;

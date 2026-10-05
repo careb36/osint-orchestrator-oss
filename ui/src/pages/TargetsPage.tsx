@@ -65,7 +65,7 @@ export function TargetsPage() {
   return (
     <PageLayout title="Targets" subtitle="The target inventory for this operator workspace.">
       {notice ? (
-        <p className={`state-card ${notice.tone === 'ok' ? 'ok' : 'error'}`} role="status">
+        <p className={`state-card ${notice.tone === 'ok' ? 'ok' : 'error'}`} role={notice.tone === 'ok' ? 'status' : 'alert'}>
           {notice.text}
         </p>
       ) : null}
@@ -103,9 +103,9 @@ export function TargetsPage() {
                     className="ghost-button"
                     disabled={trigger.isPending || active}
                     onClick={() => trigger.mutate(target.id)}
-                    aria-label={`Start run for ${target.id}`}
                   >
                     {active ? 'Running…' : 'Start run'}
+                    <span className="visually-hidden"> for {target.id}</span>
                   </button>
                 </td>
               </tr>
