@@ -19,6 +19,7 @@ import pytest
 
 ORCHESTRATOR_URL = os.getenv("ORCHESTRATOR_URL", "http://localhost:8000")
 OPENCTI_URL = os.getenv("OPENCTI_URL", "http://localhost:8080")
+ORCHESTRATOR_API_KEY = os.getenv("ORCHESTRATOR_API_KEY", "")
 
 
 pytestmark = pytest.mark.integration
@@ -38,22 +39,44 @@ def test_opencti_reachable():
     """OpenCTI must be accessible (health endpoint)."""
     try:
         resp = httpx.get(f"{OPENCTI_URL}/health", timeout=15)
-        assert resp.status_code in (200, 302)
+        assert resp.status_code in (200, 302, 401)
     except httpx.ConnectError:
         pytest.skip("OpenCTI not reachable — is docker compose up?")
 
 
 @pytest.mark.integration
 def test_targets_endpoint_returns_list():
-    """GET /targets must return a list (may be empty if targets.yaml absent)."""
-    resp = httpx.get(f"{ORCHESTRATOR_URL}/targets", timeout=10)
+    """GET /targets with API key must return a list (may be empty)."""
+    if not ORCHESTRATOR_API_KEY:
+        pytest.skip("ORCHESTRATOR_API_KEY not set")
+
+    resp = httpx.get(
+        f"{ORCHESTRATOR_URL}/targets",
+        headers={"X-API-Key": ORCHESTRATOR_API_KEY},
+        timeout=10,
+    )
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
 
 @pytest.mark.integration
-def test_trigger_run_unknown_target_returns_404():
+def test_trigger_run_requires_api_key():
+    """POST /targets/{id}/run without API key must be rejected."""
     resp = httpx.post(f"{ORCHESTRATOR_URL}/targets/non-existent-target/run", timeout=10)
+    assert resp.status_code == 401
+
+
+@pytest.mark.integration
+def test_trigger_run_unknown_target_returns_404_with_api_key():
+    """POST /targets/{id}/run with API key must return 404 for unknown target."""
+    if not ORCHESTRATOR_API_KEY:
+        pytest.skip("ORCHESTRATOR_API_KEY not set")
+
+    resp = httpx.post(
+        f"{ORCHESTRATOR_URL}/targets/non-existent-target/run",
+        headers={"X-API-Key": ORCHESTRATOR_API_KEY},
+        timeout=10,
+    )
     assert resp.status_code == 404
 
 
