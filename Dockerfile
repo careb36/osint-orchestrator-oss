@@ -37,8 +37,8 @@ RUN mkdir -p orchestrator && touch orchestrator/__init__.py
 RUN pip install --no-cache-dir ".[llm]"
 
 COPY orchestrator/ ./orchestrator/
-# Dashboard build: orchestrator/api.py serves it at /console and falls back to
-# the server-rendered console when the directory is missing.
+# Dashboard build: orchestrator/api.py serves it at /console (and answers 503
+# with the build steps when the directory is missing).
 COPY --from=ui-builder /ui/dist ./orchestrator/static/ui-dist
 
 COPY --from=amass /bin/enum /usr/local/bin/oam_enum

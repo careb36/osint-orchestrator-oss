@@ -124,6 +124,10 @@ from [SECURITY.md](SECURITY.md).
 
 ### Removed
 
+- Startup detection of databases created before Alembic (app tables present,
+  no `alembic_version`), which stamped them at the baseline revision; every
+  database now starts from the migrations. The daily report index no longer
+  parses its pre-Phase-3 four-column rows.
 - The server-rendered operator console (`orchestrator/templates/console.html`)
   and its routes `/console/legacy` and `/console/i18n.json`: the React
   dashboard covers every view it had (health, risk, runs, run detail with
