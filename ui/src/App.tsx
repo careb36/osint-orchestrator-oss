@@ -3,6 +3,7 @@ import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { useApiKey } from './auth';
 import { ApiKeyGate } from './components/ApiKeyGate';
 import { AppErrorBoundary } from './components/ErrorBoundary';
+import { ErrorFallback } from './components/ErrorFallback';
 import { ErrorState, LoadingState } from './components/PageState';
 import { locales, useLocale, type MessageKey } from './i18n';
 import { describeUnavailable } from './lib/unavailable';
@@ -121,7 +122,9 @@ export default function App() {
   }, []);
 
   return (
-    <AppErrorBoundary>
+    // The shell's own boundary: when it fires nothing around it works, so its
+    // fallback offers a reload, not a route change.
+    <AppErrorBoundary fallback={<ErrorFallback scope="app" />}>
       <AppShell />
     </AppErrorBoundary>
   );

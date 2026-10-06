@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { LocaleProvider } from '../i18n';
 import { uiTelemetry } from '../lib/telemetry';
 import { AppErrorBoundary } from './ErrorBoundary';
+import { ErrorFallback } from './ErrorFallback';
 
 function Crashing({ when }: { when: boolean }) {
   if (when) throw new Error('view exploded');
@@ -39,6 +40,18 @@ describe('AppErrorBoundary', () => {
     expect(screen.getByRole('link', { name: /back to the overview/i })).toHaveAttribute('href', '/');
     expect(uiTelemetry.map((entry) => entry.event)).toEqual(['ui_error', 'error_boundary_triggered']);
     expect(uiTelemetry[0].detail.message).toBe('view exploded');
+  });
+
+  it('offers a reload, not a route, when the shell itself crashed', () => {
+    wrap(
+      <AppErrorBoundary fallback={<ErrorFallback scope="app" />}>
+        <Crashing when={true} />
+      </AppErrorBoundary>,
+    );
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent(/cannot continue/i);
+    expect(screen.getByRole('button', { name: /reload the page/i })).toBeInTheDocument();
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
   });
 
   it('renders the children again on retry', async () => {
