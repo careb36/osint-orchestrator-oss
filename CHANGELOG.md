@@ -11,6 +11,14 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- Dashboard resilience and performance pass: the routed views sit inside an
+  error boundary keyed by the route, whose fallback offers *Try again* and
+  *Back to the overview* and which resets on navigation, so one crashed view
+  never takes the shell down; views are code-split and loaded on demand with
+  the libraries in two long-cached vendor chunks; the smoke test walks the
+  analyst path and fails on any `console.error` or UI error event. The DoD
+  (`ui/docs/dod.md`) records the state of every phase and `ui/docs/kpis.md`
+  the scorecard the current telemetry allows.
 - Run history with transitions: `GET /runs` and `GET /runs/{id}` carry the
   `risk_level` of the run's finding; the runs view and the target detail show
   the risk of each run and what changed since the target's previous run

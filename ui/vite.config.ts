@@ -26,6 +26,17 @@ export default defineConfig(({ mode }) => {
     build: {
       // Hashed asset names let the backend serve them with immutable caching.
       assetsDir: 'assets',
+      rollupOptions: {
+        output: {
+          // The libraries change far less often than the views: one vendor
+          // chunk keeps its immutable cache entry across dashboard releases,
+          // and each lazily loaded view (src/App.tsx) gets its own chunk.
+          manualChunks: {
+            react: ['react', 'react-dom', 'react-router-dom'],
+            query: ['@tanstack/react-query'],
+          },
+        },
+      },
     },
     test: {
       environment: 'jsdom',

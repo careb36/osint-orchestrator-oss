@@ -5,6 +5,12 @@ import { ErrorFallback } from './ErrorFallback';
 type ErrorBoundaryProps = {
   children: ReactNode;
   fallback?: ReactNode;
+  /**
+   * When this value changes while the fallback is showing, the boundary
+   * clears its error and renders its children again. The app passes the
+   * route path, so leaving a view that crashed recovers the shell.
+   */
+  resetKey?: string;
 };
 
 type ErrorBoundaryState = {
@@ -30,9 +36,19 @@ export class AppErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundar
     console.error('Unhandled UI error', error, errorInfo);
   }
 
+  componentDidUpdate(previous: ErrorBoundaryProps): void {
+    if (this.state.hasError && previous.resetKey !== this.props.resetKey) {
+      this.setState({ hasError: false });
+    }
+  }
+
+  retry = (): void => {
+    this.setState({ hasError: false });
+  };
+
   render(): ReactNode {
     if (this.state.hasError) {
-      return this.props.fallback ?? <ErrorFallback />;
+      return this.props.fallback ?? <ErrorFallback onRetry={this.retry} />;
     }
 
     return this.props.children;

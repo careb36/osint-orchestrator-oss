@@ -37,6 +37,20 @@ The following sources are sufficient to measure the baseline and target state wi
 
 The dashboard should surface these KPIs in weekly review windows, with the baseline established during the first live rollout period and targets evaluated after each phase gate.
 
+## Scorecard today
+
+What the dashboard can measure with the events that exist, checked against the
+guardrail below:
+
+| KPI | Status | Where |
+| --- | --- | --- |
+| Task completion time | Measured: median minutes from `started_at` to `finished_at` over the terminal runs of the loaded window (100 most recent) | Overview, key figures |
+| Adoption | Withheld: no operator identity or session event exists (ADR-005: one shared API key, no users) | — |
+| MTTR | Withheld: alerts have a dispatch status but no acknowledgement or resolution event | — |
+
+Adoption and MTTR return to the scorecard when the backend emits the events
+they need; until then the two targets above are not evaluated.
+
 ## Guardrail
 
 If a KPI cannot be computed from the current telemetry set, it is not a valid UI2 KPI and should be removed from the scorecard until the underlying event is available.
