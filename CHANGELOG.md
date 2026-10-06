@@ -11,6 +11,11 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- Run history with transitions: `GET /runs` and `GET /runs/{id}` carry the
+  `risk_level` of the run's finding; the runs view and the target detail show
+  the risk of each run and what changed since the target's previous run
+  (status, risk up or down), the runs view sorts by risk, and the target
+  detail opens with a timeline of its runs, oldest first.
 - Run handoff: `GET /runs/{id}/bundle` (the run directory with its signed
   `manifest.json` as one zip, verifiable offline) and `GET /runs/{id}/report.pdf`;
   the dashboard's run detail gains a Handoff block that verifies the target's

@@ -79,8 +79,8 @@ Interactive reference: `/docs` (OpenAPI at `/openapi.json`). Public routes are
 | `POST` | `/scheduler/reload` | Reload target cron jobs from `targets.yaml` without restarting the process |
 | `POST` | `/alerts/dlq/replay` | Replay dead-letter alert deliveries (`channel` = `webhook` \| `email`, `limit` = `1..1000`) |
 | `POST` | `/opencti/outbox/replay` | Replay dead-letter OpenCTI bundles (`run_id`, `limit` = `1..1000`) and drain the due ones now |
-| `GET` | `/runs` | 100 most recent runs, newest first; `?target_id=` filters |
-| `GET` | `/runs/{id}` | A run's status, counts, and `alerts[]` dispatch audit |
+| `GET` | `/runs` | 100 most recent runs, newest first, each with the `risk_level` of its finding (`null` without one); `?target_id=` filters |
+| `GET` | `/runs/{id}` | A run's status, counts, `risk_level`, and `alerts[]` dispatch audit |
 | `GET` | `/runs/{id}/delta` | Net-new observables for that run (from the DB, not the files) |
 | `GET` | `/runs/{id}/report` | Markdown report for a completed run (`text/plain`) |
 | `GET` | `/runs/{id}/finding` | LLM-synthesized finding for a completed run |

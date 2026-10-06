@@ -1,20 +1,22 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { EmptyState, ErrorState, LoadingState, PageLayout } from '../components/PageState';
+import { RunChange } from '../components/RunChange';
 import { SearchField } from '../components/SearchField';
 import { SortableHeader } from '../components/SortableHeader';
 import { StatusPill } from '../components/StatusPill';
 import { useListControls } from '../hooks/useListControls';
 import { useLocale } from '../i18n';
 import { api } from '../lib/api';
-import { formatDateTime, formatDuration, runStatusTone } from '../lib/format';
+import { formatDateTime, formatDuration, riskTone, runStatusTone } from '../lib/format';
+import { runTransitions } from '../lib/history';
 import { distinct, filterRuns, SINCE_OPTIONS, sortRuns, type RunSortKey, type SinceFilter } from '../lib/listing';
 import { isActiveStatus } from '../lib/overview';
 import type { RunStatus } from '../types';
 
 const STATUSES: RunStatus[] = ['running', 'pending', 'failed', 'partial', 'success'];
 const DEFAULTS = { q: '', target: '', status: '', since: '' };
-const SORT_KEYS: RunSortKey[] = ['started', 'duration', 'observables', 'status', 'target'];
+const SORT_KEYS: RunSortKey[] = ['started', 'duration', 'observables', 'status', 'target', 'risk'];
 const ACTIVE_REFRESH_MS = 10_000;
 
 export function RunsPage() {
@@ -58,6 +60,8 @@ export function RunsPage() {
   }
 
   const now = new Date();
+  // Transitions are computed over the whole loaded window, not the filtered rows.
+  const transitions = runTransitions(runs.data);
   const visible = sortRuns(
     filterRuns(
       runs.data,
@@ -126,6 +130,8 @@ export function RunsPage() {
               <th scope="col">{t('col.run')}</th>
               <SortableHeader label={t('col.target')} column="target" sort={controls.sort} onSort={controls.toggleSort} />
               <SortableHeader label={t('col.status')} column="status" sort={controls.sort} onSort={controls.toggleSort} />
+              <SortableHeader label={t('col.risk')} column="risk" sort={controls.sort} onSort={controls.toggleSort} naturalDir="desc" />
+              <th scope="col">{t('col.change')}</th>
               <SortableHeader label={t('col.newObservables')} column="observables" sort={controls.sort} onSort={controls.toggleSort} naturalDir="desc" />
               <SortableHeader label={t('col.started')} column="started" sort={controls.sort} onSort={controls.toggleSort} naturalDir="desc" />
               <SortableHeader label={t('col.duration')} column="duration" sort={controls.sort} onSort={controls.toggleSort} naturalDir="desc" />
@@ -145,6 +151,10 @@ export function RunsPage() {
                   <td>
                     <StatusPill label={run.status} tone={runStatusTone(run.status)} />
                     {run.error ? <small className="error-text"> {run.error}</small> : null}
+                  </td>
+                  <td>{run.risk_level ? <StatusPill label={run.risk_level} tone={riskTone(run.risk_level)} /> : <span className="muted">—</span>}</td>
+                  <td>
+                    <RunChange transition={transitions.get(run.id)} />
                   </td>
                   <td>{run.new_observables}</td>
                   <td>{formatDateTime(run.started_at, locale)}</td>

@@ -631,6 +631,67 @@ a {
   outline-offset: 1px;
 }
 
+/* ── Run history ──────────────────────────────────────────────────────── */
+
+.changes {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.change {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.change-up {
+  border-color: rgba(248, 113, 113, 0.6);
+  color: #fecaca;
+}
+
+.change-down {
+  border-color: rgba(74, 222, 128, 0.6);
+  color: #bbf7d0;
+}
+
+.run-timeline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+
+.timeline-dot {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  color: #e5eef9;
+  text-decoration: none;
+  font-size: 0.85rem;
+}
+
+.timeline-dot.tone-ok {
+  border-color: rgba(74, 222, 128, 0.6);
+}
+
+.timeline-dot.tone-warning {
+  border-color: rgba(250, 204, 21, 0.6);
+}
+
+.timeline-dot.tone-error {
+  border-color: rgba(248, 113, 113, 0.6);
+}
+
+.timeline-dot.tone-info {
+  border-color: rgba(125, 211, 252, 0.8);
+}
 /* ── Run handoff ──────────────────────────────────────────────────────── */
 
 .handoff {
