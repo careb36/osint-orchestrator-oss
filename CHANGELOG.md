@@ -11,6 +11,12 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- Run handoff: `GET /runs/{id}/bundle` (the run directory with its signed
+  `manifest.json` as one zip, verifiable offline) and `GET /runs/{id}/report.pdf`;
+  the dashboard's run detail gains a Handoff block that verifies the target's
+  evidence chain, downloads the bundle or the PDF, copies a plain-text handoff
+  summary, starts a follow-up run and lists the alerts the run dispatched, and
+  the evidence tab leads to the report and to the handoff.
 - Operator dashboard foundation (`ui/`): the React app is built in a Node
   stage of both Dockerfiles and served by the orchestrator at `/console`
   (client routes, `/console/assets/*` with immutable caching,

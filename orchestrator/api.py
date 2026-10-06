@@ -9,11 +9,13 @@ Data/control endpoints sit behind the API-key dependency
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import os
 import re
 import secrets
 import uuid
+import zipfile
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -864,6 +866,74 @@ async def get_run_manifest(run_id: int) -> dict[str, Any]:
             status_code=404, detail=t("manifest.not_found", run_id=run_id)
         ) from None
     return payload
+
+
+async def _run_or_404(run_id: int) -> Run:
+    async with get_session() as session:
+        run = await session.get(Run, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=t("run_not_found", run_id=run_id))
+    return run
+
+
+@router.get("/runs/{run_id}/report.pdf", response_class=FileResponse, tags=["runs"])
+async def get_run_report_pdf(run_id: int) -> FileResponse:
+    """Serve the PDF companion of the report (written next to report.md), or 404."""
+    run = await _run_or_404(run_id)
+    pdf_path = Path(run.report_path).with_name("report.pdf") if run.report_path else None
+    if pdf_path is None or not pdf_path.is_file():
+        raise HTTPException(status_code=404, detail=t("report_pdf_not_found", run_id=run_id))
+    return FileResponse(
+        pdf_path,
+        media_type="application/pdf",
+        filename=f"run-{run_id}-report.pdf",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+_BUNDLE_NAME_SAFE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+@router.get("/runs/{run_id}/bundle", tags=["runs"])
+async def get_run_bundle(run_id: int) -> Response:
+    """The run's artefacts as one zip archive, the signed manifest included.
+
+    The handoff artefact: whoever receives it can recompute the SHA-256 of
+    each file against ``manifest.json`` and check the signature with the
+    deployment's key, without access to this service. A sealed run ships
+    exactly the files its manifest covers (plus the manifest), so nothing
+    unsigned travels under the "signed bundle" name; an unsealed run ships
+    every regular file of its directory. Symbolic links are never followed.
+    """
+    run = await _run_or_404(run_id)
+    run_dir = Path(run.report_path).parent if run.report_path else None
+    if run_dir is None or not run_dir.is_dir():
+        raise HTTPException(status_code=404, detail=t("bundle.not_found", run_id=run_id))
+    files = sorted(item for item in run_dir.iterdir() if item.is_file() and not item.is_symlink())
+    manifest_path = run_dir / "manifest.json"
+    if manifest_path in files:
+        try:
+            covered = set(load_manifest_file(manifest_path).get("artefacts", {}))
+        except (OSError, TypeError, ValueError):
+            covered = set()
+        if covered:
+            files = [item for item in files if item.name in covered or item == manifest_path]
+    if not files:
+        raise HTTPException(status_code=404, detail=t("bundle.not_found", run_id=run_id))
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for item in files:
+            archive.write(item, arcname=item.name)
+    target_slug = _BUNDLE_NAME_SAFE.sub("-", run.target_id).strip("-") or "target"
+    filename = f"run-{run_id}-{target_slug}.zip"
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @router.get("/targets/{target_id}/chain/verify", response_model=dict[str, Any], tags=["runs"])

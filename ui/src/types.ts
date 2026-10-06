@@ -108,3 +108,17 @@ export type TriggerRunResponse = {
 };
 
 export type ArtifactKind = 'report' | 'finding' | 'evidence' | 'manifest' | 'delta';
+
+/** GET /targets/{id}/chain/verify (orchestrator/evidence.py::verify_target_chain). */
+export type ChainVerification = {
+  ok: boolean;
+  checked: number;
+  unsealed: number;
+  first_broken_run_id: number | null;
+  reason: string | null;
+  detail: string | null;
+  anchor_run_id: number | null;
+  anchor_previous_manifest_sha256: string | null;
+  /** Operator-language explanation of `reason`, set by the API when the chain is broken. */
+  message?: string;
+};

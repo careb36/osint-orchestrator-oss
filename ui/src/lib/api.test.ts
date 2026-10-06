@@ -1,4 +1,4 @@
-import { api, ApiError } from './api';
+import { api, ApiError, filenameFromDisposition } from './api';
 import { currentLocale, setCurrentLocale } from './locale';
 import { uiTelemetry } from './telemetry';
 
@@ -50,5 +50,15 @@ describe('api.request language', () => {
     setCurrentLocale('es');
     await api.getTargets();
     expect(headersOf(1).get('Accept-Language')).toBe('es');
+  });
+});
+
+describe('filenameFromDisposition', () => {
+  it('reads a quoted or bare file name and refuses paths', () => {
+    expect(filenameFromDisposition('attachment; filename="run-42-acme.zip"')).toBe('run-42-acme.zip');
+    expect(filenameFromDisposition('attachment; filename=run-42.pdf')).toBe('run-42.pdf');
+    expect(filenameFromDisposition('attachment')).toBeNull();
+    expect(filenameFromDisposition(null)).toBeNull();
+    expect(filenameFromDisposition('attachment; filename="../etc/passwd"')).toBeNull();
   });
 });

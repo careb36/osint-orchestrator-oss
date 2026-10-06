@@ -1,4 +1,5 @@
 import type {
+  ChainVerification,
   DeltaRow,
   EvidenceRow,
   Finding,
@@ -79,7 +80,7 @@ export function clearApiKey(): void {
 
 type RequestOptions = {
   method?: 'GET' | 'POST';
-  parse?: 'json' | 'text' | 'blob';
+  parse?: 'json' | 'text' | 'blob' | 'download';
   body?: unknown;
   /** Try this key instead of the stored one (used to validate a key before storing it). */
   apiKey?: string | null;
@@ -88,6 +89,19 @@ type RequestOptions = {
   /** A 404 is an expected answer (an artefact the run never produced): not an api_error. */
   optional?: boolean;
 };
+
+/** A file the API handed over, with the name its Content-Disposition suggested. */
+export type Download = { blob: Blob; filename: string | null };
+
+// filename="…" or a bare token; the RFC 5987 filename*= form is not used by the API.
+const DISPOSITION_FILENAME = /filename=(?:"([^"]*)"|([^;]+))/i;
+
+export function filenameFromDisposition(header: string | null): string | null {
+  const match = header?.match(DISPOSITION_FILENAME);
+  const name = (match?.[1] ?? match?.[2] ?? '').trim();
+  // A path separator in a server-suggested name is never honoured.
+  return name && !/[\\/]/.test(name) ? name : null;
+}
 
 export function authHeaders(apiKey?: string | null): Record<string, string> {
   const key = apiKey === undefined ? readApiKey() : apiKey;
@@ -149,6 +163,13 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     if (parse === 'blob') {
       return (await response.blob()) as T;
     }
+    if (parse === 'download') {
+      const download: Download = {
+        blob: await response.blob(),
+        filename: filenameFromDisposition(response.headers.get('Content-Disposition')),
+      };
+      return download as T;
+    }
     return (await response.json()) as T;
   } catch (error) {
     if (!(error instanceof ApiError)) {
@@ -173,6 +194,8 @@ export const api = {
   getRunEvidence: (runId: string | number) => request<EvidenceRow[]>(`/runs/${runId}/evidence`),
   getRunManifest: (runId: string | number) => request<Record<string, unknown>>(`/runs/${runId}/manifest`),
   getRiskTrends: () => request<RiskTrend[]>('/analytics/risk-trends'),
+  verifyChain: (targetId: string) =>
+    request<ChainVerification>(`/targets/${encodeURIComponent(targetId)}/chain/verify`),
   triggerRun: (targetId: string) =>
     request<TriggerRunResponse>(`/targets/${encodeURIComponent(targetId)}/run`, { method: 'POST' }),
 };
@@ -182,13 +205,27 @@ export const api = {
  * API key header) and hand the bytes to the browser as a file.
  */
 export async function downloadArtifact(runId: string | number, artifact: 'report' | 'finding' | 'evidence' | 'manifest' | 'delta') {
-  const isText = artifact === 'report';
-  const blob = await request<Blob>(`/runs/${runId}/${artifact}`, { parse: 'blob' });
-  const extension = isText ? 'md' : 'json';
+  const extension = artifact === 'report' ? 'md' : 'json';
+  await downloadFile(`/runs/${runId}/${artifact}`, `run-${runId}-${artifact}.${extension}`);
+}
+
+/** The whole run directory, signed manifest included, as one zip (GET /runs/{id}/bundle). */
+export async function downloadRunBundle(runId: string | number) {
+  await downloadFile(`/runs/${runId}/bundle`, `run-${runId}-bundle.zip`);
+}
+
+/** The PDF companion of the report (GET /runs/{id}/report.pdf). */
+export async function downloadRunPdf(runId: string | number) {
+  await downloadFile(`/runs/${runId}/report.pdf`, `run-${runId}-report.pdf`);
+}
+
+/** Save a file the API serves; the server's suggested name wins over the fallback. */
+async function downloadFile(path: string, fallbackName: string) {
+  const { blob, filename } = await request<Download>(path, { parse: 'download' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
-  anchor.download = `run-${runId}-${artifact}.${extension}`;
+  anchor.download = filename ?? fallbackName;
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
