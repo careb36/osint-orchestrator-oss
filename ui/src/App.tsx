@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { NavLink, Route, Routes } from 'react-router-dom';
+import { lazy, Suspense, useEffect, type ReactNode } from 'react';
+import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { useApiKey } from './auth';
 import { ApiKeyGate } from './components/ApiKeyGate';
 import { AppErrorBoundary } from './components/ErrorBoundary';
@@ -7,13 +7,31 @@ import { ErrorState, LoadingState } from './components/PageState';
 import { locales, useLocale, type MessageKey } from './i18n';
 import { describeUnavailable } from './lib/unavailable';
 import { trackUiTelemetry } from './lib/telemetry';
-import { HomePage } from './pages/HomePage';
-import { NotFoundPage } from './pages/NotFoundPage';
-import { RunWorkspacePage } from './pages/RunWorkspacePage';
-import { RunsPage } from './pages/RunsPage';
-import { TargetDetailPage } from './pages/TargetDetailPage';
-import { TargetsPage } from './pages/TargetsPage';
 import { APP_ROUTES } from './routes';
+
+// One chunk per view: the shell and the overview load first, the rest when
+// a view is opened (vite.config.ts splits the vendor libraries separately).
+const HomePage = lazy(() => import('./pages/HomePage').then((m) => ({ default: m.HomePage })));
+const TargetsPage = lazy(() => import('./pages/TargetsPage').then((m) => ({ default: m.TargetsPage })));
+const TargetDetailPage = lazy(() => import('./pages/TargetDetailPage').then((m) => ({ default: m.TargetDetailPage })));
+const RunsPage = lazy(() => import('./pages/RunsPage').then((m) => ({ default: m.RunsPage })));
+const RunWorkspacePage = lazy(() => import('./pages/RunWorkspacePage').then((m) => ({ default: m.RunWorkspacePage })));
+const NotFoundPage = lazy(() => import('./pages/NotFoundPage').then((m) => ({ default: m.NotFoundPage })));
+
+/**
+ * A crash inside one view shows the fallback in place of that view only; the
+ * shell, the navigation and the language switch keep working, and moving to
+ * another route (the key) renders views again.
+ */
+function ViewBoundary({ children }: { children: ReactNode }) {
+  const { pathname } = useLocation();
+  const { t } = useLocale();
+  return (
+    <AppErrorBoundary resetKey={pathname}>
+      <Suspense fallback={<LoadingState message={t('loadingView')} />}>{children}</Suspense>
+    </AppErrorBoundary>
+  );
+}
 
 function AppShell() {
   const { mode, hasKey, unavailableReason, forgetKey, retry } = useApiKey();
@@ -80,15 +98,17 @@ function AppShell() {
           />
         ) : null}
         {mode === 'open' || mode === 'ready' ? (
-          <Routes>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/targets" element={<TargetsPage />} />
-            <Route path="/targets/:targetId" element={<TargetDetailPage />} />
-            <Route path="/targets/:targetId/runs/:runId" element={<RunWorkspacePage />} />
-            <Route path="/runs" element={<RunsPage />} />
-            <Route path="/runs/:runId" element={<RunWorkspacePage />} />
-            <Route path="*" element={<NotFoundPage />} />
-          </Routes>
+          <ViewBoundary>
+            <Routes>
+              <Route path="/" element={<HomePage />} />
+              <Route path="/targets" element={<TargetsPage />} />
+              <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+              <Route path="/targets/:targetId/runs/:runId" element={<RunWorkspacePage />} />
+              <Route path="/runs" element={<RunsPage />} />
+              <Route path="/runs/:runId" element={<RunWorkspacePage />} />
+              <Route path="*" element={<NotFoundPage />} />
+            </Routes>
+          </ViewBoundary>
         ) : null}
       </main>
     </div>

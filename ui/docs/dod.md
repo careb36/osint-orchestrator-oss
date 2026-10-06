@@ -4,12 +4,12 @@
 
 The goal of this phase is to establish a stable app shell, reliable API access, and predictable UX primitives.
 
-- [ ] Shared application shell with clear navigation and consistent layout.
-- [ ] Typed API client and a bounded error-handling strategy.
-- [ ] Loading, empty, and error states for every major route.
-- [ ] Global error boundary with visible recovery path.
-- [ ] Responsive layout that remains legible on narrow screens.
-- [ ] Unit tests cover the shell and fallback states.
+- [x] Shared application shell with clear navigation and consistent layout. *`src/App.tsx`, routes from `src/routes.ts`.*
+- [x] Typed API client and a bounded error-handling strategy. *`src/lib/api.ts` (`ApiError`, `optional` 404s, bounded telemetry ring).*
+- [x] Loading, empty, and error states for every major route. *`src/components/PageState.tsx`, used by every view.*
+- [x] Global error boundary with visible recovery path. *`src/components/ErrorBoundary.tsx`: the fallback offers Try again and Back to the overview, and the boundary resets on route change so one crashed view never takes the shell down.*
+- [x] Responsive layout that remains legible on narrow screens. *Top bar and navigation stack under 720 px; tables scroll within the content column.*
+- [x] Unit tests cover the shell and fallback states. *`src/App.test.tsx`, `src/components/ErrorBoundary.test.tsx`, `src/a11y.test.tsx`.*
 
 Definition of done for Phase 1: the shell is stable enough to ship to operators without bespoke page-level fixes, and all routes are accessible to a future feature team without reworking the base layout.
 
@@ -35,7 +35,7 @@ The goal of this phase is to support evidence review and decision-making within 
 - [x] Evidence review controls that show provenance and confidence alongside the result.
 - [x] Search, filters, and drill-down patterns that support deeper investigation.
 - [ ] Clear handoff from evidence review to report output or follow-up action.
-- [ ] No uncaught runtime errors during a typical analyst investigation path.
+- [x] No uncaught runtime errors during a typical analyst investigation path. *`src/App.e2e.test.tsx` walks overview → targets → target → runs → run (finding, evidence with a filter, report, manifest) → back with a `console.error` spy and the telemetry ring both required to stay empty.*
 
 Definition of done for Phase 3: an analyst can investigate a target from dashboard to evidence review without leaving the product or losing context.
 
@@ -46,8 +46,8 @@ The goal of this phase is to close the loop between investigation and human-read
 - [ ] Report and export path aligned to the signed-report workflow.
 - [ ] Historical run review with clear state and result transitions.
 - [ ] Handover actions documented and discoverable for operators.
-- [ ] Performance and accessibility pass on the main analyst journeys. *Accessibility: axe-core smoke tests over every main view (`ui/src/a11y.test.tsx`); performance pass still open.*
-- [ ] KPI telemetry confirms the adoption, MTTR, and task completion targets are met or trending toward them.
+- [x] Performance and accessibility pass on the main analyst journeys. *Accessibility: axe-core smoke tests over every main view (`ui/src/a11y.test.tsx`). Performance: views are code-split and loaded on demand, the libraries live in two vendor chunks that keep their immutable cache entry across dashboard releases; the single 284.8 kB script became a 37.8 kB shell plus 157.6 kB (React, router) and 53.2 kB (query) vendor chunks and 0.3 to 9.3 kB per view, so a release that changes one view invalidates that view's chunk only. List refreshes are bounded (10 s while a run is active, otherwise none), and the overview makes one bounded finding request per recent run.*
+- [ ] KPI telemetry confirms the adoption, MTTR, and task completion targets are met or trending toward them. *Needs production usage, not code: task completion time (median run duration) is on the overview and can be read weekly; adoption and MTTR are withheld from the scorecard under the KPI guardrail until the backend emits operator sessions and alert acknowledgements (see `kpis.md`, Scorecard today).*
 
 Definition of done for Phase 4: the UI supports the operational lifecycle from monitoring to investigation to handoff with measurement evidence that the workflow is materially improving analyst speed and clarity.
 

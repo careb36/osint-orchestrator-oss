@@ -11,6 +11,14 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- Dashboard resilience and performance pass: the routed views sit inside an
+  error boundary keyed by the route, whose fallback offers *Try again* and
+  *Back to the overview* and which resets on navigation, so one crashed view
+  never takes the shell down; views are code-split and loaded on demand with
+  the libraries in two long-cached vendor chunks; the smoke test walks the
+  analyst path and fails on any `console.error` or UI error event. The DoD
+  (`ui/docs/dod.md`) records the state of every phase and `ui/docs/kpis.md`
+  the scorecard the current telemetry allows.
 - Operator dashboard foundation (`ui/`): the React app is built in a Node
   stage of both Dockerfiles and served by the orchestrator at `/console`
   (client routes, `/console/assets/*` with immutable caching,

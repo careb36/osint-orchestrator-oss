@@ -154,6 +154,8 @@ type Route = {
   pattern: RegExp;
   status?: number;
   body: unknown | ((match: RegExpMatchArray) => unknown);
+  /** Serve the body as text/plain instead of JSON (the Markdown report). */
+  text?: boolean;
 };
 
 type MockOptions = {
@@ -179,6 +181,11 @@ export const defaultRoutes: Route[] = [
   { pattern: /^\/runs\/\d+\/evidence$/, body: [] },
   { pattern: /^\/runs\/\d+\/delta$/, body: [] },
   { pattern: /^\/analytics\/risk-trends$/, body: sampleTrends },
+  { pattern: new RegExp(`^/runs/${sampleRuns[0].id}/report$`), body: '# Report\n\nTwo new subdomains.\n', text: true },
+  {
+    pattern: new RegExp(`^/runs/${sampleRuns[0].id}/manifest$`),
+    body: { manifest_version: 1, run_id: sampleRuns[0].id, target_id: sampleRuns[0].target_id, artefacts: { 'report.md': 'sha256:1' }, signature: 'hmac-sha256:test' },
+  },
 ];
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -209,6 +216,9 @@ export function installFetchMock(options: MockOptions = {}) {
         const body = typeof route.body === 'function' ? route.body(match) : route.body;
         if (body === null) {
           return jsonResponse(404, { detail: 'Not found' });
+        }
+        if (route.text) {
+          return new Response(String(body), { status: route.status ?? 200, headers: { 'Content-Type': 'text/plain' } });
         }
         return jsonResponse(route.status ?? 200, body);
       }

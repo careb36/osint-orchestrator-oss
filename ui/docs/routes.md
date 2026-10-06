@@ -7,7 +7,8 @@ This document captures the top-level route map for the UI2 super-app shell so co
 - The app is wrapped in a single `AppShell` layout.
 - Top-level navigation is defined in `src/routes.ts` and is rendered from the same source of truth.
 - Shared page layout/state primitives live in `src/components/PageState.tsx` and are expected to be reused by every major route.
-- Global runtime errors are caught by `src/components/ErrorBoundary.tsx` and show a fallback state instead of crashing the shell.
+- Runtime errors are caught by `src/components/ErrorBoundary.tsx`: one boundary around the whole app, and one around the routed views keyed by the route path, so a crashed view shows a fallback with *Try again* and *Back to the overview* while the shell keeps working, and changing route renders views again.
+- Views are lazy-loaded (`React.lazy` in `src/App.tsx`, one chunk each); the libraries build into two vendor chunks (`vite.config.ts`).
 
 ## Route map
 

@@ -352,7 +352,7 @@ API failures and unhandled client exceptions without exposing raw API keys.
 | Signal | Likely cause | Immediate action |
 | --- | --- | --- |
 | `/console` loads but all data calls return `401` | API key missing or stale | Verify the stored key, clear/re-enter it, check the service's `ORCHESTRATOR_API_KEY` value |
-| `/console` fails in-browser with a JS error | Frontend regression or malformed API payload | Open the browser console, inspect the last `ui-telemetry` event, and compare it with the failing route and payload |
+| A view shows "Something went wrong" with *Try again* | Frontend regression or malformed API payload in that view (the shell keeps working) | Try again or open another view; in the browser console inspect the last `ui-telemetry` events (`ui_error`, `error_boundary_triggered`) and compare them with the failing route and payload |
 | `/console` answers `503` | The image or checkout has no dashboard build | Build `ui/` and copy `ui/dist` to `orchestrator/static/ui-dist` (the Docker images do this in their Node stage) |
 | `/console/assets/*` fails to load | Deployment problem or CSP regression | Confirm the page loads with the `script-src 'self'` CSP and the hashed asset is served with `200` and an immutable cache header |
 | Data loads but a target or run view is empty | API/auth issue or empty database | Check `/targets`, `/runs` and `/analytics/risk-trends` with the same key; if empty, verify scheduler and database state |

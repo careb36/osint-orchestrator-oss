@@ -56,6 +56,20 @@ engine) and fails on any violation. Tables carry sortable headers with
 `aria-live="polite"`, failures use `role="alert"`, and the run tabs follow the
 tablist pattern.
 
+## Resilience and performance
+
+Every routed view sits inside an error boundary keyed by the route: a crash
+shows a fallback with *Try again* and *Back to the overview*, the shell and the
+navigation keep working, and changing route renders views again. The crash is
+recorded in the telemetry ring (`src/lib/telemetry.ts`) and on `console.error`.
+`src/App.e2e.test.tsx` walks the analyst path (overview, targets, target,
+runs, run with its finding, evidence, report and manifest) and fails on any
+`console.error` or UI error event.
+
+Views are code-split and loaded on demand; React, the router and the query
+library build into two vendor chunks so a dashboard release invalidates only
+the chunks it changed. Lists refresh every 10 s only while a run is active.
+
 ## Access
 
 Access follows ADR-005: one static API key, the same one every API client uses.
