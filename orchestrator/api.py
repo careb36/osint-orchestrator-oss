@@ -922,17 +922,28 @@ _BUNDLE_NAME_SAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
 @router.get("/runs/{run_id}/bundle", tags=["runs"])
 async def get_run_bundle(run_id: int) -> Response:
-    """Every file of the run directory as one zip archive, the signed manifest included.
+    """The run's artefacts as one zip archive, the signed manifest included.
 
     The handoff artefact: whoever receives it can recompute the SHA-256 of
     each file against ``manifest.json`` and check the signature with the
-    deployment's key, without access to this service.
+    deployment's key, without access to this service. A sealed run ships
+    exactly the files its manifest covers (plus the manifest), so nothing
+    unsigned travels under the "signed bundle" name; an unsealed run ships
+    every regular file of its directory. Symbolic links are never followed.
     """
     run = await _run_or_404(run_id)
     run_dir = Path(run.report_path).parent if run.report_path else None
     if run_dir is None or not run_dir.is_dir():
         raise HTTPException(status_code=404, detail=t("bundle.not_found", run_id=run_id))
-    files = sorted(item for item in run_dir.iterdir() if item.is_file())
+    files = sorted(item for item in run_dir.iterdir() if item.is_file() and not item.is_symlink())
+    manifest_path = run_dir / "manifest.json"
+    if manifest_path in files:
+        try:
+            covered = set(load_manifest_file(manifest_path).get("artefacts", {}))
+        except (OSError, TypeError, ValueError):
+            covered = set()
+        if covered:
+            files = [item for item in files if item.name in covered or item == manifest_path]
     if not files:
         raise HTTPException(status_code=404, detail=t("bundle.not_found", run_id=run_id))
     buffer = io.BytesIO()

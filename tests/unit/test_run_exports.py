@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import zipfile
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -45,6 +46,7 @@ async def _prepare(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, with_file
     session_ctx = _session_factory(engine)
     monkeypatch.setattr(api_mod, "get_session", session_ctx)
     monkeypatch.setattr(settings, "orchestrator_api_key", "")
+    monkeypatch.setattr(settings, "orchestrator_language", "es")
 
     run_dir = tmp_path / "2026-10-06" / "acme.example" / "run-7"
     run_dir.mkdir(parents=True)
@@ -53,8 +55,20 @@ async def _prepare(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, with_file
         (run_dir / "report.pdf").write_bytes(b"%PDF-1.4 test")
         (run_dir / "bundle.stix.json").write_text("{}", encoding="utf-8")
         (run_dir / "delta.json").write_text("[]", encoding="utf-8")
-        (run_dir / "manifest.json").write_text('{"manifest_version": 1}', encoding="utf-8")
+        manifest = {
+            "manifest_version": 1,
+            "artefacts": {
+                "bundle.stix.json": "sha256:1",
+                "delta.json": "sha256:2",
+                "report.md": "sha256:3",
+                "report.pdf": "sha256:4",
+            },
+        }
+        (run_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
         (run_dir / "nested").mkdir()  # directories are not artefacts
+        # Dropped next to the artefacts after sealing: not covered, must not ship.
+        (run_dir / "report.md~").write_text("editor backup", encoding="utf-8")
+        (run_dir / "link.md").symlink_to(run_dir / "report.md")
     async with session_ctx() as session:
         run = Run(
             target_id="acme.example",
@@ -91,6 +105,32 @@ async def test_bundle_zips_every_artefact_of_the_run(
             "report.pdf",
         ]
         assert archive.read("report.md") == b"# Report\n"
+
+
+@pytest.mark.asyncio
+async def test_unsealed_run_bundle_ships_every_regular_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    run_id = await _prepare(monkeypatch, tmp_path, with_files=True)
+    async with api_mod.get_session() as session:
+        run = await session.get(Run, run_id)
+        run_dir = Path(run.report_path).parent
+        (run_dir / "manifest.json").unlink()
+        run.manifest_sha256 = None
+        session.add(run)
+        await session.commit()
+    with TestClient(app, raise_server_exceptions=True) as client:
+        response = client.get(f"/runs/{run_id}/bundle")
+    assert response.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        # No manifest to go by: every regular file, still no symlink.
+        assert archive.namelist() == [
+            "bundle.stix.json",
+            "delta.json",
+            "report.md",
+            "report.md~",
+            "report.pdf",
+        ]
 
 
 @pytest.mark.asyncio

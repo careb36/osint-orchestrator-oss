@@ -516,12 +516,18 @@ describe('App shell', () => {
 
     await user.click(screen.getByRole('button', { name: /verify evidence chain/i }));
     const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent("Chain broken at run #41: Artifact hash mismatch for 'report.md'");
+    expect(alert).toHaveTextContent("Chain broken at run #41: Artefact hash mismatch for 'report.md'");
     expect(within(alert).getByRole('link', { name: /open run #41/i })).toHaveAttribute('href', '/runs/41');
+
+    // Following the link opens another run: the verdict belongs to the old page and is gone.
+    await user.click(within(alert).getByRole('link', { name: /open run #41/i }));
+    await waitFor(() => expect(screen.queryByText(/chain broken/i)).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: /verify evidence chain/i })).toBeEnabled();
   });
 
   it('exports the signed bundle and the PDF through the API with the key header', async () => {
-    const fetchMock = installFetchMock();
+    window.sessionStorage.setItem(API_KEY_STORAGE_KEY, 'test-key');
+    const fetchMock = installFetchMock({ requireKey: 'test-key' });
     const createObjectURL = vi.fn(() => 'blob:run-42');
     const revokeObjectURL = vi.fn();
     Object.defineProperty(URL, 'createObjectURL', { value: createObjectURL, configurable: true });
@@ -540,6 +546,8 @@ describe('App shell', () => {
       const paths = fetchMock.mock.calls.map(([input]) => String(input));
       expect(paths).toContain('/runs/42/bundle');
       expect(paths).toContain('/runs/42/report.pdf');
+      const bundleCall = fetchMock.mock.calls.find(([input]) => String(input) === '/runs/42/bundle')!;
+      expect(new Headers((bundleCall[1] as RequestInit | undefined)?.headers).get('X-API-Key')).toBe('test-key');
       expect(createObjectURL).toHaveBeenCalledTimes(2);
     } finally {
       click.mockRestore();
@@ -600,6 +608,7 @@ describe('App shell', () => {
     const alerts = screen.getByRole('heading', { name: /alerts dispatched/i }).parentElement!;
     expect(within(alerts).getByRole('table')).toHaveTextContent('webhook');
     expect(within(alerts).getByRole('table')).toHaveTextContent('sent');
+    expect(within(alerts).getByRole('table').querySelector('.status-pill')).toHaveTextContent('sent');
 
     await user.click(screen.getByRole('button', { name: /start follow-up run/i }));
     expect(await screen.findByRole('status')).toHaveTextContent(/run #99/i);

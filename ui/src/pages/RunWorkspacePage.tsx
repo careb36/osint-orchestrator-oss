@@ -10,7 +10,7 @@ import { useListControls } from '../hooks/useListControls';
 import { useStartRun } from '../hooks/useStartRun';
 import { useLocale, type MessageKey } from '../i18n';
 import { api, downloadArtifact, downloadRunBundle, downloadRunPdf } from '../lib/api';
-import { formatDateTime, formatDuration, riskTone, runStatusTone } from '../lib/format';
+import { alertStatusTone, formatDateTime, formatDuration, riskTone, runStatusTone } from '../lib/format';
 import { buildHandoffSummary, describeVerification } from '../lib/handoff';
 import { distinct, filterDelta, filterEvidence, sortEvidence, type EvidenceSortKey } from '../lib/listing';
 import { isActiveStatus } from '../lib/overview';
@@ -60,7 +60,8 @@ export function RunWorkspacePage() {
 
   const run = useQuery({ queryKey: ['run', runId], queryFn: () => api.getRun(runId), enabled: Boolean(runId) });
   const finding = useQuery({ queryKey: ['run', runId, 'finding'], queryFn: () => api.getRunFinding(runId, { optional: true }), enabled: Boolean(runId) });
-  const evidence = useQuery({ queryKey: ['run', runId, 'evidence'], queryFn: () => api.getRunEvidence(runId), enabled: artifact === 'evidence' });
+  // Loaded for every tab: the handoff summary counts the evidence by relevance.
+  const evidence = useQuery({ queryKey: ['run', runId, 'evidence'], queryFn: () => api.getRunEvidence(runId), enabled: Boolean(runId) });
   const delta = useQuery({ queryKey: ['run', runId, 'delta'], queryFn: () => api.getRunDelta(runId), enabled: artifact === 'delta' });
   const report = useQuery({ queryKey: ['run', runId, 'report'], queryFn: () => api.getRunReport(runId), enabled: artifact === 'report' });
   const manifest = useQuery({ queryKey: ['run', runId, 'manifest'], queryFn: () => api.getRunManifest(runId), enabled: artifact === 'manifest' });
@@ -428,7 +429,8 @@ export function RunWorkspacePage() {
                 <button type="button" className="ghost-button" onClick={() => handleExport('pdf')}>
                   {t('handoff.pdf')}
                 </button>
-                <button type="button" className="ghost-button" onClick={handleCopySummary}>
+                {/* The summary quotes the finding and the evidence counts: wait for both. */}
+                <button type="button" className="ghost-button" onClick={handleCopySummary} disabled={finding.isLoading || evidence.isLoading}>
                   {t('handoff.copy')}
                 </button>
               </div>
@@ -485,8 +487,8 @@ export function RunWorkspacePage() {
                 <tbody>
                   {run.data.alerts.map((alert, index) => (
                     <tr key={alert.id ?? index}>
-                      <td>{alert.channel ?? '—'}</td>
-                      <td>{alert.status ?? '—'}</td>
+                      <td>{alert.channel ? tv(alert.channel) : '—'}</td>
+                      <td>{alert.status ? <StatusPill label={alert.status} tone={alertStatusTone(alert.status)} /> : '—'}</td>
                       <td>{formatDateTime(alert.sent_at, locale)}</td>
                       <td>{alert.error ?? '—'}</td>
                     </tr>

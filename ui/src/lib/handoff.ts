@@ -14,18 +14,40 @@ export type HandoffInput = {
   href: string;
 };
 
+const REASON_KEYS: Record<string, MessageKey> = {
+  artefact_hash: 'chain.reason.artefact_hash',
+  artefact_missing: 'chain.reason.artefact_missing',
+  manifest_missing: 'chain.reason.manifest_missing',
+  signature: 'chain.reason.signature',
+  signature_key: 'chain.reason.signature_key',
+  chain_link: 'chain.reason.chain_link',
+  unsupported_version: 'chain.reason.unsupported_version',
+};
+
+/**
+ * Why the chain broke, in the operator's language. The API's `message` is
+ * rendered in the server's configured language, which need not match the
+ * dashboard's, so the stable `reason` id is translated here; an id this
+ * build does not know falls back to the server text.
+ */
+export function describeReason(t: Translate, result: ChainVerification): string {
+  const key = result.reason ? REASON_KEYS[result.reason] : undefined;
+  if (key) {
+    return t(key, { name: result.detail ?? '', runId: result.first_broken_run_id ?? '' });
+  }
+  return result.message ?? result.reason ?? '';
+}
+
 /** Operator-language sentence for a chain verification result. */
 export function describeVerification(t: Translate, result: ChainVerification): string {
   if (result.ok) {
-    const runs = result.checked === 1 ? t('target.run') : t('target.runs');
-    let text = t('handoff.chain.ok', { checked: result.checked, runs });
+    let text = result.checked === 1 ? t('handoff.chain.okOne') : t('handoff.chain.okMany', { checked: result.checked });
     if (result.unsealed > 0) {
-      const unsealedRuns = result.unsealed === 1 ? t('target.run') : t('target.runs');
-      text += ` ${t('handoff.chain.unsealed', { count: result.unsealed, runs: unsealedRuns })}`;
+      text += ` ${result.unsealed === 1 ? t('handoff.chain.unsealedOne') : t('handoff.chain.unsealedMany', { count: result.unsealed })}`;
     }
     return text;
   }
-  const message = result.message ?? result.reason ?? '';
+  const message = describeReason(t, result);
   return result.first_broken_run_id === null
     ? t('handoff.chain.brokenNoRun', { message })
     : t('handoff.chain.broken', { runId: result.first_broken_run_id, message });
