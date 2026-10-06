@@ -44,7 +44,7 @@ Definition of done for Phase 3: an analyst can investigate a target from dashboa
 The goal of this phase is to close the loop between investigation and human-ready outputs.
 
 - [ ] Report and export path aligned to the signed-report workflow.
-- [ ] Historical run review with clear state and result transitions.
+- [x] Historical run review with clear state and result transitions. *Every run row carries its risk level and a Change column (status and risk against the target's previous run); target detail opens with a timeline of its runs, oldest first.*
 - [ ] Handover actions documented and discoverable for operators.
 - [ ] Performance and accessibility pass on the main analyst journeys. *Accessibility: axe-core smoke tests over every main view (`ui/src/a11y.test.tsx`); performance pass still open.*
 - [ ] KPI telemetry confirms the adoption, MTTR, and task completion targets are met or trending toward them.

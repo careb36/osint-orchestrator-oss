@@ -7,7 +7,7 @@ import { ApiKeyProvider } from './auth';
 import { LOCALE_STORAGE_KEY, LocaleProvider, type Locale } from './i18n';
 import { API_KEY_STORAGE_KEY } from './lib/api';
 import { uiTelemetry } from './lib/telemetry';
-import { installFetchMock } from './test/mockApi';
+import { installFetchMock, sampleRuns } from './test/mockApi';
 
 // The assertions below read the English catalogue; Spanish is the default
 // for operators and has its own tests at the end of this file.
@@ -487,6 +487,54 @@ describe('App shell', () => {
     expect(await screen.findByRole('heading', { name: /run #42/i })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /finding/i })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /report/i })).toBeInTheDocument();
+  });
+
+  it('shows the risk of each run and what changed since the previous run of the target', async () => {
+    const history = [
+      { ...sampleRuns[0], id: 40, started_at: '2026-09-29T06:00:00Z', finished_at: '2026-09-29T06:03:00Z', status: 'partial', risk_level: 'medium' },
+      { ...sampleRuns[0], id: 41, started_at: '2026-09-30T06:00:00Z', finished_at: '2026-09-30T06:02:00Z', status: 'failed', risk_level: null, error: 'collector timeout' },
+      sampleRuns[0], // #42, success, high
+    ];
+    installFetchMock({ routes: [{ pattern: /^\/runs(\?.*)?$/, body: history }] });
+    const user = userEvent.setup();
+    renderApp(['/runs']);
+
+    const table = await screen.findByRole('table');
+    const rowOf = (id: string) => within(table).getAllByRole('row').find((row) => within(row).queryByRole('link', { name: id }))!;
+    expect(rowOf('#40')).toHaveTextContent('first run');
+    expect(rowOf('#41')).toHaveTextContent('status partial → failed');
+    expect(rowOf('#41')).not.toHaveTextContent(/risk (up|down)/);
+    expect(rowOf('#42')).toHaveTextContent('status failed → success');
+    expect(rowOf('#42')).toHaveTextContent('risk up medium → high');
+    expect(within(rowOf('#42')).getByText('high')).toBeInTheDocument();
+
+    // Sorting by risk puts the run with the highest level first and the ones without a finding last.
+    await user.click(within(screen.getByRole('columnheader', { name: /^risk/i })).getByRole('button'));
+    const ids = within(table).getAllByRole('row').slice(1).map((row) => within(row).getAllByRole('link')[0].textContent);
+    expect(ids).toEqual(['#42', '#40', '#41']);
+  });
+
+  it('draws the run history of a target oldest first with risk and change columns', async () => {
+    const history = [
+      sampleRuns[0],
+      { ...sampleRuns[0], id: 41, started_at: '2026-09-30T06:00:00Z', finished_at: '2026-09-30T06:02:00Z', status: 'success', risk_level: 'critical' },
+    ];
+    installFetchMock({ routes: [{ pattern: /^\/runs\?target_id=example-corp$/, body: history }] });
+    renderApp(['/targets/example-corp']);
+
+    await screen.findByRole('heading', { name: 'example.com' });
+    const timeline = screen.getByRole('list', { name: /run history, oldest first/i });
+    const items = within(timeline).getAllByRole('link');
+    expect(items.map((item) => item.getAttribute('aria-label'))).toEqual([
+      'Run #41: success, risk critical',
+      'Run #42: success, risk high',
+    ]);
+    expect(items[1]).toHaveAttribute('href', '/targets/example-corp/runs/42');
+    const table = screen.getByRole('table');
+    const rows = within(table).getAllByRole('row').slice(1);
+    expect(rows[0]).toHaveTextContent('#42');
+    expect(rows[0]).toHaveTextContent('risk down critical → high');
+    expect(rows[1]).toHaveTextContent('first run');
   });
 
   it('renders in Spanish and switches language on demand', async () => {

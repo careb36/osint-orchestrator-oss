@@ -11,6 +11,11 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- Run history with transitions: `GET /runs` and `GET /runs/{id}` carry the
+  `risk_level` of the run's finding; the runs view and the target detail show
+  the risk of each run and what changed since the target's previous run
+  (status, risk up or down), the runs view sorts by risk, and the target
+  detail opens with a timeline of its runs, oldest first.
 - Operator dashboard foundation (`ui/`): the React app is built in a Node
   stage of both Dockerfiles and served by the orchestrator at `/console`
   (client routes, `/console/assets/*` with immutable caching,

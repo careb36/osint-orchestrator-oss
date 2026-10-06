@@ -41,6 +41,8 @@ export type RunSummary = {
   error: string | null;
   report_path: string | null;
   manifest_sha256: string | null;
+  /** Risk level of the run's finding; null without one (failed early, synthesis off, still running). */
+  risk_level?: string | null;
 };
 
 export type AlertRecordSummary = {

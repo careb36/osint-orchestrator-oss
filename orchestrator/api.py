@@ -799,28 +799,55 @@ async def risk_trends() -> list[dict[str, Any]]:
     return trends
 
 
+async def _risk_levels_by_run(session: Any, run_ids: list[int]) -> dict[int, str]:
+    """The synthesised risk level of each run that has a finding (one query)."""
+    if not run_ids:
+        return {}
+    result = await session.exec(
+        select(FindingRecord.run_id, FindingRecord.risk_level).where(
+            FindingRecord.run_id.in_(run_ids)  # type: ignore[attr-defined]
+        )
+    )
+    return {int(run_id): str(risk_level) for run_id, risk_level in result.all()}
+
+
 @router.get("/runs", response_model=list[dict[str, Any]], tags=["runs"])
 async def list_runs(target_id: str | None = None) -> list[dict[str, Any]]:
-    """List recent runs, optionally filtered by target."""
+    """List recent runs, optionally filtered by target.
+
+    Each row carries ``risk_level``: the synthesised level of the run's
+    finding, or ``null`` for a run without one (failed early, synthesis off or
+    still running), so the history can show how the risk moved run by run.
+    """
     async with get_session() as session:
         stmt = select(Run).order_by(Run.started_at.desc()).limit(100)  # type: ignore[arg-type]
         if target_id:
             stmt = stmt.where(Run.target_id == target_id)
         result = await session.exec(stmt)
         runs = result.all()
-    return [r.model_dump() for r in runs]
+        risk_levels = await _risk_levels_by_run(
+            session, [int(run.id) for run in runs if run.id is not None]
+        )
+    rows = []
+    for run in runs:
+        data = run.model_dump()
+        data["risk_level"] = risk_levels.get(int(run.id)) if run.id is not None else None
+        rows.append(data)
+    return rows
 
 
 @router.get("/runs/{run_id}", response_model=dict[str, Any], tags=["runs"])
 async def get_run(run_id: int) -> dict[str, Any]:
-    """Return a run's status and counts, plus its alert dispatch audit trail."""
+    """Return a run's status and counts, its risk level and its alert dispatch audit trail."""
     async with get_session() as session:
         run = await session.get(Run, run_id)
         if run is None:
             raise HTTPException(status_code=404, detail=t("run_not_found", run_id=run_id))
         result = await session.exec(select(AlertRecord).where(AlertRecord.run_id == run_id))
         alert_records = result.all()
+        risk_levels = await _risk_levels_by_run(session, [run_id])
     data = run.model_dump()
+    data["risk_level"] = risk_levels.get(run_id)
     data["alerts"] = [a.model_dump() for a in alert_records]
     return data
 

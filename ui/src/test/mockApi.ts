@@ -48,6 +48,7 @@ export const sampleRuns: RunSummary[] = [
     error: null,
     report_path: 'daily_reports/2026-10-01/example-corp/report.md',
     manifest_sha256: 'a'.repeat(64),
+    risk_level: 'high',
   },
   {
     id: 43,
@@ -60,6 +61,7 @@ export const sampleRuns: RunSummary[] = [
     error: 'collector timeout',
     report_path: null,
     manifest_sha256: null,
+    risk_level: null,
   },
 ];
 

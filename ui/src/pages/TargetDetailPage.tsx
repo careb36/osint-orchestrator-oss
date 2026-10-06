@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { EmptyState, ErrorState, LoadingState, PageLayout } from '../components/PageState';
+import { RunChange } from '../components/RunChange';
 import { RunNotice } from '../components/RunNotice';
 import { StatusPill } from '../components/StatusPill';
 import { useListControls } from '../hooks/useListControls';
@@ -8,6 +9,7 @@ import { useStartRun } from '../hooks/useStartRun';
 import { useLocale } from '../i18n';
 import { api } from '../lib/api';
 import { formatDateTime, formatDuration, riskTone, runStatusTone } from '../lib/format';
+import { runTransitions } from '../lib/history';
 import { filterRuns, sortRuns, type RunSortKey } from '../lib/listing';
 import { isActiveStatus } from '../lib/overview';
 import type { RunStatus } from '../types';
@@ -31,6 +33,8 @@ export function TargetDetailPage() {
   const latestRisk = trend?.latest_risk_level ?? 'unknown';
   const now = new Date();
   const active = (runs.data ?? []).some((run) => isActiveStatus(run.status));
+  const transitions = runTransitions(runs.data ?? []);
+  const chronological = runs.data ? sortRuns(runs.data, { key: 'started', dir: 'asc' }, now) : [];
   const visibleRuns = runs.data
     ? sortRuns(filterRuns(runs.data, { query: '', target: '', status: controls.get('status') as RunStatus | '', since: '' }, now), controls.sort, now)
     : [];
@@ -95,6 +99,22 @@ export function TargetDetailPage() {
       {runs.isLoading ? <LoadingState message={t('target.runsLoading')} /> : null}
       {runs.error ? <ErrorState description={t('target.runsDown')} /> : null}
       {runs.data && runs.data.length === 0 ? <EmptyState title={t('target.noRuns.title')} description={t('target.noRuns.body')} /> : null}
+      {chronological.length > 1 ? (
+        <ol className="run-timeline" aria-label={t('history.timeline')}>
+          {chronological.map((run) => (
+            <li key={run.id}>
+              <Link
+                to={`/targets/${encodeURIComponent(targetId)}/runs/${run.id}`}
+                className={`timeline-dot tone-${runStatusTone(run.status) || 'muted'}`}
+                aria-label={t('history.timelineItem', { runId: run.id, status: tv(run.status), risk: tv(run.risk_level ?? 'unknown') })}
+                title={formatDateTime(run.started_at, locale)}
+              >
+                <span aria-hidden="true">#{run.id}</span>
+              </Link>
+            </li>
+          ))}
+        </ol>
+      ) : null}
       {runs.data && runs.data.length > 0 ? (
         <div className="filters" role="search" aria-label={t('runs.filters')}>
           <label>
@@ -120,6 +140,8 @@ export function TargetDetailPage() {
             <tr>
               <th scope="col">{t('col.run')}</th>
               <th scope="col">{t('col.status')}</th>
+              <th scope="col">{t('col.risk')}</th>
+              <th scope="col">{t('col.change')}</th>
               <th scope="col">{t('col.collectors')}</th>
               <th scope="col">{t('col.newObservables')}</th>
               <th scope="col">{t('col.started')}</th>
@@ -134,6 +156,10 @@ export function TargetDetailPage() {
                 </td>
                 <td>
                   <StatusPill label={run.status} tone={runStatusTone(run.status)} />
+                </td>
+                <td>{run.risk_level ? <StatusPill label={run.risk_level} tone={riskTone(run.risk_level)} /> : <span className="muted">—</span>}</td>
+                <td>
+                  <RunChange transition={transitions.get(run.id)} />
                 </td>
                 <td>{run.collectors_run || '—'}</td>
                 <td>{run.new_observables}</td>

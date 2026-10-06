@@ -84,6 +84,17 @@ describe('runs', () => {
     expect(sortRuns(runs, { key: 'status', dir: 'asc' }, now).map((r) => r.status)).toEqual(['running', 'failed', 'partial', 'success']);
     expect(sortRuns(runs, { key: 'target', dir: 'asc' }, now).map((r) => r.target_id)).toEqual(['a', 'a', 'b', 'c']);
   });
+
+  it('sorts by risk level and keeps runs without a finding last either way', () => {
+    const withRisk = [
+      { ...runs[0], risk_level: 'medium' },
+      { ...runs[1], risk_level: null },
+      { ...runs[2], risk_level: 'critical' },
+      { ...runs[3], risk_level: 'low' },
+    ];
+    expect(sortRuns(withRisk, { key: 'risk', dir: 'desc' }, now).map((r) => r.id)).toEqual([3, 1, 4, 2]);
+    expect(sortRuns(withRisk, { key: 'risk', dir: 'asc' }, now).map((r) => r.id)).toEqual([4, 1, 3, 2]);
+  });
 });
 
 describe('evidence and delta', () => {
