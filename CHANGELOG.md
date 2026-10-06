@@ -157,6 +157,15 @@ from [SECURITY.md](SECURITY.md).
 
 ### Fixed
 
+- Security: model and internet-derived text is made inert more thoroughly.
+  HTML tags are stripped until none is left, so a tag re-formed by removing
+  an inner one (`<scr<b>ipt>`) or hidden behind a `<` in an attribute goes
+  too, and an unterminated tag cannot open one; setext headings, thematic
+  breaks and bare `www.` links are escaped like ATX headings and `http(s)`
+  already were. The synthesizer's fallback finding and its repair prompt
+  quote the validation error, which quotes the model's own reply, as one
+  inert, bounded line, and two invalid replies now count as a `failed`
+  synthesis instead of `ok`.
 - The integration tests (`tests/integration/test_e2e.py`) send
   `ORCHESTRATOR_API_KEY` to the protected routes and assert the `401` without
   it; since the API key landed (ADR-005) they had been failing against a
