@@ -11,6 +11,11 @@ export type RunTransition = {
   riskChange: { from: string; to: string; direction: 'up' | 'down' } | null;
 };
 
+/** A level the comparison can use: a finding without one says `unknown`, which is no information. */
+function knownRisk(level: string | null | undefined): string | null {
+  return level && level !== 'unknown' && level in RISK_RANK ? level : null;
+}
+
 function chronological(a: RunSummary, b: RunSummary): number {
   return parseApiDate(a.started_at).getTime() - parseApiDate(b.started_at).getTime() || a.id - b.id;
 }
@@ -20,8 +25,9 @@ function chronological(a: RunSummary, b: RunSummary): number {
  *
  * Runs are compared in start order within their target. A run still active
  * has no result yet, so it carries no change; a run without a finding (failed
- * early, synthesis off) does not reset the risk: the comparison uses the last
- * level the target was known to have.
+ * early, synthesis off) or whose finding says `unknown` does not reset the
+ * risk: the comparison uses the last level the target was known to have, and
+ * `unknown` is never ranked below `low`.
  */
 export function runTransitions(runs: RunSummary[]): Map<number, RunTransition> {
   const byTarget = new Map<string, RunSummary[]>();
@@ -39,14 +45,15 @@ export function runTransitions(runs: RunSummary[]): Map<number, RunTransition> {
       const active = isActiveStatus(run.status);
       const statusChange = !active && previous && previous.status !== run.status ? { from: previous.status, to: run.status } : null;
       let riskChange: RunTransition['riskChange'] = null;
-      if (!active && run.risk_level && lastRisk && run.risk_level !== lastRisk) {
-        const direction = (RISK_RANK[run.risk_level] ?? 0) > (RISK_RANK[lastRisk] ?? 0) ? 'up' : 'down';
-        riskChange = { from: lastRisk, to: run.risk_level, direction };
+      const risk = active ? null : knownRisk(run.risk_level);
+      if (risk && lastRisk && risk !== lastRisk) {
+        const direction = RISK_RANK[risk] > RISK_RANK[lastRisk] ? 'up' : 'down';
+        riskChange = { from: lastRisk, to: risk, direction };
       }
       transitions.set(run.id, { previous, statusChange, riskChange });
       if (!active) {
         previous = run;
-        if (run.risk_level) lastRisk = run.risk_level;
+        if (risk) lastRisk = risk;
       }
     }
   }

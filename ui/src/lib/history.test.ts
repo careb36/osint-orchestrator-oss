@@ -46,6 +46,21 @@ describe('runTransitions', () => {
     expect(t.get(3)?.previous?.id).toBe(2);
   });
 
+  it('treats an unknown level as no information, never as a drop below low', () => {
+    const runs = [
+      run(1, 'a', '2026-10-01T00:00:00Z', 'success', 'low'),
+      run(2, 'a', '2026-10-02T00:00:00Z', 'success', 'unknown'),
+      run(3, 'a', '2026-10-03T00:00:00Z', 'success', 'medium'),
+      run(4, 'a', '2026-10-04T00:00:00Z', 'success', 'not-a-level'),
+    ];
+    const t = runTransitions(runs);
+    expect(t.get(2)?.riskChange).toBeNull();
+    expect(t.get(3)?.riskChange).toEqual({ from: 'low', to: 'medium', direction: 'up' });
+    expect(t.get(4)?.riskChange).toBeNull();
+    // Nothing known yet: the first known level is not a change either.
+    expect(runTransitions([run(5, 'b', '2026-10-01T00:00:00Z', 'success', 'unknown'), run(6, 'b', '2026-10-02T00:00:00Z', 'success', 'high')]).get(6)?.riskChange).toBeNull();
+  });
+
   it('gives an active run no change and does not use it as a predecessor', () => {
     const runs = [
       run(1, 'a', '2026-10-01T00:00:00Z', 'success', 'low'),
