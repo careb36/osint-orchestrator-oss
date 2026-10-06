@@ -7,8 +7,6 @@ sujetos obligados no financieros: investiga una entidad en fuentes públicas,
 califica lo que encuentra con NVIDIA Nemotron en Nebius Token Factory y deja un
 reporte firmado y auditable.
 
-**Demo en vivo:** todavía no desplegada · **Video:** todavía no grabado (ver [Hoja de ruta](#hoja-de-ruta))
-
 ## El problema
 
 La debida diligencia en fuentes abiertas se hace a mano: un analista busca en
@@ -75,22 +73,17 @@ Nota, es calificada por Nemotron y queda registrada en
 
 ## Inicio rápido
 
-**Demo** (un contenedor: API, página de demo, Tavily y Nemotron; sin OpenCTI):
+El stack completo (OpenCTI, SpiderFoot, corridas programadas, alertas) necesita
+Docker con Compose v2 y 16 GB de RAM:
 
 ```bash
-cp .env.example .env    # NEBIUS_API_KEY, TAVILY_API_KEY, LLM_PROVIDER=nebius, los dos LLM_MODEL_*, ORCHESTRATOR_API_KEY, ORCHESTRATOR_SECRET_KEY
-docker compose -f docker-compose.demo.yml up -d --build
-open http://localhost:7860/demo
+cp .env.example .env                    # contraseñas, tokens y API keys que lista
+cp targets.example.yaml targets.yaml    # solo objetivos que esté autorizado a evaluar
+docker compose up -d --build
 ```
 
-Elija una entidad, lance una investigación, lea la evidencia calificada y
-verifique la cadena de evidencia. Las entidades son una lista cerrada
-([`demo/targets.demo.yaml`](demo/targets.demo.yaml)) y el uso está limitado por
-visitante y por día.
-
-**Stack completo** (OpenCTI, SpiderFoot, corridas programadas, alertas; 16 GB
-de RAM): `docker compose up -d --build`; ver [operación](docs/operations.md) y
-[configuración](docs/configuration.md) (en inglés).
+Después, ver [operación](docs/operations.md), [configuración](docs/configuration.md)
+y, para un servidor, [despliegue](docs/deploy.md) (en inglés).
 
 **Panel del operador:** <http://localhost:8000/console>, en español o inglés.
 Cifras clave, objetivos ordenados por lo que requiere atención, corridas
@@ -128,8 +121,7 @@ salida de los modelos es una ayuda para el analista, no una determinación. Ver
 | Ítem | Estado |
 | --- | --- |
 | Calificación de evidencia y cadena de evidencia | Hecho |
-| Modo demo liviano con límites de uso | Hecho |
-| Despliegue público de la demo | Planificado ([guía de despliegue](docs/deploy.md)) |
+| Panel del operador (resumen, triaje, investigación) | Hecho |
 | Calificación de relaciones entre entidades | Planificado |
 | Indicadores de calidad de datos por fuente | Planificado |
 | NLP de documentos (balances, expedientes) | Planificado |

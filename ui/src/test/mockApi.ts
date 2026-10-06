@@ -7,7 +7,7 @@ export const sampleHealth: HealthStatus = {
   checks: {
     database: { status: 'ok', detail: 'SQLite reachable' },
     scheduler: { status: 'ok', detail: 'APScheduler running' },
-    opencti: { status: 'disabled', detail: 'OpenCTI disabled in demo mode' },
+    opencti: { status: 'degraded', detail: 'OpenCTI sink disabled' },
   },
 };
 
