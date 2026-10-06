@@ -123,6 +123,9 @@ def _finding_json(**overrides) -> str:
         ("above\n---\nbelow", "above\n\\---\nbelow"),
         # GFM autolinks a bare www.
         ("see www.evil.test now", "see wxw.evil.test now"),
+        ("see WwW.Evil.test", "see Wxw.Evil.test"),
+        # CommonMark: one "=" or "-" under a text line is already a setext heading.
+        ("Title\n=\nbody", "Title\n\\=\nbody"),
     ],
 )
 def test_neutralise_markdown(raw: str, expected: str) -> None:

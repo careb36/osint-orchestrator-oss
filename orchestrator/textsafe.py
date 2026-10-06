@@ -25,7 +25,7 @@ _TAG_START = re.compile(r"<(?=/?[A-Za-z])")
 _HEADING = re.compile(r"^(\s*)(#{1,6})(?=\s)", re.MULTILINE)
 _SCHEME = re.compile(r"\b(h)ttp(s?)://", re.IGNORECASE)
 # GFM turns a bare "www." into a clickable link as well; defang it the same way.
-_WWW = re.compile(r"\b(w)ww\.", re.IGNORECASE)
+_WWW = re.compile(r"\bwww\.", re.IGNORECASE)
 # A line of only "=" or "-" under a text line is a setext heading, and "---"
 # alone a thematic break: structure a model's prose must not add to a report.
 _SETEXT_OR_RULE = re.compile(r"^(\s*)(=+|-{1,})\s*$", re.MULTILINE)
@@ -41,12 +41,11 @@ _LINE_BREAK = re.compile(r"\r\n|[\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029]")
 
 def _strip_tags(text: str) -> str:
     """Remove HTML tags until none is left, including ones removal re-forms."""
-    for pattern in (_HTML_TAG, _HTML_TAG_LOOSE):
-        for _ in range(_MAX_TAG_PASSES):
-            stripped = pattern.sub("", text)
-            if stripped == text:
-                break
-            text = stripped
+    for _ in range(_MAX_TAG_PASSES):
+        stripped = _HTML_TAG_LOOSE.sub("", _HTML_TAG.sub("", text))
+        if stripped == text:
+            break
+        text = stripped
     return _TAG_START.sub("‹", text)
 
 
@@ -67,7 +66,8 @@ def neutralise_markdown(text: str) -> str:
     text = _strip_tags(text)
     text = _HEADING.sub(r"\1\\\2", text)
     text = _SETEXT_OR_RULE.sub(r"\1\\\2", text)
-    text = _WWW.sub(r"\1xw.", text)
+    # Keep the writer's letter case: only the middle "w" becomes an "x".
+    text = _WWW.sub(lambda m: f"{m.group(0)[0]}x{m.group(0)[2:]}", text)
     return _SCHEME.sub(r"\1xxp\2://", text)
 
 

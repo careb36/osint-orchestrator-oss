@@ -549,15 +549,17 @@ async def synthesize(
                     ),
                     risk_level="unknown",
                 )
+                # The run's note first: if the database refuses it, the outer
+                # handler reports the failure and no half-recorded fallback is left.
+                await _annotate_run_error(
+                    run_id, "synthesis: the model returned an invalid response twice"
+                )
                 await _persist_finding(
                     finding,
                     provider=provider_name,
                     model=client.model_for_route("reasoning"),
                     duration_ms=duration_ms,
                     raw_response=raw,
-                )
-                await _annotate_run_error(
-                    run_id, "synthesis: the model returned an invalid response twice"
                 )
                 return finding, "failed"
 
