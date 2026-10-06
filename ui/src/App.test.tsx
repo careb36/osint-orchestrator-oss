@@ -533,6 +533,9 @@ describe('App shell', () => {
     Object.defineProperty(URL, 'createObjectURL', { value: createObjectURL, configurable: true });
     Object.defineProperty(URL, 'revokeObjectURL', { value: revokeObjectURL, configurable: true });
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    const download = vi.fn();
+    const downloadProperty = Object.getOwnPropertyDescriptor(HTMLAnchorElement.prototype, 'download');
+    Object.defineProperty(HTMLAnchorElement.prototype, 'download', { set: download, get: () => '', configurable: true });
     try {
       const user = userEvent.setup();
       renderApp(['/runs/42']);
@@ -543,6 +546,8 @@ describe('App shell', () => {
       await user.click(screen.getByRole('button', { name: /download pdf report/i }));
       await waitFor(() => expect(click).toHaveBeenCalledTimes(2));
 
+      // The server names the bundle after the run and the target; the PDF route sends no name, so the fallback applies.
+      expect(download.mock.calls.map(([name]) => name)).toEqual(['run-42-example-corp.zip', 'run-42-report.pdf']);
       const paths = fetchMock.mock.calls.map(([input]) => String(input));
       expect(paths).toContain('/runs/42/bundle');
       expect(paths).toContain('/runs/42/report.pdf');
@@ -551,7 +556,16 @@ describe('App shell', () => {
       expect(createObjectURL).toHaveBeenCalledTimes(2);
     } finally {
       click.mockRestore();
+      if (downloadProperty) Object.defineProperty(HTMLAnchorElement.prototype, 'download', downloadProperty);
     }
+  });
+
+  it('shows a run without a finding as a state, not as an error', async () => {
+    installFetchMock();
+    renderApp(['/runs/43']);
+    await screen.findByRole('heading', { name: /run #/i });
+    expect(await screen.findByRole('heading', { name: /no synthesis for this run/i })).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('reports an export the API refused', async () => {

@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ErrorState, LoadingState, PageLayout } from '../components/PageState';
+import { EmptyState, ErrorState, LoadingState, PageLayout } from '../components/PageState';
 import { RunNotice } from '../components/RunNotice';
 import { SearchField } from '../components/SearchField';
 import { SortableHeader } from '../components/SortableHeader';
@@ -9,7 +9,7 @@ import { StatusPill } from '../components/StatusPill';
 import { useListControls } from '../hooks/useListControls';
 import { useStartRun } from '../hooks/useStartRun';
 import { useLocale, type MessageKey } from '../i18n';
-import { api, downloadArtifact, downloadRunBundle, downloadRunPdf } from '../lib/api';
+import { api, ApiError, downloadArtifact, downloadRunBundle, downloadRunPdf } from '../lib/api';
 import { alertStatusTone, formatDateTime, formatDuration, riskTone, runStatusTone } from '../lib/format';
 import { buildHandoffSummary, describeVerification } from '../lib/handoff';
 import { distinct, filterDelta, filterEvidence, sortEvidence, type EvidenceSortKey } from '../lib/listing';
@@ -67,6 +67,9 @@ export function RunWorkspacePage() {
   const manifest = useQuery({ queryKey: ['run', runId, 'manifest'], queryFn: () => api.getRunManifest(runId), enabled: artifact === 'manifest' });
 
   const active = { finding, evidence, delta, report, manifest }[artifact];
+  // A run without a finding (synthesis off, failed before it, still running) answers 404: that is a state, not an error.
+  const noSynthesis = finding.error instanceof ApiError && finding.error.status === 404;
+  const activeError = artifact === 'finding' && noSynthesis ? null : active.error;
   const categories = distinct(evidence.data ?? [], (row) => row.category);
   const types = distinct(delta.data ?? [], (row) => row.stix_type);
   const controls = useListControls<EvidenceSortKey>({
@@ -205,7 +208,8 @@ export function RunWorkspacePage() {
 
         <div id={`panel-${artifact}`} className="artifact-panel" role="tabpanel" aria-labelledby={`tab-${artifact}`}>
           {active.isLoading ? <LoadingState message={t('runDetail.loadingArtifact', { artifact: artifactName(artifact) })} /> : null}
-          {active.error ? <ErrorState title={t('runDetail.noArtifact.title', { artifact: artifactName(artifact) })} description={t('runDetail.noArtifact.body')} /> : null}
+          {activeError ? <ErrorState title={t('runDetail.noArtifact.title', { artifact: artifactName(artifact) })} description={t('runDetail.noArtifact.body')} /> : null}
+          {artifact === 'finding' && noSynthesis ? <EmptyState title={t('runDetail.noSynthesis.title')} description={t('runDetail.noSynthesis.body')} /> : null}
 
           {artifact === 'finding' && finding.data ? (
             <div className="finding">

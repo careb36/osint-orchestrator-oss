@@ -80,7 +80,7 @@ export function clearApiKey(): void {
 
 type RequestOptions = {
   method?: 'GET' | 'POST';
-  parse?: 'json' | 'text' | 'blob';
+  parse?: 'json' | 'text' | 'blob' | 'download';
   body?: unknown;
   /** Try this key instead of the stored one (used to validate a key before storing it). */
   apiKey?: string | null;
@@ -89,6 +89,19 @@ type RequestOptions = {
   /** A 404 is an expected answer (an artefact the run never produced): not an api_error. */
   optional?: boolean;
 };
+
+/** A file the API handed over, with the name its Content-Disposition suggested. */
+export type Download = { blob: Blob; filename: string | null };
+
+// filename="…" or a bare token; the RFC 5987 filename*= form is not used by the API.
+const DISPOSITION_FILENAME = /filename=(?:"([^"]*)"|([^;]+))/i;
+
+export function filenameFromDisposition(header: string | null): string | null {
+  const match = header?.match(DISPOSITION_FILENAME);
+  const name = (match?.[1] ?? match?.[2] ?? '').trim();
+  // A path separator in a server-suggested name is never honoured.
+  return name && !/[\\/]/.test(name) ? name : null;
+}
 
 export function authHeaders(apiKey?: string | null): Record<string, string> {
   const key = apiKey === undefined ? readApiKey() : apiKey;
@@ -150,6 +163,13 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     if (parse === 'blob') {
       return (await response.blob()) as T;
     }
+    if (parse === 'download') {
+      const download: Download = {
+        blob: await response.blob(),
+        filename: filenameFromDisposition(response.headers.get('Content-Disposition')),
+      };
+      return download as T;
+    }
     return (await response.json()) as T;
   } catch (error) {
     if (!(error instanceof ApiError)) {
@@ -199,12 +219,13 @@ export async function downloadRunPdf(runId: string | number) {
   await downloadFile(`/runs/${runId}/report.pdf`, `run-${runId}-report.pdf`);
 }
 
-async function downloadFile(path: string, filename: string) {
-  const blob = await request<Blob>(path, { parse: 'blob' });
+/** Save a file the API serves; the server's suggested name wins over the fallback. */
+async function downloadFile(path: string, fallbackName: string) {
+  const { blob, filename } = await request<Download>(path, { parse: 'download' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
-  anchor.download = filename;
+  anchor.download = filename ?? fallbackName;
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();

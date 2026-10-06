@@ -168,6 +168,7 @@ type Route = {
   pattern: RegExp;
   status?: number;
   body: unknown | ((match: RegExpMatchArray) => unknown);
+  headers?: Record<string, string>;
 };
 
 type MockOptions = {
@@ -195,7 +196,7 @@ export const defaultRoutes: Route[] = [
   { pattern: /^\/analytics\/risk-trends$/, body: sampleTrends },
   { pattern: /^\/targets\/[^/]+\/chain\/verify$/, body: sampleVerification },
   // Binary exports: the body only has to be a blob the download helper can hand over.
-  { pattern: /^\/runs\/\d+\/bundle$/, body: 'zip-bytes' },
+  { pattern: /^\/runs\/\d+\/bundle$/, body: 'zip-bytes', headers: { 'Content-Disposition': 'attachment; filename="run-42-example-corp.zip"' } },
   { pattern: /^\/runs\/\d+\/report\.pdf$/, body: 'pdf-bytes' },
 ];
 
@@ -228,7 +229,9 @@ export function installFetchMock(options: MockOptions = {}) {
         if (body === null) {
           return jsonResponse(404, { detail: 'Not found' });
         }
-        return jsonResponse(route.status ?? 200, body);
+        const response = jsonResponse(route.status ?? 200, body);
+        for (const [name, value] of Object.entries(route.headers ?? {})) response.headers.set(name, value);
+        return response;
       }
     }
     return jsonResponse(404, { detail: `Unmocked path ${path}` });
