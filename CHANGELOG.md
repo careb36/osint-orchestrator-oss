@@ -134,6 +134,10 @@ from [SECURITY.md](SECURITY.md).
 
 ### Fixed
 
+- The integration tests (`tests/integration/test_e2e.py`) send
+  `ORCHESTRATOR_API_KEY` to the protected routes and assert the `401` without
+  it; since the API key landed (ADR-005) they had been failing against a
+  running stack. OpenCTI's health probe also accepts a `401` as reachable.
 - A run keeps `running` until it is sealed (ADR-007). The final status was
   written before synthesis, the report and the manifest, so a second run of
   the same target was admitted meanwhile; whichever sealed last pointed to the
