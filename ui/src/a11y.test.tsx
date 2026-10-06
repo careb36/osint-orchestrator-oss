@@ -71,13 +71,15 @@ describe('accessibility (axe)', () => {
     await expectNoViolations();
   });
 
-  it('run detail with the evidence tab', async () => {
+  it('run detail with the evidence tab and a verified handoff', async () => {
     installFetchMock();
     const user = userEvent.setup();
     renderApp(['/runs/42']);
     await screen.findByRole('heading', { name: /corrida #42/i });
     await user.click(screen.getByRole('tab', { name: /evidencia/i }));
-    await screen.findByRole('table');
+    await screen.findAllByRole('table');
+    await user.click(screen.getByRole('button', { name: /verificar cadena de evidencia/i }));
+    await screen.findByText(/cadena intacta/i);
     await expectNoViolations();
   });
 

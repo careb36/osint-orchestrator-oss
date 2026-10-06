@@ -34,7 +34,6 @@ import httpx
 
 from orchestrator.collectors import BaseCollector
 from orchestrator.config import settings
-from orchestrator.demo import consume_budget
 from orchestrator.i18n import resolve_language
 from orchestrator.models import CollectorName, CollectorResult, EvidenceItem, Observable
 from orchestrator.textsafe import flatten_untrusted
@@ -123,15 +122,9 @@ class TavilyCollector(BaseCollector):
         failures: list[str] = []
         seen_urls: set[str] = set()
         timed_out = False
-        budget_exhausted = False
         try:
             async with asyncio.timeout(budget):
                 for query in queries:
-                    if not await consume_budget("tavily"):
-                        # Public demo only: the daily call budget is spent.
-                        budget_exhausted = True
-                        failures.append(query)
-                        continue
                     data = await self._search(query, cfg, max_results, deadline)
                     if data is None:
                         failures.append(query)
@@ -189,11 +182,7 @@ class TavilyCollector(BaseCollector):
                 collector=self.name,
                 target_fqdn=fqdn,
                 success=False,
-                error=(
-                    "Tavily: the demo's daily search budget is exhausted"
-                    if budget_exhausted
-                    else f"Tavily: all {len(queries)} queries failed; see the collector log"
-                ),
+                error=f"Tavily: all {len(queries)} queries failed; see the collector log",
                 observables=[],
                 notes=notes,
                 evidence=evidence,

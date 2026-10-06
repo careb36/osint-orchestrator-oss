@@ -22,9 +22,7 @@ Rules:
     /openapi.json, GET /redoc; and the dashboard shell, GET /console with its
     client routes and assets, which carries no target or run data — a browser
     cannot attach a header to its first navigation, so the page that asks for
-    the key must itself be open. With DEMO_MODE=true the /demo routes are public
-    too: allowlisted targets, rate-limited runs and views without the model's
-    synthesis (see orchestrator/demo.py). Every data and control endpoint,
+    the key must itself be open. Every data and control endpoint,
     including everything the dashboard fetches, remains protected.
   - Comparison is constant-time (hmac.compare_digest) and every configured
     key is checked so timing does not reveal which slot matched.

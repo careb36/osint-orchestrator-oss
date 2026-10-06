@@ -34,7 +34,7 @@ The goal of this phase is to support evidence review and decision-making within 
 - [x] Risk summary and supporting facts aligned to the backend report model.
 - [x] Evidence review controls that show provenance and confidence alongside the result.
 - [x] Search, filters, and drill-down patterns that support deeper investigation.
-- [ ] Clear handoff from evidence review to report output or follow-up action.
+- [x] Clear handoff from evidence review to report output or follow-up action. *Evidence tab leads to the report and to the handoff block; the block verifies the chain, exports the signed bundle and the PDF, copies a handoff summary and starts a follow-up run.*
 - [ ] No uncaught runtime errors during a typical analyst investigation path.
 
 Definition of done for Phase 3: an analyst can investigate a target from dashboard to evidence review without leaving the product or losing context.
@@ -43,9 +43,9 @@ Definition of done for Phase 3: an analyst can investigate a target from dashboa
 
 The goal of this phase is to close the loop between investigation and human-ready outputs.
 
-- [ ] Report and export path aligned to the signed-report workflow.
+- [x] Report and export path aligned to the signed-report workflow. *`GET /runs/{id}/bundle` ships the run directory with its `manifest.json`, so the recipient re-hashes every file and checks the signature offline; `GET /runs/{id}/report.pdf` is the human-ready copy.*
 - [x] Historical run review with clear state and result transitions. *Every run row carries its risk level and a Change column (status and risk against the target's previous run); target detail opens with a timeline of its runs, oldest first.*
-- [ ] Handover actions documented and discoverable for operators.
+- [x] Handover actions documented and discoverable for operators. *One block at the end of every run detail; runbook in `docs/operations.md` (Handover actions).*
 - [ ] Performance and accessibility pass on the main analyst journeys. *Accessibility: axe-core smoke tests over every main view (`ui/src/a11y.test.tsx`); performance pass still open.*
 - [ ] KPI telemetry confirms the adoption, MTTR, and task completion targets are met or trending toward them.
 

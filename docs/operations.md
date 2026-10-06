@@ -47,68 +47,6 @@ Without OpenCTI: set `OPENCTI_ENABLED=false`. Reports, findings, the delta and
 alerts keep working; nothing is pushed to a knowledge graph, and those runs are
 never backfilled later ([ADR-008](adr/ADR-008-optional-opencti-sink.md)).
 
-### Demo mode
-
-A lightweight, public-facing deployment of the same code: the API and a demo
-page, SQLite, Tavily and the configured LLM. No OpenCTI, SpiderFoot or Amass.
-
-```bash
-cp .env.example .env    # NEBIUS_API_KEY, TAVILY_API_KEY, LLM_PROVIDER=nebius, the two LLM_MODEL_* ids,
-                        # ORCHESTRATOR_API_KEY, ORCHESTRATOR_SECRET_KEY
-docker compose -f docker-compose.demo.yml up -d --build
-open http://localhost:7860/demo
-```
-
-What a visitor can do, without an API key:
-
-| Route | Purpose |
-| --- | --- |
-| `GET /demo` | The demo page |
-| `GET /demo/targets` | The allowlist ([`demo/targets.demo.yaml`](../demo/targets.demo.yaml)); there is no free-text target |
-| `POST /demo/targets/{id}/run` | Start a run; `429` with `Retry-After` over the daily limits |
-| `GET /demo/targets/{id}/runs`, `GET /demo/runs/{id}` | Run list and status |
-| `GET /demo/runs/{id}/evidence` | Each web result with its category, relevance, confidence and rationale |
-| `GET /demo/runs/{id}/finding` | Which model synthesised the run and how long it took; the synthesis text is not public |
-| `GET /demo/runs/{id}/report` | The report with a disclaimer and **without** its synthesis section |
-| `GET /demo/runs/{id}/manifest`, `GET /demo/targets/{id}/chain/verify` | The signed manifest and the chain check |
-
-Guards:
-
-- **No model verdict in public.** The synthesis (summary, risk level,
-  justification, pivots) is free model prose about a named entity: it is
-  available to the operator with the API key and never served by `/demo`. The
-  public page shows the qualified evidence, where every row links its source.
-- **Allowlist only.** Runs of any other target are invisible to the `/demo`
-  routes; every other route still needs the API key.
-- **Daily limits** per visitor (`DEMO_MAX_RUNS_PER_IP_PER_DAY`) and overall
-  (`DEMO_MAX_RUNS_PER_DAY`), reset at 00:00 UTC. Visitors are counted by an
-  HMAC of their address, kept for two days; the address is never stored. Set
-  `DEMO_TRUSTED_PROXY_HOPS` to the number of proxies in front of the service.
-- **Call budgets** for Tavily (`DEMO_TAVILY_CALLS_PER_DAY`) and the LLM
-  (`DEMO_LLM_CALLS_PER_DAY`). When one is spent the call is not made, the run
-  still finishes and its error field says why.
-- **Startup check.** With `DEMO_MODE=true` the service refuses to start unless
-  `OPENCTI_ENABLED=false`, the API key and the signing key are set,
-  `TAVILY_API_KEY` is set, every allowlisted target enables the Tavily
-  collector and nothing else, and, for each target, the key of the provider
-  its synthesis would use is set: `anthropic` → `ANTHROPIC_API_KEY`; `openai`
-  → `OPENAI_API_KEY`; `nebius` → `NEBIUS_API_KEY` plus both `LLM_MODEL_*` ids.
-  The provider is the resolved one: `llm: openai` under `LLM_PROVIDER=nebius`
-  is the Nebius route; `llm: local` and `LLM_PROVIDER=none` need no key.
-  Nothing runs on a schedule.
-- **Local demo.** `docker-compose.demo.yml` sets `DEMO_TRUSTED_PROXY_HOPS=0`
-  and, unless `.env` sets it, raises `DEMO_MAX_RUNS_PER_IP_PER_DAY` to the
-  global cap: behind Docker's port mapping every browser on the machine shares
-  one address. The counters
-  live in the `demo-data` volume; `docker compose -f docker-compose.demo.yml
-  down -v` resets them. `/health` reports the OpenCTI sink as `disabled`, not
-  `degraded`, because demo mode turns it off by design.
-- **Page language.** `/demo?lang=es|en` or the browser's `Accept-Language`;
-  the global `ORCHESTRATOR_LANGUAGE` is the fallback.
-
-Runs shown before any visitor starts one are loaded from `demo/seed/` (see its
-[README](../demo/seed/README.md)); deployment: [deploy.md](deploy.md).
-
 ### Kubernetes
 
 The Helm chart in [`deploy/helm/osint-orchestrator`](../deploy/helm/osint-orchestrator/)
@@ -120,11 +58,9 @@ scheduler): one replica, `Recreate` strategy, one `ReadWriteOnce` volume
 ## API
 
 Interactive reference: `/docs` (OpenAPI at `/openapi.json`). Public routes are
-`/`, `/health`, `/metrics`, `/docs`, `/redoc`, `/openapi.json`, `/console`
-(with its client routes and `/console/assets/*`) and, with `DEMO_MODE=true`,
-the `/demo` routes listed
-under [Demo mode](#demo-mode); every other route needs `X-API-Key: <key>` or
-`Authorization: Bearer <key>`.
+`/`, `/health`, `/metrics`, `/docs`, `/redoc`, `/openapi.json` and `/console`
+(with its client routes and `/console/assets/*`); every other route needs
+`X-API-Key: <key>` or `Authorization: Bearer <key>`.
 
 | Method | Path | Description |
 | --- | --- | --- |
@@ -150,6 +86,8 @@ under [Demo mode](#demo-mode); every other route needs `X-API-Key: <key>` or
 | `GET` | `/runs/{id}/finding` | LLM-synthesized finding for a completed run |
 | `GET` | `/runs/{id}/evidence` | Evidence qualifications of a run |
 | `GET` | `/runs/{id}/manifest` | Signed evidence manifest of a run (`404` when unsealed) |
+| `GET` | `/runs/{id}/report.pdf` | PDF companion of the report (`application/pdf`; `404` when the run has none) |
+| `GET` | `/runs/{id}/bundle` | Every file of the run directory, `manifest.json` included, as one `application/zip` download (`404` without artefacts) |
 | `GET` | `/targets/{id}/chain/verify` | Verify the target's evidence chain |
 
 Errors carry a `detail` string in the operator language: `404` unknown target,
@@ -169,9 +107,7 @@ can render every state without guessing:
   (for example, the scheduler is not running or OpenCTI is disabled)
 - `offline`: a core dependency failed its self-check (for example, DB access)
 
-Each entry under `checks` carries one of the same three values, plus `disabled`
-for a component that is off by configuration and does not affect the overall
-status (today only the OpenCTI sink in demo mode).
+Each entry under `checks` carries one of the same three values.
 
 A failed poll is surfaced as an error state in the dashboard rather than
 crashing the page; the next periodic refresh retries automatically. The UI keeps
@@ -336,8 +272,25 @@ key, protected API calls still answer `401`, the dashboard build is served with
 a `script-src 'self'` CSP and immutable assets, and a missing build answers
 `503` without a script. The UI suite covers the operator journey against a
 mocked API (key prompt on `401`, key validation and storage, navigation,
-filters, run detail), the Spanish/English catalogue, and an axe-core
+filters, run detail, handoff), the Spanish/English catalogue, and an axe-core
 accessibility check of every main view.
+
+### Handover actions
+
+Every run detail ends with a **Handoff** block, the place where an analyst
+closes a review and passes the run on:
+
+| Action | What it does | Backed by |
+| --- | --- | --- |
+| Verify evidence chain | Re-hashes every sealed run of the target and checks the signatures; shows the first broken run with a link | `GET /targets/{id}/chain/verify` |
+| Download signed bundle | One `.zip` with the run directory: report, STIX bundle, delta, qualified evidence, PDF and `manifest.json`. The recipient recomputes the SHA-256 of each file against the manifest and checks the HMAC with the deployment's `ORCHESTRATOR_SECRET_KEY` | `GET /runs/{id}/bundle` |
+| Download PDF report | The human-ready copy of the report | `GET /runs/{id}/report.pdf` |
+| Copy handoff summary | Plain text for a ticket or an e-mail: target, run, status, timing, risk level, new observables, evidence counts, manifest hash, chain result of this session and the dashboard link. Falls back to a text box when the browser has no clipboard | run records already loaded |
+| Start follow-up run | Triggers a new run of the same target; refused while one is active | `POST /targets/{id}/run` |
+| Alerts dispatched | Channel, status, time and error of every alert the run sent | `alerts[]` of `GET /runs/{id}` |
+
+The evidence tab offers *Continue to the report* and *Prepare handoff* so the
+path from review to output never leaves the page.
 
 ### Frontend telemetry and error tracking
 

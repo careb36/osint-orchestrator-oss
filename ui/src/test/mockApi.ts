@@ -1,13 +1,15 @@
 import { vi } from 'vitest';
-import type { DeltaRow, EvidenceRow, Finding, HealthStatus, RiskTrend, RunDetail, RunSummary, TargetSummary } from '../types';
+import type { ChainVerification, DeltaRow, EvidenceRow, Finding, HealthStatus, RiskTrend, RunDetail, RunSummary, TargetSummary } from '../types';
 
+// The default deployment (OpenCTI sink off, ADR-008): the backend promotes the
+// overall status to degraded whenever a check is, so the fixture does too.
 export const sampleHealth: HealthStatus = {
-  status: 'ok',
+  status: 'degraded',
   version: '0.1.0-test',
   checks: {
     database: { status: 'ok', detail: 'SQLite reachable' },
     scheduler: { status: 'ok', detail: 'APScheduler running' },
-    opencti: { status: 'disabled', detail: 'OpenCTI disabled in demo mode' },
+    opencti: { status: 'degraded', detail: 'OpenCTI sink disabled' },
   },
 };
 
@@ -65,7 +67,21 @@ export const sampleRuns: RunSummary[] = [
   },
 ];
 
-export const sampleRunDetail: RunDetail = { ...sampleRuns[0], alerts: [] };
+export const sampleRunDetail: RunDetail = {
+  ...sampleRuns[0],
+  alerts: [{ id: 1, run_id: 42, channel: 'webhook', status: 'sent', sent_at: '2026-10-01T06:04:30Z', error: null }],
+};
+
+export const sampleVerification: ChainVerification = {
+  ok: true,
+  checked: 1,
+  unsealed: 0,
+  first_broken_run_id: null,
+  reason: null,
+  detail: null,
+  anchor_run_id: null,
+  anchor_previous_manifest_sha256: null,
+};
 
 export const sampleTrends: RiskTrend[] = [
   {
@@ -156,6 +172,7 @@ type Route = {
   pattern: RegExp;
   status?: number;
   body: unknown | ((match: RegExpMatchArray) => unknown);
+  headers?: Record<string, string>;
 };
 
 type MockOptions = {
@@ -181,6 +198,10 @@ export const defaultRoutes: Route[] = [
   { pattern: /^\/runs\/\d+\/evidence$/, body: [] },
   { pattern: /^\/runs\/\d+\/delta$/, body: [] },
   { pattern: /^\/analytics\/risk-trends$/, body: sampleTrends },
+  { pattern: /^\/targets\/[^/]+\/chain\/verify$/, body: sampleVerification },
+  // Binary exports: the body only has to be a blob the download helper can hand over.
+  { pattern: /^\/runs\/\d+\/bundle$/, body: 'zip-bytes', headers: { 'Content-Disposition': 'attachment; filename="run-42-example-corp.zip"' } },
+  { pattern: /^\/runs\/\d+\/report\.pdf$/, body: 'pdf-bytes' },
 ];
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -212,7 +233,9 @@ export function installFetchMock(options: MockOptions = {}) {
         if (body === null) {
           return jsonResponse(404, { detail: 'Not found' });
         }
-        return jsonResponse(route.status ?? 200, body);
+        const response = jsonResponse(route.status ?? 200, body);
+        for (const [name, value] of Object.entries(route.headers ?? {})) response.headers.set(name, value);
+        return response;
       }
     }
     return jsonResponse(404, { detail: `Unmocked path ${path}` });

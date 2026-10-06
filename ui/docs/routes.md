@@ -18,7 +18,7 @@ This document captures the top-level route map for the UI2 super-app shell so co
 | `/targets/:targetId` | Target detail | No | Target settings, risk trend, Start run, run history oldest first (timeline) with risk and change per run. |
 | `/targets/:targetId/runs/:runId` | Run detail | No | Same view as `/runs/:runId`, reached from a target. |
 | `/runs` | Runs | Yes | Recent execution history with search, filters and sortable columns, the risk of each run and what changed since the target's previous run. |
-| `/runs/:runId` | Run detail | No | Finding, evidence (searchable, sortable), delta, report and manifest tabs; artefact download. |
+| `/runs/:runId` | Run detail | No | Finding, evidence (searchable, sortable), delta, report and manifest tabs; artefact download. Handoff block: verify the target's evidence chain, download the signed bundle (`.zip`) or the PDF report, copy a plain-text handoff summary, start a follow-up run, and see the alerts the run dispatched. |
 | `*` | Not found | No | Fallback empty-state view within the shell. |
 
 Search, filter and sort state lives in the URL query string (`useListControls`):
