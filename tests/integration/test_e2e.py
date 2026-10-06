@@ -61,7 +61,14 @@ def test_targets_endpoint_returns_list():
 
 @pytest.mark.integration
 def test_trigger_run_requires_api_key():
-    """POST /targets/{id}/run without API key must be rejected."""
+    """POST /targets/{id}/run without the API key must be rejected.
+
+    Only meaningful against a stack that has a key: with ORCHESTRATOR_API_KEY
+    empty the API is open by design (orchestrator/auth.py) and answers 404.
+    """
+    if not ORCHESTRATOR_API_KEY:
+        pytest.skip("ORCHESTRATOR_API_KEY not set")
+
     resp = httpx.post(f"{ORCHESTRATOR_URL}/targets/non-existent-target/run", timeout=10)
     assert resp.status_code == 401
 
