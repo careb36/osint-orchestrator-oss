@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import type { DeltaRow, EvidenceRow, Finding, HealthStatus, RiskTrend, RunDetail, RunSummary, TargetSummary } from '../types';
+import type { ChainVerification, DeltaRow, EvidenceRow, Finding, HealthStatus, RiskTrend, RunDetail, RunSummary, TargetSummary } from '../types';
 
 export const sampleHealth: HealthStatus = {
   status: 'ok',
@@ -63,7 +63,21 @@ export const sampleRuns: RunSummary[] = [
   },
 ];
 
-export const sampleRunDetail: RunDetail = { ...sampleRuns[0], alerts: [] };
+export const sampleRunDetail: RunDetail = {
+  ...sampleRuns[0],
+  alerts: [{ id: 1, run_id: 42, channel: 'webhook', status: 'sent', sent_at: '2026-10-01T06:04:30Z', error: null }],
+};
+
+export const sampleVerification: ChainVerification = {
+  ok: true,
+  checked: 1,
+  unsealed: 0,
+  first_broken_run_id: null,
+  reason: null,
+  detail: null,
+  anchor_run_id: null,
+  anchor_previous_manifest_sha256: null,
+};
 
 export const sampleTrends: RiskTrend[] = [
   {
@@ -179,6 +193,10 @@ export const defaultRoutes: Route[] = [
   { pattern: /^\/runs\/\d+\/evidence$/, body: [] },
   { pattern: /^\/runs\/\d+\/delta$/, body: [] },
   { pattern: /^\/analytics\/risk-trends$/, body: sampleTrends },
+  { pattern: /^\/targets\/[^/]+\/chain\/verify$/, body: sampleVerification },
+  // Binary exports: the body only has to be a blob the download helper can hand over.
+  { pattern: /^\/runs\/\d+\/bundle$/, body: 'zip-bytes' },
+  { pattern: /^\/runs\/\d+\/report\.pdf$/, body: 'pdf-bytes' },
 ];
 
 function jsonResponse(status: number, body: unknown): Response {

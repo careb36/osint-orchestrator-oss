@@ -150,6 +150,8 @@ under [Demo mode](#demo-mode); every other route needs `X-API-Key: <key>` or
 | `GET` | `/runs/{id}/finding` | LLM-synthesized finding for a completed run |
 | `GET` | `/runs/{id}/evidence` | Evidence qualifications of a run |
 | `GET` | `/runs/{id}/manifest` | Signed evidence manifest of a run (`404` when unsealed) |
+| `GET` | `/runs/{id}/report.pdf` | PDF companion of the report (`application/pdf`; `404` when the run has none) |
+| `GET` | `/runs/{id}/bundle` | Every file of the run directory, `manifest.json` included, as one `application/zip` download (`404` without artefacts) |
 | `GET` | `/targets/{id}/chain/verify` | Verify the target's evidence chain |
 
 Errors carry a `detail` string in the operator language: `404` unknown target,
@@ -336,8 +338,25 @@ key, protected API calls still answer `401`, the dashboard build is served with
 a `script-src 'self'` CSP and immutable assets, and a missing build answers
 `503` without a script. The UI suite covers the operator journey against a
 mocked API (key prompt on `401`, key validation and storage, navigation,
-filters, run detail), the Spanish/English catalogue, and an axe-core
+filters, run detail, handoff), the Spanish/English catalogue, and an axe-core
 accessibility check of every main view.
+
+### Handover actions
+
+Every run detail ends with a **Handoff** block, the place where an analyst
+closes a review and passes the run on:
+
+| Action | What it does | Backed by |
+| --- | --- | --- |
+| Verify evidence chain | Re-hashes every sealed run of the target and checks the signatures; shows the first broken run with a link | `GET /targets/{id}/chain/verify` |
+| Download signed bundle | One `.zip` with the run directory: report, STIX bundle, delta, qualified evidence, PDF and `manifest.json`. The recipient recomputes the SHA-256 of each file against the manifest and checks the HMAC with the deployment's `ORCHESTRATOR_SECRET_KEY` | `GET /runs/{id}/bundle` |
+| Download PDF report | The human-ready copy of the report | `GET /runs/{id}/report.pdf` |
+| Copy handoff summary | Plain text for a ticket or an e-mail: target, run, status, timing, risk level, new observables, evidence counts, manifest hash, chain result of this session and the dashboard link. Falls back to a text box when the browser has no clipboard | run records already loaded |
+| Start follow-up run | Triggers a new run of the same target; refused while one is active | `POST /targets/{id}/run` |
+| Alerts dispatched | Channel, status, time and error of every alert the run sent | `alerts[]` of `GET /runs/{id}` |
+
+The evidence tab offers *Continue to the report* and *Prepare handoff* so the
+path from review to output never leaves the page.
 
 ### Frontend telemetry and error tracking
 

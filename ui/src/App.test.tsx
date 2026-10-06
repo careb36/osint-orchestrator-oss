@@ -410,7 +410,7 @@ describe('App shell', () => {
 
     await screen.findByRole('heading', { name: /run #42/i });
     await user.click(screen.getByRole('tab', { name: /evidence/i }));
-    const table = await screen.findByRole('table');
+    const table = await within(screen.getByRole('tabpanel')).findByRole('table');
     const rowsOf = () => within(table).getAllByRole('row').slice(1);
     // Default: relevance descending.
     expect(rowsOf().map((row) => row.textContent)).toEqual([
@@ -431,7 +431,7 @@ describe('App shell', () => {
     // The observables tab has its own keys: the evidence term does not leak
     // into it, and its Clear filters button appears only for its own keys.
     await user.click(screen.getByRole('tab', { name: /delta/i }));
-    const deltaTable = await screen.findByRole('table');
+    const deltaTable = await within(screen.getByRole('tabpanel')).findByRole('table');
     expect(within(deltaTable).getAllByRole('row').slice(1)).toHaveLength(3);
     expect(screen.getByRole('searchbox', { name: /search/i })).toHaveValue('');
     expect(screen.queryByRole('button', { name: /clear filters/i })).not.toBeInTheDocument();
@@ -487,6 +487,135 @@ describe('App shell', () => {
     expect(await screen.findByRole('heading', { name: /run #42/i })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /finding/i })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /report/i })).toBeInTheDocument();
+  });
+
+  it('verifies the evidence chain from the run detail and shows the outcome', async () => {
+    const fetchMock = installFetchMock();
+    const user = userEvent.setup();
+    renderApp(['/runs/42']);
+    await screen.findByRole('heading', { name: /run #42/i });
+
+    await user.click(screen.getByRole('button', { name: /verify evidence chain/i }));
+    expect(await screen.findByRole('status')).toHaveTextContent('Chain intact: 1 sealed run verified.');
+    const verifyCall = fetchMock.mock.calls.find(([input]) => String(input).includes('/targets/example-corp/chain/verify'));
+    expect(verifyCall).toBeDefined();
+  });
+
+  it('shows a broken chain as an alert with a link to the first broken run', async () => {
+    installFetchMock({
+      routes: [
+        {
+          pattern: /^\/targets\/[^/]+\/chain\/verify$/,
+          body: { ok: false, checked: 2, unsealed: 0, first_broken_run_id: 41, reason: 'artefact_hash', detail: 'report.md', anchor_run_id: null, anchor_previous_manifest_sha256: null, message: "Artifact hash mismatch for 'report.md'" },
+        },
+      ],
+    });
+    const user = userEvent.setup();
+    renderApp(['/runs/42']);
+    await screen.findByRole('heading', { name: /run #42/i });
+
+    await user.click(screen.getByRole('button', { name: /verify evidence chain/i }));
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent("Chain broken at run #41: Artifact hash mismatch for 'report.md'");
+    expect(within(alert).getByRole('link', { name: /open run #41/i })).toHaveAttribute('href', '/runs/41');
+  });
+
+  it('exports the signed bundle and the PDF through the API with the key header', async () => {
+    const fetchMock = installFetchMock();
+    const createObjectURL = vi.fn(() => 'blob:run-42');
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { value: createObjectURL, configurable: true });
+    Object.defineProperty(URL, 'revokeObjectURL', { value: revokeObjectURL, configurable: true });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    try {
+      const user = userEvent.setup();
+      renderApp(['/runs/42']);
+      await screen.findByRole('heading', { name: /run #42/i });
+
+      await user.click(screen.getByRole('button', { name: /download signed bundle/i }));
+      await waitFor(() => expect(click).toHaveBeenCalledTimes(1));
+      await user.click(screen.getByRole('button', { name: /download pdf report/i }));
+      await waitFor(() => expect(click).toHaveBeenCalledTimes(2));
+
+      const paths = fetchMock.mock.calls.map(([input]) => String(input));
+      expect(paths).toContain('/runs/42/bundle');
+      expect(paths).toContain('/runs/42/report.pdf');
+      expect(createObjectURL).toHaveBeenCalledTimes(2);
+    } finally {
+      click.mockRestore();
+    }
+  });
+
+  it('reports an export the API refused', async () => {
+    installFetchMock({ routes: [{ pattern: /^\/runs\/\d+\/report\.pdf$/, status: 404, body: { detail: 'Run 42 has no PDF report' } }] });
+    const user = userEvent.setup();
+    renderApp(['/runs/42']);
+    await screen.findByRole('heading', { name: /run #42/i });
+
+    await user.click(screen.getByRole('button', { name: /download pdf report/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('The PDF report could not be downloaded.');
+  });
+
+  it('copies a handoff summary built from the run, its finding and the verification', async () => {
+    installFetchMock();
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    renderApp(['/runs/42']);
+    await screen.findByRole('heading', { name: /run #42/i });
+
+    await user.click(screen.getByRole('button', { name: /verify evidence chain/i }));
+    await screen.findByText('Chain intact: 1 sealed run verified.');
+    await user.click(screen.getByRole('button', { name: /copy handoff summary/i }));
+    expect(await screen.findByText('Handoff summary copied to the clipboard.')).toBeInTheDocument();
+    expect(writeText).toHaveBeenCalledTimes(1);
+    const text = writeText.mock.calls[0][0] as string;
+    expect(text).toContain('Target: example-corp');
+    expect(text).toContain('Risk level: high');
+    expect(text).toContain('Evidence chain: Chain intact: 1 sealed run verified.');
+  });
+
+  it('shows the summary for manual copying when the clipboard is unavailable', async () => {
+    installFetchMock();
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
+    renderApp(['/runs/42']);
+    await screen.findByRole('heading', { name: /run #42/i });
+
+    await user.click(screen.getByRole('button', { name: /copy handoff summary/i }));
+    expect(await screen.findByText(/clipboard is not available/i)).toBeInTheDocument();
+    const summary = screen.getByRole('textbox', { name: /handoff summary/i }) as HTMLTextAreaElement;
+    expect(summary.value).toContain('Target: example-corp');
+    expect(summary.value).toContain('Evidence chain: not verified in this session');
+  });
+
+  it('starts a follow-up run from the run detail and lists the alerts dispatched', async () => {
+    installFetchMock({
+      routes: [{ pattern: /^\/targets\/example-corp\/run$/, body: { run_id: 99, status: 'accepted', target_id: 'example-corp' } }],
+    });
+    const user = userEvent.setup();
+    renderApp(['/runs/42']);
+    await screen.findByRole('heading', { name: /run #42/i });
+
+    const alerts = screen.getByRole('heading', { name: /alerts dispatched/i }).parentElement!;
+    expect(within(alerts).getByRole('table')).toHaveTextContent('webhook');
+    expect(within(alerts).getByRole('table')).toHaveTextContent('sent');
+
+    await user.click(screen.getByRole('button', { name: /start follow-up run/i }));
+    expect(await screen.findByRole('status')).toHaveTextContent(/run #99/i);
+  });
+
+  it('leads from the evidence review to the report', async () => {
+    installFetchMock();
+    const user = userEvent.setup();
+    renderApp(['/runs/42']);
+    await screen.findByRole('heading', { name: /run #42/i });
+
+    await user.click(screen.getByRole('tab', { name: /evidence/i }));
+    await within(screen.getByRole('tabpanel')).findByRole('table');
+    expect(screen.getByRole('link', { name: /prepare handoff/i })).toHaveAttribute('href', '#handoff');
+    await user.click(screen.getByRole('button', { name: /continue to the report/i }));
+    expect(screen.getByRole('tab', { name: /report/i })).toHaveAttribute('aria-selected', 'true');
   });
 
   it('renders in Spanish and switches language on demand', async () => {

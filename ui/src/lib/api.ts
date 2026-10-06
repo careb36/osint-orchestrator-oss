@@ -1,4 +1,5 @@
 import type {
+  ChainVerification,
   DeltaRow,
   EvidenceRow,
   Finding,
@@ -173,6 +174,8 @@ export const api = {
   getRunEvidence: (runId: string | number) => request<EvidenceRow[]>(`/runs/${runId}/evidence`),
   getRunManifest: (runId: string | number) => request<Record<string, unknown>>(`/runs/${runId}/manifest`),
   getRiskTrends: () => request<RiskTrend[]>('/analytics/risk-trends'),
+  verifyChain: (targetId: string) =>
+    request<ChainVerification>(`/targets/${encodeURIComponent(targetId)}/chain/verify`),
   triggerRun: (targetId: string) =>
     request<TriggerRunResponse>(`/targets/${encodeURIComponent(targetId)}/run`, { method: 'POST' }),
 };
@@ -182,13 +185,26 @@ export const api = {
  * API key header) and hand the bytes to the browser as a file.
  */
 export async function downloadArtifact(runId: string | number, artifact: 'report' | 'finding' | 'evidence' | 'manifest' | 'delta') {
-  const isText = artifact === 'report';
-  const blob = await request<Blob>(`/runs/${runId}/${artifact}`, { parse: 'blob' });
-  const extension = isText ? 'md' : 'json';
+  const extension = artifact === 'report' ? 'md' : 'json';
+  await downloadFile(`/runs/${runId}/${artifact}`, `run-${runId}-${artifact}.${extension}`);
+}
+
+/** The whole run directory, signed manifest included, as one zip (GET /runs/{id}/bundle). */
+export async function downloadRunBundle(runId: string | number) {
+  await downloadFile(`/runs/${runId}/bundle`, `run-${runId}-bundle.zip`);
+}
+
+/** The PDF companion of the report (GET /runs/{id}/report.pdf). */
+export async function downloadRunPdf(runId: string | number) {
+  await downloadFile(`/runs/${runId}/report.pdf`, `run-${runId}-report.pdf`);
+}
+
+async function downloadFile(path: string, filename: string) {
+  const blob = await request<Blob>(path, { parse: 'blob' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
-  anchor.download = `run-${runId}-${artifact}.${extension}`;
+  anchor.download = filename;
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();

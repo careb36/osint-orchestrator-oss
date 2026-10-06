@@ -1,15 +1,19 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ErrorState, LoadingState, PageLayout } from '../components/PageState';
+import { RunNotice } from '../components/RunNotice';
 import { SearchField } from '../components/SearchField';
 import { SortableHeader } from '../components/SortableHeader';
 import { StatusPill } from '../components/StatusPill';
 import { useListControls } from '../hooks/useListControls';
+import { useStartRun } from '../hooks/useStartRun';
 import { useLocale, type MessageKey } from '../i18n';
-import { api, downloadArtifact } from '../lib/api';
+import { api, downloadArtifact, downloadRunBundle, downloadRunPdf } from '../lib/api';
 import { formatDateTime, formatDuration, riskTone, runStatusTone } from '../lib/format';
+import { buildHandoffSummary, describeVerification } from '../lib/handoff';
 import { distinct, filterDelta, filterEvidence, sortEvidence, type EvidenceSortKey } from '../lib/listing';
+import { isActiveStatus } from '../lib/overview';
 import type { ArtifactKind } from '../types';
 
 const RELEVANCES = ['high', 'medium', 'low'];
@@ -55,7 +59,7 @@ export function RunWorkspacePage() {
   }, [runId, artifact]);
 
   const run = useQuery({ queryKey: ['run', runId], queryFn: () => api.getRun(runId), enabled: Boolean(runId) });
-  const finding = useQuery({ queryKey: ['run', runId, 'finding'], queryFn: () => api.getRunFinding(runId), enabled: artifact === 'finding' });
+  const finding = useQuery({ queryKey: ['run', runId, 'finding'], queryFn: () => api.getRunFinding(runId, { optional: true }), enabled: Boolean(runId) });
   const evidence = useQuery({ queryKey: ['run', runId, 'evidence'], queryFn: () => api.getRunEvidence(runId), enabled: artifact === 'evidence' });
   const delta = useQuery({ queryKey: ['run', runId, 'delta'], queryFn: () => api.getRunDelta(runId), enabled: artifact === 'delta' });
   const report = useQuery({ queryKey: ['run', runId, 'report'], queryFn: () => api.getRunReport(runId), enabled: artifact === 'report' });
@@ -89,6 +93,43 @@ export function RunWorkspacePage() {
       await downloadArtifact(runId, artifact);
     } catch {
       setDownloadError(t('runDetail.downloadFailed', { artifact: artifactName(artifact) }));
+    }
+  };
+
+  // Handoff: verify the target's chain on demand, export, summarise, follow up.
+  const verification = useMutation({ mutationFn: (targetId: string) => api.verifyChain(targetId) });
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const [summaryText, setSummaryText] = useState('');
+  const followUp = useStartRun();
+  const runActive = run.data ? isActiveStatus(run.data.status) : false;
+
+  const handleExport = async (kind: 'bundle' | 'pdf') => {
+    setExportError(null);
+    try {
+      await (kind === 'bundle' ? downloadRunBundle(runId) : downloadRunPdf(runId));
+    } catch {
+      setExportError(t('runDetail.downloadFailed', { artifact: t(`artifact.${kind}`) }));
+    }
+  };
+
+  const handleCopySummary = async () => {
+    if (!run.data) return;
+    const text = buildHandoffSummary(t, tv, locale, {
+      run: run.data,
+      finding: finding.data,
+      evidence: evidence.data,
+      verification: verification.data,
+      href: window.location.href,
+    });
+    setSummaryText(text);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyState('copied');
+    } catch {
+      // No clipboard (insecure context, permission denied, old browser): the
+      // text is shown instead so it can be copied by hand.
+      setCopyState('failed');
     }
   };
 
@@ -272,6 +313,14 @@ export function RunWorkspacePage() {
                   ))}
                 </tbody>
               </table>
+              <div className="workspace-actions">
+                <button type="button" className="ghost-button" onClick={() => setArtifact('report')}>
+                  {t('evidence.continueReport')}
+                </button>
+                <a className="ghost-button" href="#handoff">
+                  {t('evidence.prepareHandoff')}
+                </a>
+              </div>
               </>
             )
           ) : null}
@@ -328,6 +377,126 @@ export function RunWorkspacePage() {
           {artifact === 'manifest' && manifest.data ? <pre>{JSON.stringify(manifest.data, null, 2)}</pre> : null}
         </div>
       </div>
+
+      {run.data ? (
+        <section id="handoff" className="handoff" aria-labelledby="handoff-title">
+          <div>
+            <h2 id="handoff-title" className="section-title">
+              {t('handoff.title')}
+            </h2>
+            <p className="muted">{t('handoff.lede')}</p>
+          </div>
+          <div className="handoff-grid">
+            <div className="handoff-block">
+              <h3>{t('handoff.chainTitle')}</h3>
+              <div className="handoff-actions">
+                <button
+                  type="button"
+                  className="primary-action"
+                  disabled={verification.isPending}
+                  onClick={() => verification.mutate(run.data!.target_id)}
+                >
+                  {verification.isPending ? t('handoff.verifying') : t('handoff.verify')}
+                </button>
+              </div>
+              {verification.error ? (
+                <p className="state-card error" role="alert">
+                  {t('handoff.chain.failed')}
+                </p>
+              ) : null}
+              {verification.data ? (
+                <div className={`state-card ${verification.data.ok ? 'ok' : 'error'}`} role={verification.data.ok ? 'status' : 'alert'}>
+                  <p>{describeVerification(t, verification.data)}</p>
+                  {verification.data.anchor_run_id !== null ? (
+                    <small className="muted">{t('handoff.chain.anchor', { runId: verification.data.anchor_run_id })}</small>
+                  ) : null}
+                  {!verification.data.ok && verification.data.first_broken_run_id !== null ? (
+                    <Link to={`/runs/${verification.data.first_broken_run_id}`}>
+                      {t('handoff.chain.openRun', { runId: verification.data.first_broken_run_id })}
+                    </Link>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="handoff-block">
+              <h3>{t('handoff.exportTitle')}</h3>
+              <div className="handoff-actions">
+                <button type="button" className="ghost-button" onClick={() => handleExport('bundle')}>
+                  {t('handoff.bundle')}
+                </button>
+                <button type="button" className="ghost-button" onClick={() => handleExport('pdf')}>
+                  {t('handoff.pdf')}
+                </button>
+                <button type="button" className="ghost-button" onClick={handleCopySummary}>
+                  {t('handoff.copy')}
+                </button>
+              </div>
+              {exportError ? (
+                <p className="state-card error" role="alert">
+                  {exportError}
+                </p>
+              ) : null}
+              {copyState === 'copied' ? (
+                <p className="state-card ok" role="status">
+                  {t('handoff.copied')}
+                </p>
+              ) : null}
+              {copyState === 'failed' ? (
+                <>
+                  <p className="state-card warning" role="status">
+                    {t('handoff.copyFailed')}
+                  </p>
+                  <textarea className="handoff-summary" readOnly aria-label={t('handoff.summary.title')} value={summaryText} />
+                </>
+              ) : null}
+            </div>
+
+            <div className="handoff-block">
+              <h3>{t('handoff.followUpTitle')}</h3>
+              <div className="handoff-actions">
+                <button
+                  type="button"
+                  className="ghost-button"
+                  disabled={followUp.isPending || runActive}
+                  onClick={() => followUp.start(run.data!.target_id)}
+                >
+                  {runActive ? t('run.running') : t('handoff.followUp')}
+                </button>
+              </div>
+              <RunNotice notice={followUp.notice} />
+            </div>
+          </div>
+
+          <div className="handoff-block">
+            <h3>{t('handoff.alertsTitle')}</h3>
+            {run.data.alerts.length === 0 ? (
+              <p className="muted">{t('handoff.noAlerts')}</p>
+            ) : (
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th scope="col">{t('col.channel')}</th>
+                    <th scope="col">{t('col.status')}</th>
+                    <th scope="col">{t('col.sentAt')}</th>
+                    <th scope="col">{t('col.error')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {run.data.alerts.map((alert, index) => (
+                    <tr key={alert.id ?? index}>
+                      <td>{alert.channel ?? '—'}</td>
+                      <td>{alert.status ?? '—'}</td>
+                      <td>{formatDateTime(alert.sent_at, locale)}</td>
+                      <td>{alert.error ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </section>
+      ) : null}
     </PageLayout>
   );
 }

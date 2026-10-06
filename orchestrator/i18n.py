@@ -48,6 +48,14 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "es": "No existe reporte para la ejecución {run_id}",
         "en": "Report for run {run_id} not found",
     },
+    "report_pdf_not_found": {
+        "es": "La corrida {run_id} no tiene informe en PDF",
+        "en": "Run {run_id} has no PDF report",
+    },
+    "bundle.not_found": {
+        "es": "La corrida {run_id} no tiene artefactos para exportar",
+        "en": "Run {run_id} has no artefacts to export",
+    },
     "synthesis_skipped": {
         "es": "Síntesis omitida: no hay proveedor LLM configurado.",
         "en": "Synthesis skipped: no LLM provider is configured.",
