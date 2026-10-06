@@ -565,7 +565,7 @@ async def generate_report(
     lang = resolve_language(language or data.language)
     day = _bundle_date(data.run_started_at)
     # One directory per run: runs of the same target on the same day (manual
-    # runs, retries, the demo) must not overwrite each other's evidence.
+    # runs, retries) must not overwrite each other's evidence.
     date_dir = Path(report_dir) / day
     base = date_dir / data.target_id / f"run-{data.run_id}"
     base.mkdir(parents=True, exist_ok=True)
