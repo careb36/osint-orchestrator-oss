@@ -1,8 +1,10 @@
 import { vi } from 'vitest';
 import type { DeltaRow, EvidenceRow, Finding, HealthStatus, RiskTrend, RunDetail, RunSummary, TargetSummary } from '../types';
 
+// The default deployment (OpenCTI sink off, ADR-008): the backend promotes the
+// overall status to degraded whenever a check is, so the fixture does too.
 export const sampleHealth: HealthStatus = {
-  status: 'ok',
+  status: 'degraded',
   version: '0.1.0-test',
   checks: {
     database: { status: 'ok', detail: 'SQLite reachable' },
