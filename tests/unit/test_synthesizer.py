@@ -927,6 +927,11 @@ async def test_fallback_finding_carries_an_inert_bounded_error(
 
     assert finding is not None and status == "failed"
     assert finding.risk_level == "unknown"
+    # The run keeps running, with the failure noted in its error field.
+    async with session_factory() as session:
+        run_db = await session.get(Run, run_id)
+    assert run_db is not None and run_db.status == RunStatus.RUNNING
+    assert "invalid response twice" in (run_db.error or "")
     assert re.search(r"</?[A-Za-z]", finding.summary) is None
     assert "https://" not in finding.summary
     assert "\n" not in finding.summary

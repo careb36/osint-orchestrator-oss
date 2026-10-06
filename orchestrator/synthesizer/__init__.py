@@ -464,8 +464,13 @@ async def synthesize(
 
     - ``"ok"``      — finding produced and persisted.
     - ``"skipped"`` — no LLM provider is configured; finding is None.
-    - ``"failed"``  — provider configured but the call failed; Run.error
-                      is annotated and finding is None.
+    - ``"failed"``  — provider configured but no valid finding came back;
+                      Run.error is annotated. finding is None when the call
+                      itself failed, and a persisted ``risk_level="unknown"``
+                      fallback whose summary quotes the last validation error
+                      when the model answered twice with an invalid reply.
+                      Callers must not read ``finding is None`` as the test
+                      for failure; the status is.
 
     Never raises.
     """
@@ -550,6 +555,9 @@ async def synthesize(
                     model=client.model_for_route("reasoning"),
                     duration_ms=duration_ms,
                     raw_response=raw,
+                )
+                await _annotate_run_error(
+                    run_id, "synthesis: the model returned an invalid response twice"
                 )
                 return finding, "failed"
 
