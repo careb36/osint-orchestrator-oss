@@ -81,11 +81,6 @@ def _target_schedule_signature(trigger: CronTrigger, grace: int) -> tuple[str, i
 
 def _load_targets() -> tuple[list[Target], list[str], bool]:
     """Load targets centrally and report whether the targets file itself failed."""
-    if settings.demo_mode:
-        # Public demo: runs start only from POST /demo/targets/{id}/run, within
-        # the daily limits. Nothing runs on a cron.
-        return [], [], False
-
     loaded_targets, invalid_targets = load_targets(settings.targets_file)
     load_failed = "<targets-file>" in invalid_targets
     if load_failed:

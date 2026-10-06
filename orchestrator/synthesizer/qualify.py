@@ -13,7 +13,6 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from orchestrator.config import settings
 from orchestrator.database import get_session
-from orchestrator.demo import consume_budget
 from orchestrator.i18n import resolve_language
 from orchestrator.models import (
     EvidenceCategory,
@@ -207,14 +206,7 @@ async def qualify_evidence(
     # unparseable answer, a skipped index) are asked for once more.
     for attempt in (1, 2):
         retry: list[EvidenceItem] = []
-        stop = False
         for batch in pending:
-            if not await consume_budget("llm"):
-                # Public demo only: the remaining items stay unqualified and
-                # the run goes on.
-                failures.append("the demo's daily LLM budget is exhausted")
-                stop = True
-                break
             try:
                 raw = await client.complete(
                     _QUALIFY_SYSTEM_PROMPT,
@@ -270,7 +262,7 @@ async def qualify_evidence(
                     },
                 )
                 retry.extend(missing)
-        if stop or not retry or attempt == 2:
+        if not retry or attempt == 2:
             break
         pending = [retry[i : i + _BATCH_SIZE] for i in range(0, len(retry), _BATCH_SIZE)]
     logger.info(

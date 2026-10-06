@@ -20,6 +20,20 @@ export function runStatusTone(status: RunStatus): Tone {
   }
 }
 
+/** Visual tone of an alert dispatch outcome (orchestrator/models.py::AlertStatus). */
+export function alertStatusTone(status: string): Tone {
+  switch (status) {
+    case 'sent':
+      return 'ok';
+    case 'failed':
+      return 'error';
+    case 'skipped':
+      return 'muted';
+    default:
+      return '';
+  }
+}
+
 export function riskTone(level: string): Tone {
   switch (level) {
     case 'critical':

@@ -7,7 +7,7 @@ import { ApiKeyProvider } from './auth';
 import { LOCALE_STORAGE_KEY, LocaleProvider, type Locale } from './i18n';
 import { API_KEY_STORAGE_KEY } from './lib/api';
 import { uiTelemetry } from './lib/telemetry';
-import { installFetchMock } from './test/mockApi';
+import { installFetchMock, sampleRuns } from './test/mockApi';
 
 // The assertions below read the English catalogue; Spanish is the default
 // for operators and has its own tests at the end of this file.
@@ -410,7 +410,7 @@ describe('App shell', () => {
 
     await screen.findByRole('heading', { name: /run #42/i });
     await user.click(screen.getByRole('tab', { name: /evidence/i }));
-    const table = await screen.findByRole('table');
+    const table = await within(screen.getByRole('tabpanel')).findByRole('table');
     const rowsOf = () => within(table).getAllByRole('row').slice(1);
     // Default: relevance descending.
     expect(rowsOf().map((row) => row.textContent)).toEqual([
@@ -431,7 +431,7 @@ describe('App shell', () => {
     // The observables tab has its own keys: the evidence term does not leak
     // into it, and its Clear filters button appears only for its own keys.
     await user.click(screen.getByRole('tab', { name: /delta/i }));
-    const deltaTable = await screen.findByRole('table');
+    const deltaTable = await within(screen.getByRole('tabpanel')).findByRole('table');
     expect(within(deltaTable).getAllByRole('row').slice(1)).toHaveLength(3);
     expect(screen.getByRole('searchbox', { name: /search/i })).toHaveValue('');
     expect(screen.queryByRole('button', { name: /clear filters/i })).not.toBeInTheDocument();
@@ -487,6 +487,206 @@ describe('App shell', () => {
     expect(await screen.findByRole('heading', { name: /run #42/i })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /finding/i })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /report/i })).toBeInTheDocument();
+  });
+
+  it('shows the risk of each run and what changed since the previous run of the target', async () => {
+    const history = [
+      { ...sampleRuns[0], id: 40, started_at: '2026-09-29T06:00:00Z', finished_at: '2026-09-29T06:03:00Z', status: 'partial', risk_level: 'medium' },
+      { ...sampleRuns[0], id: 41, started_at: '2026-09-30T06:00:00Z', finished_at: '2026-09-30T06:02:00Z', status: 'failed', risk_level: null, error: 'collector timeout' },
+      sampleRuns[0], // #42, success, high
+    ];
+    installFetchMock({ routes: [{ pattern: /^\/runs(\?.*)?$/, body: history }] });
+    const user = userEvent.setup();
+    renderApp(['/runs']);
+
+    const table = await screen.findByRole('table');
+    const rowOf = (id: string) => within(table).getAllByRole('row').find((row) => within(row).queryByRole('link', { name: id }))!;
+    expect(rowOf('#40')).toHaveTextContent('first run');
+    expect(rowOf('#41')).toHaveTextContent('status partial → failed');
+    expect(rowOf('#41')).not.toHaveTextContent(/risk (up|down)/);
+    expect(rowOf('#42')).toHaveTextContent('status failed → success');
+    expect(rowOf('#42')).toHaveTextContent('risk up medium → high');
+    expect(within(rowOf('#42')).getByText('high')).toBeInTheDocument();
+
+    // Sorting by risk puts the run with the highest level first and the ones without a finding last.
+    await user.click(within(screen.getByRole('columnheader', { name: /^risk/i })).getByRole('button'));
+    const ids = within(table).getAllByRole('row').slice(1).map((row) => within(row).getAllByRole('link')[0].textContent);
+    expect(ids).toEqual(['#42', '#40', '#41']);
+  });
+
+  it('draws the run history of a target oldest first with risk and change columns', async () => {
+    const history = [
+      sampleRuns[0],
+      { ...sampleRuns[0], id: 41, started_at: '2026-09-30T06:00:00Z', finished_at: '2026-09-30T06:02:00Z', status: 'success', risk_level: 'critical' },
+    ];
+    installFetchMock({ routes: [{ pattern: /^\/runs\?target_id=example-corp$/, body: history }] });
+    renderApp(['/targets/example-corp']);
+
+    await screen.findByRole('heading', { name: 'example.com' });
+    const timeline = screen.getByRole('list', { name: /run history, oldest first/i });
+    const items = within(timeline).getAllByRole('link');
+    expect(items.map((item) => item.getAttribute('aria-label'))).toEqual([
+      'Run #41: success, risk critical',
+      'Run #42: success, risk high',
+    ]);
+    expect(items[1]).toHaveAttribute('href', '/targets/example-corp/runs/42');
+    const table = screen.getByRole('table');
+    const rows = within(table).getAllByRole('row').slice(1);
+    expect(rows[0]).toHaveTextContent('#42');
+    expect(rows[0]).toHaveTextContent('risk down critical → high');
+    expect(rows[1]).toHaveTextContent('first run');
+  });
+
+  it('verifies the evidence chain from the run detail and shows the outcome', async () => {
+    const fetchMock = installFetchMock();
+    const user = userEvent.setup();
+    renderApp(['/runs/42']);
+    await screen.findByRole('heading', { name: /run #42/i });
+
+    await user.click(screen.getByRole('button', { name: /verify evidence chain/i }));
+    expect(await screen.findByRole('status')).toHaveTextContent('Chain intact: 1 sealed run verified.');
+    const verifyCall = fetchMock.mock.calls.find(([input]) => String(input).includes('/targets/example-corp/chain/verify'));
+    expect(verifyCall).toBeDefined();
+  });
+
+  it('shows a broken chain as an alert with a link to the first broken run', async () => {
+    installFetchMock({
+      routes: [
+        {
+          pattern: /^\/targets\/[^/]+\/chain\/verify$/,
+          body: { ok: false, checked: 2, unsealed: 0, first_broken_run_id: 41, reason: 'artefact_hash', detail: 'report.md', anchor_run_id: null, anchor_previous_manifest_sha256: null, message: "Artifact hash mismatch for 'report.md'" },
+        },
+      ],
+    });
+    const user = userEvent.setup();
+    renderApp(['/runs/42']);
+    await screen.findByRole('heading', { name: /run #42/i });
+
+    await user.click(screen.getByRole('button', { name: /verify evidence chain/i }));
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent("Chain broken at run #41: Artefact hash mismatch for 'report.md'");
+    expect(within(alert).getByRole('link', { name: /open run #41/i })).toHaveAttribute('href', '/runs/41');
+
+    // Following the link opens another run: the verdict belongs to the old page and is gone.
+    await user.click(within(alert).getByRole('link', { name: /open run #41/i }));
+    await waitFor(() => expect(screen.queryByText(/chain broken/i)).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: /verify evidence chain/i })).toBeEnabled();
+  });
+
+  it('exports the signed bundle and the PDF through the API with the key header', async () => {
+    window.sessionStorage.setItem(API_KEY_STORAGE_KEY, 'test-key');
+    const fetchMock = installFetchMock({ requireKey: 'test-key' });
+    const createObjectURL = vi.fn(() => 'blob:run-42');
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { value: createObjectURL, configurable: true });
+    Object.defineProperty(URL, 'revokeObjectURL', { value: revokeObjectURL, configurable: true });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    const download = vi.fn();
+    const downloadProperty = Object.getOwnPropertyDescriptor(HTMLAnchorElement.prototype, 'download');
+    Object.defineProperty(HTMLAnchorElement.prototype, 'download', { set: download, get: () => '', configurable: true });
+    try {
+      const user = userEvent.setup();
+      renderApp(['/runs/42']);
+      await screen.findByRole('heading', { name: /run #42/i });
+
+      await user.click(screen.getByRole('button', { name: /download signed bundle/i }));
+      await waitFor(() => expect(click).toHaveBeenCalledTimes(1));
+      await user.click(screen.getByRole('button', { name: /download pdf report/i }));
+      await waitFor(() => expect(click).toHaveBeenCalledTimes(2));
+
+      // The server names the bundle after the run and the target; the PDF route sends no name, so the fallback applies.
+      expect(download.mock.calls.map(([name]) => name)).toEqual(['run-42-example-corp.zip', 'run-42-report.pdf']);
+      const paths = fetchMock.mock.calls.map(([input]) => String(input));
+      expect(paths).toContain('/runs/42/bundle');
+      expect(paths).toContain('/runs/42/report.pdf');
+      const bundleCall = fetchMock.mock.calls.find(([input]) => String(input) === '/runs/42/bundle')!;
+      expect(new Headers((bundleCall[1] as RequestInit | undefined)?.headers).get('X-API-Key')).toBe('test-key');
+      expect(createObjectURL).toHaveBeenCalledTimes(2);
+    } finally {
+      click.mockRestore();
+      if (downloadProperty) Object.defineProperty(HTMLAnchorElement.prototype, 'download', downloadProperty);
+    }
+  });
+
+  it('shows a run without a finding as a state, not as an error', async () => {
+    installFetchMock();
+    renderApp(['/runs/43']);
+    await screen.findByRole('heading', { name: /run #/i });
+    expect(await screen.findByRole('heading', { name: /no synthesis for this run/i })).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('reports an export the API refused', async () => {
+    installFetchMock({ routes: [{ pattern: /^\/runs\/\d+\/report\.pdf$/, status: 404, body: { detail: 'Run 42 has no PDF report' } }] });
+    const user = userEvent.setup();
+    renderApp(['/runs/42']);
+    await screen.findByRole('heading', { name: /run #42/i });
+
+    await user.click(screen.getByRole('button', { name: /download pdf report/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('The PDF report could not be downloaded.');
+  });
+
+  it('copies a handoff summary built from the run, its finding and the verification', async () => {
+    installFetchMock();
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    renderApp(['/runs/42']);
+    await screen.findByRole('heading', { name: /run #42/i });
+
+    await user.click(screen.getByRole('button', { name: /verify evidence chain/i }));
+    await screen.findByText('Chain intact: 1 sealed run verified.');
+    await user.click(screen.getByRole('button', { name: /copy handoff summary/i }));
+    expect(await screen.findByText('Handoff summary copied to the clipboard.')).toBeInTheDocument();
+    expect(writeText).toHaveBeenCalledTimes(1);
+    const text = writeText.mock.calls[0][0] as string;
+    expect(text).toContain('Target: example-corp');
+    expect(text).toContain('Risk level: high');
+    expect(text).toContain('Evidence chain: Chain intact: 1 sealed run verified.');
+  });
+
+  it('shows the summary for manual copying when the clipboard is unavailable', async () => {
+    installFetchMock();
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
+    renderApp(['/runs/42']);
+    await screen.findByRole('heading', { name: /run #42/i });
+
+    await user.click(screen.getByRole('button', { name: /copy handoff summary/i }));
+    expect(await screen.findByText(/clipboard is not available/i)).toBeInTheDocument();
+    const summary = screen.getByRole('textbox', { name: /handoff summary/i }) as HTMLTextAreaElement;
+    expect(summary.value).toContain('Target: example-corp');
+    expect(summary.value).toContain('Evidence chain: not verified in this session');
+  });
+
+  it('starts a follow-up run from the run detail and lists the alerts dispatched', async () => {
+    installFetchMock({
+      routes: [{ pattern: /^\/targets\/example-corp\/run$/, body: { run_id: 99, status: 'accepted', target_id: 'example-corp' } }],
+    });
+    const user = userEvent.setup();
+    renderApp(['/runs/42']);
+    await screen.findByRole('heading', { name: /run #42/i });
+
+    const alerts = screen.getByRole('heading', { name: /alerts dispatched/i }).parentElement!;
+    expect(within(alerts).getByRole('table')).toHaveTextContent('webhook');
+    expect(within(alerts).getByRole('table')).toHaveTextContent('sent');
+    expect(within(alerts).getByRole('table').querySelector('.status-pill')).toHaveTextContent('sent');
+
+    await user.click(screen.getByRole('button', { name: /start follow-up run/i }));
+    expect(await screen.findByRole('status')).toHaveTextContent(/run #99/i);
+  });
+
+  it('leads from the evidence review to the report', async () => {
+    installFetchMock();
+    const user = userEvent.setup();
+    renderApp(['/runs/42']);
+    await screen.findByRole('heading', { name: /run #42/i });
+
+    await user.click(screen.getByRole('tab', { name: /evidence/i }));
+    await within(screen.getByRole('tabpanel')).findByRole('table');
+    expect(screen.getByRole('link', { name: /prepare handoff/i })).toHaveAttribute('href', '#handoff');
+    await user.click(screen.getByRole('button', { name: /continue to the report/i }));
+    expect(screen.getByRole('tab', { name: /report/i })).toHaveAttribute('aria-selected', 'true');
   });
 
   it('renders in Spanish and switches language on demand', async () => {

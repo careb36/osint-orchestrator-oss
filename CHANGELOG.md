@@ -19,6 +19,17 @@ from [SECURITY.md](SECURITY.md).
   analyst path and fails on any `console.error` or UI error event. The DoD
   (`ui/docs/dod.md`) records the state of every phase and `ui/docs/kpis.md`
   the scorecard the current telemetry allows.
+- Run history with transitions: `GET /runs` and `GET /runs/{id}` carry the
+  `risk_level` of the run's finding; the runs view and the target detail show
+  the risk of each run and what changed since the target's previous run
+  (status, risk up or down), the runs view sorts by risk, and the target
+  detail opens with a timeline of its runs, oldest first.
+- Run handoff: `GET /runs/{id}/bundle` (the run directory with its signed
+  `manifest.json` as one zip, verifiable offline) and `GET /runs/{id}/report.pdf`;
+  the dashboard's run detail gains a Handoff block that verifies the target's
+  evidence chain, downloads the bundle or the PDF, copies a plain-text handoff
+  summary, starts a follow-up run and lists the alerts the run dispatched, and
+  the evidence tab leads to the report and to the handoff.
 - Operator dashboard foundation (`ui/`): the React app is built in a Node
   stage of both Dockerfiles and served by the orchestrator at `/console`
   (client routes, `/console/assets/*` with immutable caching,
@@ -48,12 +59,6 @@ from [SECURITY.md](SECURITY.md).
   and can be shared. Target detail gains the risk trend and a Start-run
   action; a running run shows a distinct in-progress cue and its elapsed
   time.
-- Demo mode (`DEMO_MODE=true`, `Dockerfile.demo`, `docker-compose.demo.yml`):
-  public `/demo` page and routes restricted to an allowlist
-  (`demo/targets.demo.yaml`), per-visitor and global daily run limits, daily
-  Tavily and LLM call budgets, views without the model synthesis (no summary,
-  risk level or justification), startup check, seed import (`demo/seed/`) and
-  `scripts/export_demo_seed.py`. Deployment notes in `docs/deploy.md`.
 - Evidence qualification on the fast LLM route (`LLM_QUALIFY_ENABLED`,
   `LLM_QUALIFY_MAX_ITEMS`): each Tavily result is classified (category,
   relevance, confidence, rationale) against the entity under review, stored in
@@ -132,6 +137,16 @@ from [SECURITY.md](SECURITY.md).
 
 ### Removed
 
+- Startup detection of databases created before Alembic (app tables present,
+  no `alembic_version`), which stamped them at the baseline revision; every
+  database now starts from the migrations. The daily report index no longer
+  parses its pre-Phase-3 four-column rows.
+- Demo mode: `DEMO_MODE` and the other `DEMO_*` settings, the public `/demo`
+  page and routes, `Dockerfile.demo`, `docker-compose.demo.yml`, the allowlist
+  and seed files under `demo/`, `scripts/export_demo_seed.py` and the daily
+  Tavily and LLM call budgets. The orchestrator ships as one product, the API
+  with the operator dashboard; migration `0008` drops the `demo_daily_usage`
+  counters.
 - The server-rendered operator console (`orchestrator/templates/console.html`)
   and its routes `/console/legacy` and `/console/i18n.json`: the React
   dashboard covers every view it had (health, risk, runs, run detail with
@@ -142,6 +157,10 @@ from [SECURITY.md](SECURITY.md).
 
 ### Fixed
 
+- The integration tests (`tests/integration/test_e2e.py`) send
+  `ORCHESTRATOR_API_KEY` to the protected routes and assert the `401` without
+  it; since the API key landed (ADR-005) they had been failing against a
+  running stack. OpenCTI's health probe also accepts a `401` as reachable.
 - A run keeps `running` until it is sealed (ADR-007). The final status was
   written before synthesis, the report and the manifest, so a second run of
   the same target was admitted meanwhile; whichever sealed last pointed to the
@@ -156,16 +175,6 @@ from [SECURITY.md](SECURITY.md).
   points to are deleted, and none when the remaining runs cannot be read.
 - Retention purges `evidence_qualifications` with the runs they belong to; the
   qualified URLs and rationales were kept forever.
-- Demo mode: the public report no longer leaks the synthesis. Model text that
-  put `## ` after a line separator other than `\n` (`\r`, `\u2028`, `\x85`…)
-  escaped the heading neutralisation and ended the redaction early, exposing
-  the risk level, justification and pivots. Everything from the synthesis
-  heading on (the report's last section) is now withheld, and
-  `neutralise_markdown` normalises every line break to `\n` first.
-- Demo mode: concurrent calls can no longer overspend the daily Tavily and LLM
-  budgets or the run limits. The counters were read and written without a
-  lock, so 20 concurrent checks against a limit of 5 all passed; every update
-  is now serialised in-process (single instance, ADR-005).
 - Evidence qualification asks once more for the items an answer left out and
   uses batches of 5: live, a 10-item answer was truncated and none of its items
   were qualified.

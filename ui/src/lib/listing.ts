@@ -87,7 +87,7 @@ export function sortTargets(rows: TargetRow[], sort: Sort<TargetSortKey>): Targe
 // ------------------------------------------------------------------- runs
 
 export type SinceFilter = '' | '24h' | '7d';
-export type RunSortKey = 'started' | 'duration' | 'observables' | 'status' | 'target';
+export type RunSortKey = 'started' | 'duration' | 'observables' | 'status' | 'target' | 'risk';
 export type RunFilters = {
   query: string;
   target: string;
@@ -130,6 +130,9 @@ export function sortRuns(runs: RunSummary[], sort: Sort<RunSortKey>, now: Date):
       return sortBy(runs, sort.dir, (run) => STATUS_ORDER[run.status] ?? 9);
     case 'target':
       return sortBy(runs, sort.dir, (run) => run.target_id.toLowerCase());
+    case 'risk':
+      // A run without a finding has no level to rank: it sorts last either way.
+      return sortBy(runs, sort.dir, (run) => (run.risk_level ? (RISK_RANK[run.risk_level] ?? null) : null));
     case 'started':
     default:
       return sortBy(runs, sort.dir, (run) => parseApiDate(run.started_at).getTime());

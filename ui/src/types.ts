@@ -2,7 +2,7 @@
 // orchestrator/models.py). Field names are the backend's: snake_case.
 
 export type HealthCheck = {
-  status: 'ok' | 'degraded' | 'offline' | 'disabled' | string;
+  status: 'ok' | 'degraded' | 'offline' | string;
   detail: string;
   hint?: string;
   action?: string;
@@ -41,6 +41,8 @@ export type RunSummary = {
   error: string | null;
   report_path: string | null;
   manifest_sha256: string | null;
+  /** Risk level of the run's finding; null without one (failed early, synthesis off, still running). */
+  risk_level?: string | null;
 };
 
 export type AlertRecordSummary = {
@@ -108,3 +110,17 @@ export type TriggerRunResponse = {
 };
 
 export type ArtifactKind = 'report' | 'finding' | 'evidence' | 'manifest' | 'delta';
+
+/** GET /targets/{id}/chain/verify (orchestrator/evidence.py::verify_target_chain). */
+export type ChainVerification = {
+  ok: boolean;
+  checked: number;
+  unsealed: number;
+  first_broken_run_id: number | null;
+  reason: string | null;
+  detail: string | null;
+  anchor_run_id: number | null;
+  anchor_previous_manifest_sha256: string | null;
+  /** Operator-language explanation of `reason`, set by the API when the chain is broken. */
+  message?: string;
+};

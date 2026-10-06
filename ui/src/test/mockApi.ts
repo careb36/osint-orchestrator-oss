@@ -1,13 +1,15 @@
 import { vi } from 'vitest';
-import type { DeltaRow, EvidenceRow, Finding, HealthStatus, RiskTrend, RunDetail, RunSummary, TargetSummary } from '../types';
+import type { ChainVerification, DeltaRow, EvidenceRow, Finding, HealthStatus, RiskTrend, RunDetail, RunSummary, TargetSummary } from '../types';
 
+// The default deployment (OpenCTI sink off, ADR-008): the backend promotes the
+// overall status to degraded whenever a check is, so the fixture does too.
 export const sampleHealth: HealthStatus = {
-  status: 'ok',
+  status: 'degraded',
   version: '0.1.0-test',
   checks: {
     database: { status: 'ok', detail: 'SQLite reachable' },
     scheduler: { status: 'ok', detail: 'APScheduler running' },
-    opencti: { status: 'disabled', detail: 'OpenCTI disabled in demo mode' },
+    opencti: { status: 'degraded', detail: 'OpenCTI sink disabled' },
   },
 };
 
@@ -48,6 +50,7 @@ export const sampleRuns: RunSummary[] = [
     error: null,
     report_path: 'daily_reports/2026-10-01/example-corp/report.md',
     manifest_sha256: 'a'.repeat(64),
+    risk_level: 'high',
   },
   {
     id: 43,
@@ -60,10 +63,25 @@ export const sampleRuns: RunSummary[] = [
     error: 'collector timeout',
     report_path: null,
     manifest_sha256: null,
+    risk_level: null,
   },
 ];
 
-export const sampleRunDetail: RunDetail = { ...sampleRuns[0], alerts: [] };
+export const sampleRunDetail: RunDetail = {
+  ...sampleRuns[0],
+  alerts: [{ id: 1, run_id: 42, channel: 'webhook', status: 'sent', sent_at: '2026-10-01T06:04:30Z', error: null }],
+};
+
+export const sampleVerification: ChainVerification = {
+  ok: true,
+  checked: 1,
+  unsealed: 0,
+  first_broken_run_id: null,
+  reason: null,
+  detail: null,
+  anchor_run_id: null,
+  anchor_previous_manifest_sha256: null,
+};
 
 export const sampleTrends: RiskTrend[] = [
   {
@@ -156,6 +174,7 @@ type Route = {
   body: unknown | ((match: RegExpMatchArray) => unknown);
   /** Serve the body as text/plain instead of JSON (the Markdown report). */
   text?: boolean;
+  headers?: Record<string, string>;
 };
 
 type MockOptions = {
@@ -181,6 +200,10 @@ export const defaultRoutes: Route[] = [
   { pattern: /^\/runs\/\d+\/evidence$/, body: [] },
   { pattern: /^\/runs\/\d+\/delta$/, body: [] },
   { pattern: /^\/analytics\/risk-trends$/, body: sampleTrends },
+  { pattern: /^\/targets\/[^/]+\/chain\/verify$/, body: sampleVerification },
+  // Binary exports: the body only has to be a blob the download helper can hand over.
+  { pattern: /^\/runs\/\d+\/bundle$/, body: 'zip-bytes', headers: { 'Content-Disposition': 'attachment; filename="run-42-example-corp.zip"' } },
+  { pattern: /^\/runs\/\d+\/report\.pdf$/, body: 'pdf-bytes' },
   { pattern: new RegExp(`^/runs/${sampleRuns[0].id}/report$`), body: '# Report\n\nTwo new subdomains.\n', text: true },
   {
     pattern: new RegExp(`^/runs/${sampleRuns[0].id}/manifest$`),
@@ -218,9 +241,11 @@ export function installFetchMock(options: MockOptions = {}) {
           return jsonResponse(404, { detail: 'Not found' });
         }
         if (route.text) {
-          return new Response(String(body), { status: route.status ?? 200, headers: { 'Content-Type': 'text/plain' } });
+          return new Response(String(body), { status: route.status ?? 200, headers: { 'Content-Type': 'text/plain', ...route.headers } });
         }
-        return jsonResponse(route.status ?? 200, body);
+        const response = jsonResponse(route.status ?? 200, body);
+        for (const [name, value] of Object.entries(route.headers ?? {})) response.headers.set(name, value);
+        return response;
       }
     }
     return jsonResponse(404, { detail: `Unmocked path ${path}` });

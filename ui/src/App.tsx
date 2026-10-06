@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, type ReactNode } from 'react';
-import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
+import { NavLink, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { useApiKey } from './auth';
 import { ApiKeyGate } from './components/ApiKeyGate';
 import { AppErrorBoundary } from './components/ErrorBoundary';
@@ -32,6 +32,16 @@ function ViewBoundary({ children }: { children: ReactNode }) {
       <Suspense fallback={<LoadingState message={t('loadingView')} />}>{children}</Suspense>
     </AppErrorBoundary>
   );
+}
+
+/**
+ * One page instance per run: keyed by the route param so the tab, the handoff
+ * verification, the copied summary and the follow-up notice never carry over
+ * when a link inside the page (the first broken run) changes the run.
+ */
+function RunWorkspaceRoute() {
+  const { runId = '' } = useParams();
+  return <RunWorkspacePage key={runId} />;
 }
 
 function AppShell() {
@@ -104,9 +114,9 @@ function AppShell() {
               <Route path="/" element={<HomePage />} />
               <Route path="/targets" element={<TargetsPage />} />
               <Route path="/targets/:targetId" element={<TargetDetailPage />} />
-              <Route path="/targets/:targetId/runs/:runId" element={<RunWorkspacePage />} />
+              <Route path="/targets/:targetId/runs/:runId" element={<RunWorkspaceRoute />} />
               <Route path="/runs" element={<RunsPage />} />
-              <Route path="/runs/:runId" element={<RunWorkspacePage />} />
+              <Route path="/runs/:runId" element={<RunWorkspaceRoute />} />
               <Route path="*" element={<NotFoundPage />} />
             </Routes>
           </ViewBoundary>
