@@ -118,6 +118,10 @@ from [SECURITY.md](SECURITY.md).
 
 ### Removed
 
+- Startup detection of databases created before Alembic (app tables present,
+  no `alembic_version`), which stamped them at the baseline revision; every
+  database now starts from the migrations. The daily report index no longer
+  parses its pre-Phase-3 four-column rows.
 - Demo mode: `DEMO_MODE` and the other `DEMO_*` settings, the public `/demo`
   page and routes, `Dockerfile.demo`, `docker-compose.demo.yml`, the allowlist
   and seed files under `demo/`, `scripts/export_demo_seed.py` and the daily

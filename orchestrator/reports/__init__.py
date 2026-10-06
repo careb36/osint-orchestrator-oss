@@ -469,10 +469,7 @@ def _read_index_rows(path: Path) -> dict[str, tuple[str, str, str, str]]:
         parts = [p.strip() for p in line.strip().split("|")[1:-1]]
         if parts[0].lower() in {"objetivo", "target"}:
             continue
-        if len(parts) == 4:
-            # Legacy 4-column format (pre-Phase-3): no risk column.
-            rows[parts[0]] = (parts[1], parts[2], "—", parts[3])
-        elif len(parts) == 5:
+        if len(parts) == 5:
             rows[parts[0]] = (parts[1], parts[2], parts[3], parts[4])
     return rows
 
@@ -488,9 +485,9 @@ def _write_daily_index(
 ) -> None:
     """Update daily_reports/YYYY-MM-DD/index.md with this target's latest row.
 
-    Existing rows are parsed back from the file (both the legacy 4-column and
-    current 5-column formats), replaced per target and rewritten sorted — so
-    the index survives multiple targets finishing in any order.
+    Existing rows are parsed back from the file, replaced per target and
+    rewritten sorted, so the index survives multiple targets finishing in any
+    order.
     """
     index_path = date_dir / "index.md"
     # Two targets finishing in the same minute rewrite the same file; without
