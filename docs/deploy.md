@@ -1,49 +1,100 @@
-# Deploying the demo
+# Deploying to production
 
-The demo image ([`Dockerfile.demo`](../Dockerfile.demo)) runs the orchestrator
-in [demo mode](operations.md#demo-mode): one container, SQLite, port `7860`,
-uid `1000`. Keys are read from the environment and never baked into the image.
+How to run the orchestrator for real users. [operations.md](operations.md)
+covers day-to-day running; [configuration.md](configuration.md) describes every
+setting; the hardening checklist is in
+[SECURITY.md](../SECURITY.md#3-security-model-and-hardening-checklist).
 
-## Environment
+There are two supported shapes:
 
-| Variable | Value |
+| Shape | When | Guide |
+| --- | --- | --- |
+| Docker Compose, full stack | One server; OpenCTI, SpiderFoot and the orchestrator together | This page |
+| Kubernetes, Helm chart | Existing cluster with OpenCTI and SpiderFoot deployed separately | [`deploy/helm/osint-orchestrator`](../deploy/helm/osint-orchestrator/README.md) |
+
+## Server requirements
+
+Docker Engine 24+ with Compose v2, 16 GB of RAM (OpenCTI and Elasticsearch
+take most of it; 32 GB is comfortable), 4 cores, 50 GB of disk and
+`vm.max_map_count=262144` on the host.
+
+## Configuration
+
+```bash
+git clone <repository> osint-orchestrator && cd osint-orchestrator
+cp .env.example .env
+cp targets.example.yaml targets.yaml
+```
+
+Generate every secret `.env` asks for with `openssl rand -hex 32`. The ones a
+production deployment cannot leave at their default:
+
+| Variable | Why |
 | --- | --- |
-| `NEBIUS_API_KEY`, `TAVILY_API_KEY` | Secrets |
-| `ORCHESTRATOR_API_KEY`, `ORCHESTRATOR_SECRET_KEY` | Secrets; generate each with `openssl rand -hex 32` |
-| `LLM_PROVIDER` | `nebius` |
-| `LLM_MODEL_REASONING`, `LLM_MODEL_FAST` | Nemotron ids served to your key (`GET /v1/models`) |
-| `DEMO_TRUSTED_PROXY_HOPS` | Number of proxies in front of the container (`1` behind a single platform proxy) |
-| `DEMO_*` limits | Optional; defaults in [configuration.md](configuration.md). Behind a platform proxy keep `DEMO_MAX_RUNS_PER_IP_PER_DAY` low; locally (`docker-compose.demo.yml`) it equals the global cap because every browser shares Docker's bridge address |
+| `ORCHESTRATOR_API_KEY` | Empty leaves the API open to anyone who can reach it (ADR-005). |
+| `ORCHESTRATOR_SECRET_KEY` | Signs the evidence manifests (ADR-007); the default key makes every signature forgeable. |
+| `OPENCTI_ADMIN_TOKEN`, the OpenCTI, MinIO and RabbitMQ passwords | Shared between the OpenCTI services and the orchestrator. |
+| `ALERT_WEBHOOK_SECRET`, SMTP credentials | Only if alerts are delivered. |
+| `TAVILY_API_KEY`, `NEBIUS_API_KEY` (or the key of the provider chosen in `LLM_PROVIDER`) | Web research and synthesis. |
 
-The image already sets `DEMO_MODE=true`, `OPENCTI_ENABLED=false`, the allowlist
-path and the database path. The container refuses to start if a required value
-is missing, and the log names it.
+`targets.yaml` is the audit trail: `authorization` and `purpose` are mandatory
+per target and are written into every report. List only entities you are
+authorised in writing to assess.
 
-Storage is the container's file system: runs made by visitors are lost on a
-restart unless the platform provides a persistent volume for `/app/data` and
-`/app/daily_reports`. Seeded runs are re-imported on every fresh start.
+## Start and verify
 
-## Hugging Face Spaces
+```bash
+docker compose up -d --build
+docker compose ps                     # every service healthy (OpenCTI takes 2-3 minutes)
+curl -s http://127.0.0.1:8000/health  # {"status": "ok", ...}
+```
 
-Checked against the [Docker Spaces documentation](https://huggingface.co/docs/hub/spaces-sdks-docker);
-**not yet executed** for this project.
+The orchestrator's port is published on the loopback interface only
+(`127.0.0.1:${ORCHESTRATOR_PORT:-8000}`). Database migrations run at startup;
+a fresh install reaches the latest schema and an upgrade applies what is
+missing, so no manual migration step exists.
 
-1. Create a Space with the **Docker** SDK.
-2. In the Space's `README.md` front matter set `sdk: docker` and
-   `app_port: 7860`.
-3. Add the secrets and variables of the table above in *Settings → Variables
-   and secrets*. They are injected as environment variables at run time.
-4. Push this repository's content to the Space with `Dockerfile.demo` copied to
-   `Dockerfile` (Spaces build the file named `Dockerfile` at the repository
-   root).
-5. Open `/demo` on the Space URL. `/health` answers without a key.
+## Exposing the API and the dashboard
 
-## Nebius serverless endpoint
+Never publish port 8000 directly. Two options:
 
-**Not yet verified.** The [Nebius documentation](https://docs.nebius.com/serverless/endpoints/manage)
-describes creating an endpoint from a container image with ports, environment
-variables and optional token authentication. The expected steps are: push the
-image built from `Dockerfile.demo` to a registry, create an endpoint from that
-image exposing port `7860`, set the variables of the table above, and leave the
-endpoint's own token authentication off so `/demo` stays public (the protected
-routes keep requiring `ORCHESTRATOR_API_KEY`).
+- **Your own reverse proxy** (nginx, Caddy, Traefik) terminating TLS in front
+  of `127.0.0.1:8000`. The dashboard at `/console` asks for the API key in the
+  browser; every data route requires it as `X-API-Key` or a bearer token.
+- **The OIDC overlay**: `docker compose -f docker-compose.yml -f docker-compose.auth.yml --profile auth up -d`
+  starts Keycloak and oauth2-proxy in front of the dashboard
+  ([ADR-006](adr/ADR-006-oidc-proxy.md)). Its defaults are for development
+  (`start-dev` Keycloak, insecure cookie flag, a placeholder client secret):
+  replace them and terminate TLS at the proxy before exposing it.
+
+## Persistence and backups
+
+| Data | Where | Back up |
+| --- | --- | --- |
+| Runs, findings, queues (SQLite) | volume `orchestrator-db` (`/app/data/orchestrator.db`) | Copy the file while the orchestrator is stopped, or use `sqlite3 .backup` |
+| Reports, STIX bundles, signed manifests | `./daily_reports` on the host | File-level backup; the manifest chain detects any later change |
+| OpenCTI knowledge graph | volumes `elasticsearch-data`, `minio-data`, `redis-data`, `rabbitmq-data` | Follow the OpenCTI backup guidance |
+| Collector state | `spiderfoot-data`, `amass-data` | Optional; rebuilt by later runs |
+
+`ORCHESTRATOR_RETENTION_DAYS` (default 90) purges old runs and report
+directories; the evidence chain stays verifiable across the purge.
+
+## Upgrading
+
+```bash
+git pull
+docker compose build orchestrator
+docker compose up -d orchestrator
+```
+
+The image builds the dashboard and applies the database migrations itself.
+Read the [changelog](../CHANGELOG.md) for removed settings before upgrading;
+`.env` keys that no longer exist are ignored, but a renamed one would silently
+fall back to its default.
+
+## Observability
+
+`GET /health` (component checks with hints) and `GET /metrics` (Prometheus)
+need no API key. With `ORCHESTRATOR_LOG_FORMAT=json` every log line is one
+object with `request_id`, `target_id`, `run_id` and `collector` fields for a
+log shipper. Details and the alert runbook: [operations.md](operations.md#observability).

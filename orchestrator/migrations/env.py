@@ -14,7 +14,6 @@ from sqlalchemy import engine_from_config, pool
 from sqlmodel import SQLModel
 
 # Import all SQLModel table classes so their metadata is populated.
-import orchestrator.demo  # noqa: F401
 import orchestrator.models  # noqa: F401
 from orchestrator.config import settings
 

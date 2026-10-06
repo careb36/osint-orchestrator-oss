@@ -46,7 +46,6 @@ One run, in order (`orchestrator/pipeline.py`):
 | `synthesizer/` | LLM providers (Nebius, OpenAI-compatible, Anthropic, Ollama), model routing, evidence qualification, synthesis |
 | `reports/`, `evidence.py` | Run artefacts and the signed manifest chain |
 | `alerts/` | Webhook and SMTP dispatch with a retry queue |
-| `demo.py` | Public demo mode: allowlist, daily limits and call budgets, views without the risk assessment |
 | `i18n.py` | Operator-facing text in Spanish and English |
 
 ## LLM routing

@@ -101,8 +101,8 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     Accept: parse === 'json' ? 'application/json' : 'text/plain, application/json',
     ...authHeaders(apiKey),
   };
-  // The operator's language, for any endpoint that negotiates it (today only
-  // the demo routes do). Accept-Language is a CORS-safelisted request header,
+  // The operator's language, for any endpoint that negotiates it.
+  // Accept-Language is a CORS-safelisted request header,
   // so it adds no preflight on a cross-origin VITE_API_BASE_URL setup.
   const language = currentLocale();
   if (language) {

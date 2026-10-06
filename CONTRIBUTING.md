@@ -40,8 +40,9 @@ helm lint deploy/helm/osint-orchestrator --strict
 helm template osint deploy/helm/osint-orchestrator --kube-version 1.30.0 > /dev/null
 ```
 
-Integration tests need the full compose stack:
-`docker compose up -d && pytest tests/integration/ -m integration -v`.
+Integration tests need the full compose stack and the API key the stack was
+started with (the protected routes answer `401` without it):
+`docker compose up -d && ORCHESTRATOR_API_KEY=<key> pytest tests/integration/ -m integration -v`.
 
 Unit tests are intentionally isolated from a developer's local `.env`:
 `tests/conftest.py` sets `ORCHESTRATOR_ENV_FILE=""` before importing

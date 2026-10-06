@@ -7,8 +7,6 @@ obliged entities: it researches an entity in public sources, qualifies what it
 finds with NVIDIA Nemotron on Nebius Token Factory, and leaves a signed,
 auditable report.
 
-**Live demo:** not deployed yet · **Video:** not recorded yet (see [Roadmap](#roadmap))
-
 ## The problem
 
 Open-source due diligence is done by hand: an analyst searches registries, news
@@ -72,22 +70,17 @@ observable and a Note, is qualified by Nemotron, and is recorded in
 
 ## Quickstart
 
-**Demo** (one container: API, demo page, Tavily and Nemotron; no OpenCTI):
+The full stack (OpenCTI, SpiderFoot, scheduled runs, alerts) needs Docker with
+Compose v2 and 16 GB of RAM:
 
 ```bash
-cp .env.example .env    # NEBIUS_API_KEY, TAVILY_API_KEY, LLM_PROVIDER=nebius, the two LLM_MODEL_* ids, ORCHESTRATOR_API_KEY, ORCHESTRATOR_SECRET_KEY
-docker compose -f docker-compose.demo.yml up -d --build
-open http://localhost:7860/demo
+cp .env.example .env                    # passwords, tokens and API keys it lists
+cp targets.example.yaml targets.yaml    # only targets you are authorised to assess
+docker compose up -d --build
 ```
 
-Pick an entity, run an investigation, read the qualified evidence and verify
-the evidence chain. The entities are an allowlist
-([`demo/targets.demo.yaml`](demo/targets.demo.yaml)) and usage is limited per
-visitor and per day.
-
-**Full stack** (OpenCTI, SpiderFoot, scheduled runs, alerts; 16 GB of RAM):
-`docker compose up -d --build`, then see [operations](docs/operations.md) and
-[configuration](docs/configuration.md).
+Then see [operations](docs/operations.md), [configuration](docs/configuration.md)
+and, for a server, [deploy](docs/deploy.md).
 
 **Operator dashboard:** <http://localhost:8000/console>, in Spanish or English.
 Key figures, targets ordered by what needs attention, active runs, findings,
@@ -124,8 +117,7 @@ is an aid for an analyst, not a determination. See [SECURITY](SECURITY.md).
 | Item | Status |
 | --- | --- |
 | Evidence qualification and evidence chain | Done |
-| Lightweight demo mode with usage limits | Done |
-| Public deployment of the demo | Planned ([deploy guide](docs/deploy.md)) |
+| Operator dashboard (overview, triage, investigation) | Done |
 | Qualification of relationships between entities | Planned |
 | Data-quality indicators per source | Planned |
 | Document NLP (filings, court records) | Planned |

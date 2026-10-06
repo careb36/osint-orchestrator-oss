@@ -2,7 +2,7 @@
 // orchestrator/models.py). Field names are the backend's: snake_case.
 
 export type HealthCheck = {
-  status: 'ok' | 'degraded' | 'offline' | 'disabled' | string;
+  status: 'ok' | 'degraded' | 'offline' | string;
   detail: string;
   hint?: string;
   action?: string;
