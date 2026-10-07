@@ -14,29 +14,60 @@ import re
 
 _LINK = re.compile(r"!?\[([^\]]*)\]\(\s*([^)\s]*)(?:\s+\"[^\"]*\")?\s*\)")
 _AUTOLINK = re.compile(r"<((?:https?|ftp|mailto):[^>\s]+)>")
+# Innermost tags first ("<scr<b>ipt>" holds "<b>"), then anything from "<" to
+# the next ">" even across a "<" (an attribute hiding one): over-stripping
+# beats leaving a tag behind.
 _HTML_TAG = re.compile(r"</?[A-Za-z][^<>]*>")
+_HTML_TAG_LOOSE = re.compile(r"</?[A-Za-z][^>]*>")
+# What is left and still opens like a tag (an unterminated "<img src=…", as a
+# truncated error message carries): no renderer may read it as one.
+_TAG_START = re.compile(r"<(?=/?[A-Za-z])")
 _HEADING = re.compile(r"^(\s*)(#{1,6})(?=\s)", re.MULTILINE)
 _SCHEME = re.compile(r"\b(h)ttp(s?)://", re.IGNORECASE)
+# GFM turns a bare "www." into a clickable link as well; defang it the same way.
+_WWW = re.compile(r"\bwww\.", re.IGNORECASE)
+# A line of only "=" or "-" under a text line is a setext heading, and "---"
+# alone a thematic break: structure a model's prose must not add to a report.
+_SETEXT_OR_RULE = re.compile(r"^(\s*)(=+|-{1,})\s*$", re.MULTILINE)
+# Removing a tag can form a new one from its neighbours ("<scr<b>ipt>" leaves
+# "<script>"), so stripping repeats until nothing changes; the bound only
+# guards against pathological input, each pass shortens the text.
+_MAX_TAG_PASSES = 20
 # Every separator str.splitlines() honours. A heading after a lone "\r" or a
 # "\u2028" is not at a line start for the regexes above, yet a reader that
 # splits lines (or reads the file back with universal newlines) sees one.
 _LINE_BREAK = re.compile(r"\r\n|[\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029]")
 
 
+def _strip_tags(text: str) -> str:
+    """Remove HTML tags until none is left, including ones removal re-forms."""
+    for _ in range(_MAX_TAG_PASSES):
+        stripped = _HTML_TAG_LOOSE.sub("", _HTML_TAG.sub("", text))
+        if stripped == text:
+            break
+        text = stripped
+    return _TAG_START.sub("‹", text)
+
+
 def neutralise_markdown(text: str) -> str:
     """
     Return *text* with Markdown links and images flattened to ``text (url)``,
-    autolinks unwrapped, HTML tags removed, line-leading headings escaped and
-    every ``http(s)://`` defanged to ``hxxp(s)://`` — the CTI convention, so a
-    URL in an analyst's report is never one click away from being visited.
-    Every line break is normalised to ``\n`` first, so no heading hides behind
-    a separator the heading escape would not see.
+    autolinks unwrapped, HTML tags removed (repeatedly, so a tag re-formed by
+    the removal of an inner one goes too), ATX and setext headings and
+    thematic breaks escaped, and every ``http(s)://`` and bare ``www.``
+    defanged to ``hxxp(s)://`` / ``wxw.`` — the CTI convention, so a URL in an
+    analyst's report is never one click away from being visited. Every line
+    break is normalised to ``\n`` first, so no heading hides behind a
+    separator the heading escape would not see.
     """
     text = _LINE_BREAK.sub("\n", text)
     text = _LINK.sub(lambda m: f"{m.group(1)} ({m.group(2)})" if m.group(2) else m.group(1), text)
     text = _AUTOLINK.sub(r"\1", text)
-    text = _HTML_TAG.sub("", text)
+    text = _strip_tags(text)
     text = _HEADING.sub(r"\1\\\2", text)
+    text = _SETEXT_OR_RULE.sub(r"\1\\\2", text)
+    # Keep the writer's letter case: only the middle "w" becomes an "x".
+    text = _WWW.sub(lambda m: f"{m.group(0)[0]}x{m.group(0)[2:]}", text)
     return _SCHEME.sub(r"\1xxp\2://", text)
 
 
