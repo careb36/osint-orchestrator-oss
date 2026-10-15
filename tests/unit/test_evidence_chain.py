@@ -26,6 +26,7 @@ from orchestrator.evidence import (
     build_manifest,
     canonical_json,
     sha256_file,
+    split_keys,
     verify_target_chain,
 )
 from orchestrator.models import (
@@ -114,10 +115,10 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             async with _session() as session:
                 return await session.get(Run, run_id)
 
-        async def verify(self, key: str = KEY) -> dict:
+        async def verify(self, key: str = KEY, previous: tuple[str, ...] = ()) -> dict:
             async with _session() as session:
                 return await verify_target_chain(
-                    target_id=target.id, secret_key=key, session=session
+                    target_id=target.id, secret_key=key, session=session, previous_keys=previous
                 )
 
         async def delete_row(self, run_id: int) -> None:
@@ -339,6 +340,46 @@ async def test_unhandled_error_before_sealing_marks_the_run_failed(harness) -> N
         after = await session.get(Run, run.id)
     assert (after.status, after.error) == (RunStatus.FAILED, "pipeline: boom")
     assert after.finished_at is not None
+
+
+# ─── Key rotation ─────────────────────────────────────────────────────────────
+
+
+async def test_rotated_key_verifies_old_runs_through_the_previous_keys(
+    harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await harness.setup()
+    old_run = await harness.run(0)
+    monkeypatch.setattr(settings, "orchestrator_secret_key", "new-key")
+    new_run = await harness.run(1)
+
+    without_previous = await harness.verify(key="new-key")
+    with_previous = await harness.verify(key="new-key", previous=(KEY,))
+
+    assert (without_previous["first_broken_run_id"], without_previous["reason"]) == (
+        old_run.id,
+        "signature_key",
+    )
+    assert with_previous["ok"] is True
+    assert with_previous["checked"] == 2
+    assert _manifest(new_run)["previous_manifest_sha256"] == old_run.manifest_sha256
+
+
+async def test_a_key_that_signed_nothing_still_reports_signature_key(harness) -> None:
+    await harness.setup()
+    run = await harness.run(0)
+
+    result = await harness.verify(key="new-key", previous=("older-key", "oldest-key"))
+
+    assert (result["first_broken_run_id"], result["reason"]) == (run.id, "signature_key")
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("", ()), ("a", ("a",)), (" a , b ,, ", ("a", "b")), (",", ())],
+)
+def test_split_keys_drops_blanks(raw: str, expected: tuple[str, ...]) -> None:
+    assert split_keys(raw) == expected
 
 
 # ─── Unsealed runs and versions ───────────────────────────────────────────────

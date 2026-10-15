@@ -1,6 +1,6 @@
 # docker-compose.yml
 #
-# OSINT Orchestrator stack — Phase 0
+# OSINT Orchestrator stack: OpenCTI, SpiderFoot and the orchestrator
 #
 # Services:
 #   Core (always on): opencti, worker, connector-import-file-stix,
@@ -39,7 +39,7 @@ services:
   # ── Infrastructure ──────────────────────────────────────────────────────────
 
   redis:
-    image: redis:8.0
+    image: redis:8.0.6
     restart: unless-stopped
     volumes:
       - redis-data:/data
@@ -88,7 +88,7 @@ services:
       retries: 5
 
   rabbitmq:
-    image: rabbitmq:3.13-management
+    image: rabbitmq:3.13.7-management
     restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: "${RABBITMQ_DEFAULT_USER:-orchestrator}"
@@ -140,7 +140,9 @@ services:
       SMTP__HOSTNAME: ""
       PROVIDERS__LOCAL__STRATEGY: LocalStrategy
     ports:
-      - "8080:8080"
+      # Loopback only: OpenCTI has its own login but is not meant to face the
+      # internet from this host. Reach it through an SSH tunnel or your proxy.
+      - "127.0.0.1:8080:8080"
     healthcheck:
       test: ["CMD-SHELL", 'wget -qO- --header="Content-Type: application/json" --post-data="{\"query\":\"query { __typename }\"}" http://127.0.0.1:8080/graphql | grep -q "\"__typename\":\"Query\""']
       interval: 30s
@@ -196,7 +198,9 @@ services:
 
   spiderfoot:
     build:
-      context: https://github.com/smicallef/spiderfoot.git
+      # Pinned to a commit: the repository publishes no image and no release
+      # tags, and an unpinned clone would build whatever master holds today.
+      context: https://github.com/smicallef/spiderfoot.git#0f815a203afebf05c98b605dba5cf0475a0ee5fd
       dockerfile: Dockerfile
     image: spiderfoot:local
     restart: unless-stopped
@@ -204,7 +208,8 @@ services:
     # Endpoints are at root path (no /api/v1/ prefix):
     #   /ping, /startscan, /scanlist, /scanstatus?id=, /scaneventresults?id=&eventType=
     ports:
-      - "5001:5001"
+      # Loopback only: the SpiderFoot UI and API have no authentication.
+      - "127.0.0.1:5001:5001"
     volumes:
       - spiderfoot-data:/home/spiderfoot/.spiderfoot
     healthcheck:
@@ -251,7 +256,9 @@ services:
       # the base-stack quick-start.
       - "127.0.0.1:${ORCHESTRATOR_PORT:-8000}:8000"
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import json, sys, urllib.request; payload = json.loads(urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).read().decode()); sys.exit(0 if payload.get('status') == 'ok' else 1)\""]
+      # /ready answers 503 while a component is offline or the scheduler is
+      # not running; urlopen raises on a non-2xx status, which fails the check.
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=5)\""]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -289,7 +296,7 @@ services:
       MASTODON_INSTANCE_1_TOKEN: "${SOCIALOSINT_MASTODON_INSTANCE_1_TOKEN:-}"
       MASTODON_INSTANCE_1_DEFAULT: "true"
     ports:
-      - "8001:8000"
+      - "127.0.0.1:8001:8000"
     volumes:
       - socialosint-data:/app/data
     healthcheck:

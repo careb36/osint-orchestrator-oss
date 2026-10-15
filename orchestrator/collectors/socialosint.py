@@ -42,7 +42,7 @@ import httpx
 
 from orchestrator.collectors import BaseCollector
 from orchestrator.config import settings
-from orchestrator.i18n import resolve_language
+from orchestrator.i18n import resolve_language, t
 from orchestrator.models import (
     SUPPORTED_PLATFORMS,
     CollectorName,
@@ -308,7 +308,7 @@ class SocialOSINTCollector(BaseCollector):
         report_text = await self._get_report(client, session_id)
 
         # 5. Build CollectorResult from (platform, username) inputs + report
-        return self._build_result(effective_platforms, report_text, skipped)
+        return self._build_result(effective_platforms, report_text, skipped, language=lang)
 
     async def _get_available_platforms(self, client: httpx.AsyncClient) -> set[str]:
         """Return the lowercased platform names the service has credentials for."""
@@ -400,6 +400,7 @@ class SocialOSINTCollector(BaseCollector):
         platforms: dict[str, list[str]],
         report_text: str,
         skipped_platforms: list[str] | None = None,
+        language: str | None = None,
     ) -> CollectorResult:
         """Map inputs to observables/relationships and attach the report as a note.
 
@@ -464,12 +465,20 @@ class SocialOSINTCollector(BaseCollector):
                 )
 
         # LLM analysis → note (not a fact)
+        # Note text reaches operators in reports, so it follows the target's
+        # language (ADR-004) like every other operator-facing string.
         if report_text and report_text.strip():
-            notes.append(f"[análisis de SocialOSINT, no verificado]\n\n{report_text.strip()}")
+            notes.append(
+                t("socialosint_note_unverified", language=language, report=report_text.strip())
+            )
 
         if skipped_platforms:
             notes.append(
-                f"Plataformas omitidas por falta de credenciales: {', '.join(skipped_platforms)}"
+                t(
+                    "socialosint_note_platforms_skipped",
+                    language=language,
+                    platforms=", ".join(skipped_platforms),
+                )
             )
 
         return CollectorResult(

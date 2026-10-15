@@ -100,6 +100,11 @@ class Settings(BaseSettings):
     # the report language would silently follow the host locale.
     orchestrator_language: str = "es"
     orchestrator_secret_key: str = "insecure-dev-key"
+    # Comma-separated keys retired by a rotation. New manifests are signed
+    # with orchestrator_secret_key only; chain verification also accepts a
+    # manifest signed with any of these, so runs sealed before the rotation
+    # keep verifying instead of reporting signature_key (ADR-007).
+    orchestrator_secret_key_previous: str = ""
     orchestrator_database_url: str = "sqlite+aiosqlite:///./orchestrator.db"
     targets_file: str = "targets.yaml"
 
