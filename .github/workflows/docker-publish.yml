@@ -80,12 +80,16 @@ jobs:
           # exporter used by `load:` on pull requests cannot carry one.
           sbom: ${{ github.event_name != 'pull_request' }}
 
-      # Known vulnerabilities in the OS packages and the Python dependencies of
-      # the image built for this pull request. Pinned by commit (0.35.0).
-      # The two Amass clients are upstream Go builds copied verbatim from the
-      # pinned Amass image; their findings can only be fixed by bumping that
-      # pin (its own commit), so they are reported by the next step instead of
-      # failing every unrelated pull request here.
+      # Known vulnerabilities in the image built for this pull request, in the
+      # OS packages and the Python dependencies. Pinned by commit (0.35.0).
+      # Only fixable CRITICAL findings block the merge. Fixable HIGH findings
+      # are reported by the next step instead: most of them sit behind the
+      # pycti pin (its setuptools and fastapi constraints decide the starlette
+      # and setuptools versions), which can only move with the OpenCTI
+      # platform tag in docker-compose.yml. The two Amass clients are upstream
+      # Go builds copied verbatim from the pinned Amass image; their findings
+      # can only be fixed by bumping that pin (its own commit), so they are
+      # left to the report as well.
       - name: Scan the image for vulnerabilities
         if: github.event_name == 'pull_request'
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
@@ -95,10 +99,12 @@ jobs:
           exit-code: "1"
           ignore-unfixed: true
           vuln-type: os,library
-          severity: CRITICAL,HIGH
+          severity: CRITICAL
           skip-files: /usr/local/bin/oam_enum,/usr/local/bin/oam_subs
 
-      - name: Report vulnerabilities in the bundled Amass clients (advisory)
+      # The full picture for the reviewer: every fixable CRITICAL and HIGH
+      # finding in the whole image, the Amass clients included. Never fails.
+      - name: Report CRITICAL and HIGH vulnerabilities (advisory)
         if: github.event_name == 'pull_request'
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
         with:
@@ -106,9 +112,8 @@ jobs:
           format: table
           exit-code: "0"
           ignore-unfixed: true
-          vuln-type: library
+          vuln-type: os,library
           severity: CRITICAL,HIGH
-          skip-dirs: /usr/local/lib,/usr/lib,/app
           skip-setup-trivy: true
 
       - name: Generate smoke API key

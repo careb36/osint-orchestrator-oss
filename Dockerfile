@@ -34,11 +34,7 @@ COPY pyproject.toml README.md LICENSE ./
 RUN mkdir -p orchestrator && touch orchestrator/__init__.py
 # The llm extra brings the cloud provider SDKs (openai for openai/nebius,
 # anthropic for anthropic); without it every cloud synthesis fails at runtime.
-# wheel ships with the base image at 0.45.1 (CVE-2026-24049, fixed in
-# 0.46.2); it is not a dependency of the service, so it is upgraded in place
-# rather than removed from an image whose users may still pip install.
-RUN pip install --no-cache-dir --upgrade "wheel>=0.46.2" \
-    && pip install --no-cache-dir ".[llm]"
+RUN pip install --no-cache-dir ".[llm]"
 
 COPY orchestrator/ ./orchestrator/
 # Dashboard build: orchestrator/api.py serves it at /console (and answers 503
