@@ -84,6 +84,31 @@ async def test_run_list_carries_the_risk_level_of_each_finding(
 
 
 @pytest.mark.asyncio
+async def test_run_list_pages_with_limit_and_offset(monkeypatch: pytest.MonkeyPatch) -> None:
+    ids = await _seed(monkeypatch)
+    with TestClient(app, raise_server_exceptions=True) as client:
+        first_page = client.get("/runs", params={"limit": 2}).json()
+        second_page = client.get("/runs", params={"limit": 2, "offset": 2}).json()
+        beyond = client.get("/runs", params={"limit": 2, "offset": 4}).json()
+        filtered = client.get("/runs", params={"target_id": "t1", "limit": 1, "offset": 1}).json()
+
+    assert [row["id"] for row in first_page] == [ids["other"], ids["third"]]
+    assert [row["id"] for row in second_page] == [ids["second"], ids["first"]]
+    assert beyond == []
+    assert [row["id"] for row in filtered] == [ids["second"]]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("params", [{"limit": 0}, {"limit": 501}, {"offset": -1}])
+async def test_run_list_rejects_out_of_range_paging(
+    monkeypatch: pytest.MonkeyPatch, params: dict[str, int]
+) -> None:
+    await _seed(monkeypatch)
+    with TestClient(app, raise_server_exceptions=True) as client:
+        assert client.get("/runs", params=params).status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_run_list_filter_by_target_keeps_the_risk_level(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

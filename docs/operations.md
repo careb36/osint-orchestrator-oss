@@ -65,12 +65,14 @@ Interactive reference: `/docs` (OpenAPI at `/openapi.json`). Public routes are
 | Method | Path | Description |
 | --- | --- | --- |
 | `GET` | `/` | Landing page with links to the dashboard, docs and health (no API key) |
-| `GET` | `/health` | Liveness check (no API key) |
+| `GET` | `/health` | Liveness: always 200 while the process answers; component checks in the body (no API key) |
+| `GET` | `/ready` | Readiness: the same body, 503 while the database is offline or the scheduler is not running (no API key) |
 | `GET` | `/metrics` | Prometheus metrics (no API key) |
 | `GET` | `/console` | Operator dashboard shell (public, no data; every call it makes needs the API key, entered on the page). Serves the React build from `orchestrator/static/ui-dist`; without a build it answers `503` with build instructions |
 | `GET` | `/console/{route}` | Client-side routes of the dashboard (`/console/targets`, `/console/runs/{id}`): same shell, the router renders the view. `404` without a build |
 | `GET` | `/console/assets/{file}` | Hashed script and stylesheet of the dashboard build (immutable cache; no path traversal) |
 | `GET` | `/health` | Service health snapshot (`ok`, `degraded`, `offline`) shown on the dashboard overview |
+| `GET` | `/ready` | Same snapshot with an HTTP status a probe can act on: 200 ready, 503 not ready |
 | `GET` | `/analytics/risk-trends` | Per-target risk and new-observable trends for the dashboard's risk columns and target detail |
 | `GET` | `/targets` | List configured targets |
 | `GET` | `/targets/{id}` | Get a single target |
@@ -79,7 +81,7 @@ Interactive reference: `/docs` (OpenAPI at `/openapi.json`). Public routes are
 | `POST` | `/scheduler/reload` | Reload target cron jobs from `targets.yaml` without restarting the process |
 | `POST` | `/alerts/dlq/replay` | Replay dead-letter alert deliveries (`channel` = `webhook` \| `email`, `limit` = `1..1000`) |
 | `POST` | `/opencti/outbox/replay` | Replay dead-letter OpenCTI bundles (`run_id`, `limit` = `1..1000`) and drain the due ones now |
-| `GET` | `/runs` | 100 most recent runs, newest first, each with the `risk_level` of its finding (`null` without one); `?target_id=` filters |
+| `GET` | `/runs` | Runs newest first, each with the `risk_level` of its finding (`null` without one); `?target_id=` filters, `?limit=` (1–500, default 100) and `?offset=` page through older runs |
 | `GET` | `/runs/{id}` | A run's status, counts, `risk_level`, and `alerts[]` dispatch audit |
 | `GET` | `/runs/{id}/delta` | Net-new observables for that run (from the DB, not the files) |
 | `GET` | `/runs/{id}/report` | Markdown report for a completed run (`text/plain`) |
@@ -88,7 +90,7 @@ Interactive reference: `/docs` (OpenAPI at `/openapi.json`). Public routes are
 | `GET` | `/runs/{id}/manifest` | Signed evidence manifest of a run (`404` when unsealed) |
 | `GET` | `/runs/{id}/report.pdf` | PDF companion of the report (`application/pdf`; `404` when the run has none) |
 | `GET` | `/runs/{id}/bundle` | Every file of the run directory, `manifest.json` included, as one `application/zip` download (`404` without artefacts) |
-| `GET` | `/targets/{id}/chain/verify` | Verify the target's evidence chain |
+| `GET` | `/targets/{id}/chain/verify` | Verify the target's evidence chain; 404 for a target not in `targets.yaml` |
 
 Errors carry a `detail` string in the operator language: `404` unknown target,
 run, report or finding; `400` disabled target; `401` missing or wrong key; `409`
@@ -104,10 +106,16 @@ can render every state without guessing:
 
 - `ok`: all core checks are healthy
 - `degraded`: the app is still serving requests, but a dependency is degraded
-  (for example, the scheduler is not running or OpenCTI is disabled)
+  (for example, the scheduler is not running)
 - `offline`: a core dependency failed its self-check (for example, DB access)
 
-Each entry under `checks` carries one of the same three values.
+Each entry under `checks` carries one of the same three values, plus
+`disabled` for a component switched off by configuration: with
+`OPENCTI_ENABLED=false` the `opencti` check reads `disabled` and does not
+lower the overall status (ADR-008: the sink is optional). `/health` always
+answers 200; use `/ready` where an HTTP status matters (the compose
+healthcheck, Kubernetes readiness and startup probes, a load balancer): it
+answers 503 while a check is `offline` or the scheduler is not running.
 
 A failed poll is surfaced as an error state in the dashboard rather than
 crashing the page; the next periodic refresh retries automatically. The UI keeps
