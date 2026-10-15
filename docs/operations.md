@@ -336,7 +336,25 @@ Rollback steps:
 
 ## Release checklist and support SOP
 
-Before a UI release, confirm all of the following:
+A release is a `vX.Y.Z` tag on `main`: the image workflow publishes
+`ghcr.io/careb36/osint-orchestrator-oss:X.Y.Z` and `:latest`, and the release
+workflow creates the GitHub Release from that version's `CHANGELOG.md`
+section. Before tagging, confirm all of the following against a deployment of
+the release candidate (`docker compose up -d --build` from the commit):
+
+- [ ] CI is green on the commit (lint, unit tests, dashboard, Helm chart,
+      public-release guard, image build with the vulnerability scan)
+- [ ] `GET /ready` answers 200 and `docker compose ps` shows no `unhealthy`
+      service
+- [ ] `ORCHESTRATOR_API_KEY=… pytest tests/integration -m integration` passes
+      against the running stack
+- [ ] A manual run of one target reaches `success`, its report and manifest
+      download, and `GET /targets/{id}/chain/verify` answers `ok: true`
+- [ ] `CHANGELOG.md` has the `## [X.Y.Z] - YYYY-MM-DD` section (the release
+      workflow refuses a tag without it) and `pyproject.toml` /
+      `deploy/helm/osint-orchestrator/Chart.yaml` carry the same version
+
+Before a UI release, also confirm:
 
 - [ ] The dashboard smoke checks pass in CI (`pytest tests/unit/test_operator_console.py -v` and the `frontend` job)
 - [ ] CSP and X-Content-Type-Options hardening remain intact for the shell

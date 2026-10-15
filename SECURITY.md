@@ -100,6 +100,6 @@ Before any deployment beyond a laptop:
 
 ## 5. Supported versions
 
-Only the current `main` branch (and tagged releases once published) receives
-security fixes. The project is pre-1.0; deployments pin the exact commit SHA
-they run.
+Only the current `main` branch and the latest `vX.Y.Z` tag receive security
+fixes, as a new tag. The project is pre-1.0; deployments pin the tag or the
+exact commit SHA they run.

@@ -23,6 +23,13 @@ from [SECURITY.md](SECURITY.md).
   new manifests are signed with `ORCHESTRATOR_SECRET_KEY` only, so rotating
   the signing key no longer turns every earlier run into `signature_key`.
   The rotation procedure is in `docs/operations.md`.
+- Release workflow: a `v*` tag creates the GitHub Release with that version's
+  `CHANGELOG.md` section as notes (and refuses a tag without one). The image
+  workflow scans every pull-request build with Trivy (fixable CRITICAL
+  findings block, HIGH ones are reported) and attaches an SBOM to every pushed
+  image. CI installs
+  the `llm` extra, lints `tests/integration/` too and runs mypy as an advisory
+  step. `docs/operations.md` has the backend release checklist.
 
 - Dashboard resilience and performance pass: the routed views sit inside an
   error boundary keyed by the route, whose fallback offers *Try again* and
