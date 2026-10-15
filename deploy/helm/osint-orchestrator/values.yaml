@@ -126,6 +126,8 @@ secrets:
     # Comma-separated list; empty = API open (a startup warning is logged).
     ORCHESTRATOR_API_KEY: ""
     ORCHESTRATOR_SECRET_KEY: ""
+    # Keys retired by a rotation (comma-separated); verify-only.
+    ORCHESTRATOR_SECRET_KEY_PREVIOUS: ""
     ALERT_WEBHOOK_SECRET: ""
     ALERT_SMTP_USER: ""
     ALERT_SMTP_PASSWORD: ""

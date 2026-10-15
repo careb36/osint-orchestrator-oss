@@ -18,6 +18,11 @@ from [SECURITY.md](SECURITY.md).
   body as `/health`. The compose healthcheck and the Helm readiness and
   startup probes use it; `/health` stays a liveness check that always answers
   200.
+- `ORCHESTRATOR_SECRET_KEY_PREVIOUS`: comma-separated keys retired by a
+  rotation. `chain/verify` accepts manifests signed with any of them while
+  new manifests are signed with `ORCHESTRATOR_SECRET_KEY` only, so rotating
+  the signing key no longer turns every earlier run into `signature_key`.
+  The rotation procedure is in `docs/operations.md`.
 
 - Dashboard resilience and performance pass: the routed views sit inside an
   error boundary keyed by the route, whose fallback offers *Try again* and
