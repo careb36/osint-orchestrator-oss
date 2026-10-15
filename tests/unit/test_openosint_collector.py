@@ -158,6 +158,27 @@ def test_result_carries_collector_name_and_target() -> None:
 # ── Configuration ─────────────────────────────────────────────────────────────
 
 
+async def test_graph_mapping_error_is_a_failed_collector_not_an_exception(monkeypatch) -> None:
+    """collect() never raises: a malformed graph is reported like any failure."""
+
+    async def _investigate(*_args, **_kwargs):
+        return correlation.EntityGraph()
+
+    def _broken(self, graph, fqdn):
+        raise AttributeError("'NoneType' object has no attribute 'kind'")
+
+    monkeypatch.setattr(
+        OpenOSINTCollector, "_load_api", staticmethod(lambda cfg: (_investigate, None))
+    )
+    monkeypatch.setattr(OpenOSINTCollector, "_from_graph", _broken)
+
+    result = await _collector().collect()
+
+    assert result.success is False
+    assert "graph mapping" in (result.error or "")
+    assert "kind" in (result.error or "")
+
+
 async def test_unknown_investigation_type_fails_loudly() -> None:
     """
     The predecessor silently reported success when it could not run the tool.

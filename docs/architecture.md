@@ -65,6 +65,29 @@ model is validated before it is stored; an invalid item is dropped and counted,
 it never fails the run. Collected text is passed to the models as delimited,
 flattened, untrusted data.
 
+## Operator dashboard
+
+`ui/` is a React + TypeScript single-page application built with Vite. The
+`Dockerfile` builds it in a `node` stage and copies `ui/dist` into
+`orchestrator/static/ui-dist`; `api.py` serves it under `/console` (the shell,
+`/console/assets/*` with immutable caching, and a catch-all for the client
+routes) and answers 503 with the build steps when the directory is missing.
+Every data call goes to the same REST API through one typed client
+(`ui/src/lib/api.ts`), so the dashboard has no state of its own: the backend
+stays the source of truth for runs, findings and evidence (ADR-003).
+
+Access follows ADR-005: the shell is public, every data route needs the static
+API key, which the browser keeps in `sessionStorage` (or `localStorage` when
+the operator asks to be remembered) and sends as `X-API-Key`. There are no
+users or roles. The shell is served with a `Content-Security-Policy` that
+allows nothing by default and only same-origin scripts, styles, connections,
+images and fonts (`default-src 'none'; script-src 'self'; style-src 'self';
+connect-src 'self'; img-src 'self' data:; font-src 'self'; base-uri 'none';
+form-action 'none'; frame-ancestors 'none'`, see `orchestrator/api.py`) and no
+inline script, which CI checks on the built `index.html`. Text follows ADR-004: Spanish by default with an
+English switch, one catalogue with parity enforced by a test. The scope, KPIs
+and phased definition of done are in `ui/docs/`; the decision is ADR-010.
+
 ## Decisions
 
 | ADR | Decision |
@@ -78,6 +101,7 @@ flattened, untrusted data.
 | [007](adr/ADR-007-evidence-chain.md) | Signed per-run evidence manifests chained per target |
 | [008](adr/ADR-008-optional-opencti-sink.md) | The OpenCTI sink can be disabled |
 | [009](adr/ADR-009-documentation-language.md) | Documentation in English, README in English and Spanish |
+| [010](adr/ADR-010-operator-dashboard.md) | Operator dashboard as a React SPA served by the API, API-key access |
 
 ## Third-party tools
 

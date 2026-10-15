@@ -131,8 +131,24 @@ def load_manifest_file(path: str | Path) -> dict[str, Any]:
     return data
 
 
-def verify_manifest_payload(payload: dict[str, Any], *, secret_key: str) -> tuple[bool, str | None]:
-    """Check a manifest payload's version and signature, returning (ok, reason)."""
+def split_keys(raw: str) -> tuple[str, ...]:
+    """Keys from a comma-separated setting, blanks dropped (same rule as API keys)."""
+    return tuple(key.strip() for key in raw.split(",") if key.strip())
+
+
+def verify_manifest_payload(
+    payload: dict[str, Any],
+    *,
+    secret_key: str,
+    previous_keys: tuple[str, ...] = (),
+) -> tuple[bool, str | None]:
+    """Check a manifest payload's version and signature, returning (ok, reason).
+
+    *previous_keys* are keys retired by a rotation: a manifest signed with any
+    of them still verifies, so rotating the key does not turn every earlier
+    run into a ``signature_key`` finding. New manifests are never signed with
+    them (see pipeline).
+    """
     version = payload.get("manifest_version")
     if version not in _SUPPORTED_MANIFEST_VERSIONS:
         return False, "unsupported_version"
@@ -140,16 +156,22 @@ def verify_manifest_payload(payload: dict[str, Any], *, secret_key: str) -> tupl
     if not isinstance(signature, str):
         return False, "signature"
     sanitized = {k: v for k, v in payload.items() if k != "signature"}
-    if not verify_signature(sanitized, secret_key=secret_key, signature=signature):
-        return False, "signature_key"
-    return True, None
+    for key in (secret_key, *previous_keys):
+        if verify_signature(sanitized, secret_key=key, signature=signature):
+            return True, None
+    return False, "signature_key"
 
 
 def _broken(run_id: int | None, reason: str, detail: str) -> dict[str, Any]:
     return {"first_broken_run_id": run_id, "reason": reason, "detail": detail}
 
 
-def _check_sealed_run(run: Any, previous_manifest_sha256: str | None, secret_key: str):
+def _check_sealed_run(
+    run: Any,
+    previous_manifest_sha256: str | None,
+    secret_key: str,
+    previous_keys: tuple[str, ...] = (),
+):
     """Check one sealed run; return (broken_or_None, this_manifest_sha256)."""
     manifest_path = manifest_path_for_report(run.report_path)
     if manifest_path is None or not manifest_path.exists():
@@ -167,7 +189,9 @@ def _check_sealed_run(run: Any, previous_manifest_sha256: str | None, secret_key
         return _broken(run.id, "signature", "manifest.json"), None
     if payload.get("manifest_version") not in _SUPPORTED_MANIFEST_VERSIONS:
         return _broken(run.id, "unsupported_version", str(payload.get("manifest_version"))), None
-    ok, sig_reason = verify_manifest_payload(payload, secret_key=secret_key)
+    ok, sig_reason = verify_manifest_payload(
+        payload, secret_key=secret_key, previous_keys=previous_keys
+    )
     if not ok:
         return _broken(run.id, sig_reason or "signature", "manifest.json"), None
     if payload.get("previous_manifest_sha256") != previous_manifest_sha256:
@@ -189,6 +213,7 @@ async def verify_target_chain(
     target_id: str,
     secret_key: str,
     session: Any,
+    previous_keys: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Verify a target's manifest chain (ADR-007 §4), oldest sealed run first.
 
@@ -232,7 +257,9 @@ async def verify_target_chain(
                         anchor_run_id = run.id
                         anchor_previous = link
         checked += 1
-        broken, this_sha256 = _check_sealed_run(run, previous_manifest_sha256, secret_key)
+        broken, this_sha256 = _check_sealed_run(
+            run, previous_manifest_sha256, secret_key, previous_keys=previous_keys
+        )
         if broken is not None:
             break
         previous_manifest_sha256 = this_sha256
