@@ -15,6 +15,7 @@ from sqlmodel import SQLModel, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from orchestrator.models import (
+    AlertCase,
     AlertDelivery,
     AlertDeliveryStatus,
     AlertRecord,
@@ -133,6 +134,7 @@ async def test_purge_deletes_old_run_and_dependents(tmp_path, monkeypatch):
         session.add(
             EvidenceQualification(run_id=old_run.id, target_id="t1", url="https://old.example/news")
         )
+        session.add(AlertCase(run_id=old_run.id, target_id="t1", run_status="success"))
 
         # Recent run and its dependents
         recent_run = Run(
@@ -168,6 +170,7 @@ async def test_purge_deletes_old_run_and_dependents(tmp_path, monkeypatch):
                 run_id=recent_run.id, target_id="t1", url="https://new.example/news"
             )
         )
+        session.add(AlertCase(run_id=recent_run.id, target_id="t1", run_status="success"))
 
         # SeenObservable must survive
         session.add(
@@ -191,6 +194,7 @@ async def test_purge_deletes_old_run_and_dependents(tmp_path, monkeypatch):
     assert summary.alert_deliveries_deleted == 1
     assert summary.opencti_outbox_deleted == 1
     assert summary.evidence_qualifications_deleted == 1
+    assert summary.alert_cases_deleted == 1
 
     # Verify DB state
     async with AsyncSession(engine, expire_on_commit=False) as session:
@@ -213,6 +217,8 @@ async def test_purge_deletes_old_run_and_dependents(tmp_path, monkeypatch):
         assert len(outbox_rows) == 0
         evidence = (await session.exec(select(EvidenceQualification))).all()
         assert [row.run_id for row in evidence] == [recent_run.id]
+        cases = (await session.exec(select(AlertCase))).all()
+        assert [row.run_id for row in cases] == [recent_run.id]
 
         # seen_observables untouched
         seen = (await session.exec(select(SeenObservable))).all()

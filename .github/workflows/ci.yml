@@ -25,12 +25,20 @@ jobs:
           pip install --upgrade pip
           # Install all runtime + dev deps from pyproject.toml (single source of truth — closes #6).
           # The openosint git dependency requires allow-direct-references = true (set in pyproject.toml).
-          pip install -e ".[dev]"
+          # The llm extra is what the image installs; without it the provider
+          # import test always skipped here.
+          pip install -e ".[dev,llm]"
 
       - name: Lint with ruff
         run: |
-          ruff check orchestrator/ tests/unit/
-          ruff format --check orchestrator/ tests/unit/
+          ruff check orchestrator/ tests/
+          ruff format --check orchestrator/ tests/
+
+      # Advisory until the backlog of findings is worked off: the step reports
+      # but never fails the job. Promote by removing continue-on-error.
+      - name: Type-check with mypy (advisory)
+        continue-on-error: true
+        run: mypy orchestrator/ --ignore-missing-imports
 
       - name: Verify migrations match models
         run: |

@@ -216,15 +216,16 @@ def test_health_includes_actionable_recovery_hints(one_key, client: TestClient) 
         assert check["action"]
 
 
-def test_health_reports_degraded_when_opencti_is_disabled(
+def test_health_reports_a_disabled_opencti_sink_without_degrading(
     one_key, client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """ADR-008: running without the sink is a configuration, not a fault."""
     monkeypatch.setattr(settings, "opencti_enabled", False)
     resp = client.get("/health")
     assert resp.status_code == 200
     payload = resp.json()
-    assert payload["status"] == "degraded"
-    assert payload["checks"]["opencti"]["status"] == "degraded"
+    assert payload["status"] == "ok"
+    assert payload["checks"]["opencti"]["status"] == "disabled"
     assert payload["checks"]["database"]["status"] == "ok"
 
 
@@ -245,7 +246,7 @@ def test_health_prioritizes_offline_when_database_check_fails(
     payload = resp.json()
     assert payload["status"] == "offline"
     assert payload["checks"]["database"]["status"] == "offline"
-    assert payload["checks"]["opencti"]["status"] == "degraded"
+    assert payload["checks"]["opencti"]["status"] == "disabled"
 
 
 def test_metrics_never_needs_a_key(one_key, client: TestClient) -> None:

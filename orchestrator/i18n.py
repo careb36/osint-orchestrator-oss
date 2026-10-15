@@ -36,6 +36,14 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "es": "El objetivo '{target_id}' está deshabilitado",
         "en": "Target '{target_id}' is disabled",
     },
+    "alert_not_found": {
+        "es": "No existe el caso de alerta {case_id}",
+        "en": "Alert case {case_id} not found",
+    },
+    "alert_state_conflict": {
+        "es": "El caso de alerta ya está en estado '{state}'",
+        "en": "Alert case is already '{state}'",
+    },
     "run_not_found": {
         "es": "No existe la ejecución {run_id}",
         "en": "Run {run_id} not found",
@@ -99,6 +107,14 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "{observables_section}"
             "{finding_section}"
         ),
+    },
+    "socialosint_note_unverified": {
+        "es": "[análisis de SocialOSINT, no verificado]\n\n{report}",
+        "en": "[SocialOSINT analysis, unverified]\n\n{report}",
+    },
+    "socialosint_note_platforms_skipped": {
+        "es": "Plataformas omitidas por falta de credenciales: {platforms}",
+        "en": "Platforms skipped for lack of credentials: {platforms}",
     },
     "alert_webhook_no_config": {
         "es": "Canal webhook omitido: ALERT_WEBHOOK_URL no configurado.",

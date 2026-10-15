@@ -65,12 +65,14 @@ Interactive reference: `/docs` (OpenAPI at `/openapi.json`). Public routes are
 | Method | Path | Description |
 | --- | --- | --- |
 | `GET` | `/` | Landing page with links to the dashboard, docs and health (no API key) |
-| `GET` | `/health` | Liveness check (no API key) |
+| `GET` | `/health` | Liveness: always 200 while the process answers; component checks in the body (no API key) |
+| `GET` | `/ready` | Readiness: the same body, 503 while the database is offline or the scheduler is not running (no API key) |
 | `GET` | `/metrics` | Prometheus metrics (no API key) |
 | `GET` | `/console` | Operator dashboard shell (public, no data; every call it makes needs the API key, entered on the page). Serves the React build from `orchestrator/static/ui-dist`; without a build it answers `503` with build instructions |
 | `GET` | `/console/{route}` | Client-side routes of the dashboard (`/console/targets`, `/console/runs/{id}`): same shell, the router renders the view. `404` without a build |
 | `GET` | `/console/assets/{file}` | Hashed script and stylesheet of the dashboard build (immutable cache; no path traversal) |
 | `GET` | `/health` | Service health snapshot (`ok`, `degraded`, `offline`) shown on the dashboard overview |
+| `GET` | `/ready` | Same snapshot with an HTTP status a probe can act on: 200 ready, 503 not ready |
 | `GET` | `/analytics/risk-trends` | Per-target risk and new-observable trends for the dashboard's risk columns and target detail |
 | `GET` | `/targets` | List configured targets |
 | `GET` | `/targets/{id}` | Get a single target |
@@ -78,8 +80,12 @@ Interactive reference: `/docs` (OpenAPI at `/openapi.json`). Public routes are
 | `POST` | `/scheduler/reload/preview` | Preview target cron changes from `targets.yaml` without mutating jobs |
 | `POST` | `/scheduler/reload` | Reload target cron jobs from `targets.yaml` without restarting the process |
 | `POST` | `/alerts/dlq/replay` | Replay dead-letter alert deliveries (`channel` = `webhook` \| `email`, `limit` = `1..1000`) |
+| `GET` | `/alerts` | Alert cases newest first (`?target_id=`, `?state=open\|acknowledged\|resolved`, `limit`, `offset`) with `total` |
+| `GET` | `/alerts/{id}` | One alert case |
+| `POST` | `/alerts/{id}/ack` | `open` → `acknowledged`; body `{"by": "<operator>", "note": "…"}`; 409 from any other state |
+| `POST` | `/alerts/{id}/resolve` | `open` or `acknowledged` → `resolved`; same body; 409 when already resolved |
 | `POST` | `/opencti/outbox/replay` | Replay dead-letter OpenCTI bundles (`run_id`, `limit` = `1..1000`) and drain the due ones now |
-| `GET` | `/runs` | 100 most recent runs, newest first, each with the `risk_level` of its finding (`null` without one); `?target_id=` filters |
+| `GET` | `/runs` | Runs newest first, each with the `risk_level` of its finding (`null` without one); `?target_id=` filters, `?limit=` (1–500, default 100) and `?offset=` page through older runs |
 | `GET` | `/runs/{id}` | A run's status, counts, `risk_level`, and `alerts[]` dispatch audit |
 | `GET` | `/runs/{id}/delta` | Net-new observables for that run (from the DB, not the files) |
 | `GET` | `/runs/{id}/report` | Markdown report for a completed run (`text/plain`) |
@@ -88,7 +94,7 @@ Interactive reference: `/docs` (OpenAPI at `/openapi.json`). Public routes are
 | `GET` | `/runs/{id}/manifest` | Signed evidence manifest of a run (`404` when unsealed) |
 | `GET` | `/runs/{id}/report.pdf` | PDF companion of the report (`application/pdf`; `404` when the run has none) |
 | `GET` | `/runs/{id}/bundle` | Every file of the run directory, `manifest.json` included, as one `application/zip` download (`404` without artefacts) |
-| `GET` | `/targets/{id}/chain/verify` | Verify the target's evidence chain |
+| `GET` | `/targets/{id}/chain/verify` | Verify the target's evidence chain; 404 for a target not in `targets.yaml` |
 
 Errors carry a `detail` string in the operator language: `404` unknown target,
 run, report or finding; `400` disabled target; `401` missing or wrong key; `409`
@@ -104,10 +110,16 @@ can render every state without guessing:
 
 - `ok`: all core checks are healthy
 - `degraded`: the app is still serving requests, but a dependency is degraded
-  (for example, the scheduler is not running or OpenCTI is disabled)
+  (for example, the scheduler is not running)
 - `offline`: a core dependency failed its self-check (for example, DB access)
 
-Each entry under `checks` carries one of the same three values.
+Each entry under `checks` carries one of the same three values, plus
+`disabled` for a component switched off by configuration: with
+`OPENCTI_ENABLED=false` the `opencti` check reads `disabled` and does not
+lower the overall status (ADR-008: the sink is optional). `/health` always
+answers 200; use `/ready` where an HTTP status matters (the compose
+healthcheck, Kubernetes readiness and startup probes, a load balancer): it
+answers 503 while a check is `offline` or the scheduler is not running.
 
 A failed poll is surfaced as an error state in the dashboard rather than
 crashing the page; the next periodic refresh retries automatically. The UI keeps
@@ -155,8 +167,14 @@ Offline check of a manifest signature (each file is checked with `sha256sum`):
 python3 -c 'import hashlib,hmac,json,sys; m=json.load(open(sys.argv[1])); s=m.pop("signature"); body=json.dumps(m,ensure_ascii=False,separators=(",",":"),sort_keys=True).encode(); print(hmac.compare_digest(s,"hmac-sha256:"+hmac.new(sys.argv[2].encode(),body,hashlib.sha256).hexdigest()))' manifest.json "$ORCHESTRATOR_SECRET_KEY"
 ```
 
-Rotating the key never re-signs old manifests; runs signed before the rotation
-report `signature_key` and are verified with the retired key.
+**Rotating the signing key.** Old manifests are never re-signed. Move the
+current key to `ORCHESTRATOR_SECRET_KEY_PREVIOUS` (comma-separated when more
+than one key has been retired), put the new key in `ORCHESTRATOR_SECRET_KEY`
+and restart: new runs are signed with the new key and `chain/verify` still
+accepts the manifests signed with a retired one. A manifest that matches none
+of the configured keys reports `signature_key`. Keep every retired key for as
+long as the runs it signed are within your retention period; the offline check
+above takes whichever key signed that manifest.
 
 ## Alerts
 
@@ -173,11 +191,39 @@ The webhook body carries `target_id`, `run_id`, `run_status`, `risk_level`,
 HMAC-SHA256 of the raw body with the shared secret. Payloads include observable
 values unless the target sets `include_values: false`.
 
+### Alert cases (triage)
+
+Every run that meets an alert rule opens one **alert case** before any channel
+is tried, so a deployment without a webhook or SMTP still has a list to work
+through, and a failed delivery never loses the alert. The case records the
+rule that fired (`reason`: `new_observables`, `risk_level` or `run_failure`,
+the last one only with `alerts.on_run_failure: true` on the target), the run's
+status and risk level, and its triage state:
+
+| State | Meaning | How it gets there |
+| --- | --- | --- |
+| `open` | Nobody has looked at it | Opened by the pipeline |
+| `acknowledged` | An operator is on it | `POST /alerts/{id}/ack` with the operator's name |
+| `resolved` | Nothing more to do | `POST /alerts/{id}/resolve` from `open` or `acknowledged` |
+
+The dashboard's *Alerts* view lists open cases first and offers both actions;
+the name is free text because the API has no users (ADR-005). Cases are purged
+with their run by retention. Two metrics follow the queue: `alert_cases{state}`
+(open and acknowledged counts) and `alert_case_time_to_acknowledge_seconds`
+(a histogram observed on every acknowledgement). Mean time to acknowledge over
+the last day, in PromQL:
+
+```promql
+increase(osint_orchestrator_alert_case_time_to_acknowledge_seconds_sum[1d])
+  / increase(osint_orchestrator_alert_case_time_to_acknowledge_seconds_count[1d])
+```
+
 ## Retention
 
 A nightly job (`ORCHESTRATOR_RETENTION_CRON`) deletes runs that finished more
 than `ORCHESTRATOR_RETENTION_DAYS` ago (default `90`, `0` disables it) with their
-observables, findings, qualified evidence, alerts and queued deliveries. A
+observables, findings, qualified evidence, alert cases, alerts and queued
+deliveries. A
 `daily_reports/<date>` directory is deleted once its whole day is older than the
 cutoff and no remaining run started that day, so a kept run never loses its
 report or manifest. The delta memory (`seen_observables`) is never purged. The default is operational, not a legal retention period: when reports
@@ -225,6 +271,8 @@ run id.
 | `llm_tokens_total` | `provider`, `model`, `direction` (`input`, `output`) | LLM token usage by provider and model, split by prompt vs completion direction |
 | `llm_model_available` | `provider`, `model`, `route` (`reasoning`, `fast`) | Startup preflight gauge: `1` when the configured route model is listed by the provider `GET /models`, `0` when it is not served |
 | `alerts_total` | `channel`, `status` | Alert lifecycle events (`sent`, `failed`, `retried`, `dlq`) |
+| `alert_cases` | `state` | Alert cases waiting for an operator (`open`, `acknowledged`) |
+| `alert_case_time_to_acknowledge_seconds` | — | Histogram: seconds from a case opening to its acknowledgement |
 | `evidence_chain_verify_total` | `target_id`, `outcome` | Evidence-chain verifications by outcome (`ok`, `broken`, `error`) |
 | `evidence_qualified_total` | `target_id`, `category` | Qualified evidence rows by category (`adverse_media`, `sanctions`, `litigation`, `regulatory_action`, `corporate_profile`, `unrelated`) |
 | `scheduled_jobs` | — | Cron jobs registered in the scheduler |
@@ -322,7 +370,25 @@ Rollback steps:
 
 ## Release checklist and support SOP
 
-Before a UI release, confirm all of the following:
+A release is a `vX.Y.Z` tag on `main`: the image workflow publishes
+`ghcr.io/careb36/osint-orchestrator-oss:X.Y.Z` and `:latest`, and the release
+workflow creates the GitHub Release from that version's `CHANGELOG.md`
+section. Before tagging, confirm all of the following against a deployment of
+the release candidate (`docker compose up -d --build` from the commit):
+
+- [ ] CI is green on the commit (lint, unit tests, dashboard, Helm chart,
+      public-release guard, image build with the vulnerability scan)
+- [ ] `GET /ready` answers 200 and `docker compose ps` shows no `unhealthy`
+      service
+- [ ] `ORCHESTRATOR_API_KEY=… pytest tests/integration -m integration` passes
+      against the running stack
+- [ ] A manual run of one target reaches `success`, its report and manifest
+      download, and `GET /targets/{id}/chain/verify` answers `ok: true`
+- [ ] `CHANGELOG.md` has the `## [X.Y.Z] - YYYY-MM-DD` section (the release
+      workflow refuses a tag without it) and `pyproject.toml` /
+      `deploy/helm/osint-orchestrator/Chart.yaml` carry the same version
+
+Before a UI release, also confirm:
 
 - [ ] The dashboard smoke checks pass in CI (`pytest tests/unit/test_operator_console.py -v` and the `frontend` job)
 - [ ] CSP and X-Content-Type-Options hardening remain intact for the shell

@@ -295,6 +295,10 @@ class AlertsConfig(BaseModel):
     # observables. Stable English identifiers only (never localised here).
     # Fires when risk_level is at this level or above (high → critical).
     min_risk_level: str = "high"  # low | medium | high | critical | unknown
+    # Also open an alert case (and notify the channels) when the run failed:
+    # a target that silently stops being collected is itself a finding for
+    # the operator. Off by default so a flaky collector does not page.
+    on_run_failure: bool = False
     # When False, the alert payload contains only counts and types — no
     # observable values — to reduce data sent outside the process.
     include_values: bool = True
@@ -553,6 +557,58 @@ class AlertRecord(SQLModel, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
+
+
+class AlertCaseState(StrEnum):
+    """Triage state of an alert case: what an operator did about it."""
+
+    OPEN = "open"
+    ACKNOWLEDGED = "acknowledged"
+    RESOLVED = "resolved"
+
+
+class AlertCaseReason(StrEnum):
+    """Which rule of the target's ``alerts`` block opened the case."""
+
+    NEW_OBSERVABLES = "new_observables"
+    RISK_LEVEL = "risk_level"
+    RUN_FAILURE = "run_failure"
+
+
+class AlertCase(SQLModel, table=True):
+    """One triage item per run that met an alert rule.
+
+    ``alerts`` (AlertRecord) is the delivery audit, one row per channel per
+    attempt: with no channel configured a run that met a rule leaves nothing
+    there. The case is the thing an operator acknowledges and resolves, so it
+    is opened before any channel is tried and exists without one.
+    ``acknowledged_by`` / ``resolved_by`` are free text: there are no users
+    (ADR-005).
+    """
+
+    __tablename__ = "alert_cases"
+
+    id: int | None = SQLField(default=None, primary_key=True)
+    run_id: int = SQLField(unique=True, index=True)
+    target_id: str = SQLField(index=True)
+    created_at: datetime = SQLField(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+    run_status: str
+    risk_level: str = "unknown"
+    new_observable_count: int = 0
+    reason: str = AlertCaseReason.NEW_OBSERVABLES.value
+    state: str = SQLField(default=AlertCaseState.OPEN.value, index=True)
+    acknowledged_at: datetime | None = SQLField(
+        default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
+    )
+    acknowledged_by: str | None = None
+    resolved_at: datetime | None = SQLField(
+        default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
+    )
+    resolved_by: str | None = None
+    note: str | None = None
 
 
 class AlertDeliveryStatus(StrEnum):

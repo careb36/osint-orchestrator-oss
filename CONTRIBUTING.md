@@ -115,6 +115,11 @@ PR they open with the same gates as a human PR.
 The review checklist both agents and reviewers follow is
 `.github/skills/context-aware-code-review/SKILL.md`.
 
+Claude Code also loads `.claude/rules/` (a general workflow file plus
+path-scoped Python and TypeScript files). Those restate `AGENTS.md` for the
+file being edited and add nothing to it; change `AGENTS.md` first and the
+rules second.
+
 ### One-time prerequisites (repository owner)
 
 1. Install the GitHub App

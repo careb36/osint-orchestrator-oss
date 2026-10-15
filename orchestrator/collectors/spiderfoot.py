@@ -103,8 +103,16 @@ class SpiderFootCollector(BaseCollector):
             try:
                 scan_id = await self._start_scan(client, fqdn)
                 logger.info("SpiderFoot scan %s started for %s", scan_id, fqdn)
-                await self._wait_for_scan(client, scan_id)
-                raw_events = await self._fetch_results(client, scan_id)
+                try:
+                    await self._wait_for_scan(client, scan_id)
+                    raw_events = await self._fetch_results(client, scan_id)
+                except BaseException:
+                    # A scan this run gave up on (timeout, cancellation, a
+                    # polling error) keeps probing the target on the SpiderFoot
+                    # side until someone stops it, and every scheduled run
+                    # would add another. Best effort: the original error wins.
+                    await self._stop_scan(client, scan_id)
+                    raise
                 return self._parse(raw_events, fqdn)
             except Exception as exc:  # noqa: BLE001
                 logger.error("SpiderFoot failed for %s: %s", fqdn, exc)
@@ -238,6 +246,17 @@ class SpiderFootCollector(BaseCollector):
         if isinstance(last, str) and _SF_EVENT_TYPE_RE.fullmatch(last):
             return last
         return None
+
+    async def _stop_scan(self, client: httpx.AsyncClient, scan_id: str) -> None:
+        """POST /stopscan for a scan this run will not wait for. Never raises."""
+        try:
+            resp = await client.post(
+                "/stopscan", headers={"Accept": "application/json"}, data={"id": scan_id}
+            )
+            resp.raise_for_status()
+            logger.info("SpiderFoot scan %s stop requested", scan_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("SpiderFoot scan %s could not be stopped: %s", scan_id, exc)
 
     async def _fetch_results(self, client: httpx.AsyncClient, scan_id: str) -> list[dict]:
         """GET /scaneventresults and return list of event rows."""

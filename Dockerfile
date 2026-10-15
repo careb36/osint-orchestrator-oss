@@ -48,12 +48,24 @@ COPY --from=amass /bin/subs /usr/local/bin/oam_subs
 # the volume shared with the Amass engine container, which runs as uid 1000:
 # pre-own it so the engine can write asset.db whichever container initialises
 # the volume first.
+# The service runs as uid 1000 (the same uid the Helm chart and the Amass
+# engine use), never as root: a bug in a collector or in the PDF renderer
+# must not get root inside the container. Everything the process writes at
+# run time lives under these three directories.
 RUN mkdir -p /app/daily_reports /app/data /app/amass/data \
-    && chown 1000:1000 /app/amass/data
+    && groupadd --gid 1000 app \
+    && useradd --uid 1000 --gid 1000 --no-create-home --shell /usr/sbin/nologin app \
+    && chown -R 1000:1000 /app/daily_reports /app/data /app/amass/data
 
+# The application default is ./orchestrator.db, which under /app is owned by
+# root and unwritable for uid 1000: the image points the database at the data
+# directory it owns. Compose and the Helm chart set the same value explicitly.
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    ORCHESTRATOR_DATABASE_URL=sqlite+aiosqlite:////app/data/orchestrator.db
 
 EXPOSE 8000
+
+USER 1000
 
 CMD ["python", "-m", "uvicorn", "orchestrator.api:app", "--host", "0.0.0.0", "--port", "8000"]

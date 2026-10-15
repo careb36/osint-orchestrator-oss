@@ -118,6 +118,50 @@ async def test_startscan_requests_json_and_reads_id(httpx_mock):
     assert "application/json" in request.headers["Accept"]
 
 
+async def test_timed_out_scan_is_stopped_on_the_server(httpx_mock):
+    """A scan the run gave up on keeps probing the target unless it is stopped."""
+    httpx_mock.add_response(method="POST", url=f"{BASE_URL}/startscan", json=["SUCCESS", SCAN_ID])
+    httpx_mock.add_response(method="POST", url=f"{BASE_URL}/stopscan", json=["SUCCESS"])
+    collector = _collector()
+    collector._timeout = 0  # the deadline has passed before the first poll
+
+    result = await collector.collect()
+
+    assert result.success is False
+    assert "did not finish" in (result.error or "")
+    stops = httpx_mock.get_requests(method="POST", url=f"{BASE_URL}/stopscan")
+    assert len(stops) == 1
+    assert stops[0].headers["Accept"] == "application/json"
+    assert SCAN_ID in stops[0].read().decode()
+
+
+async def test_stopscan_failure_does_not_hide_the_original_error(httpx_mock):
+    httpx_mock.add_response(method="POST", url=f"{BASE_URL}/startscan", json=["SUCCESS", SCAN_ID])
+    httpx_mock.add_response(method="POST", url=f"{BASE_URL}/stopscan", status_code=500)
+    collector = _collector()
+    collector._timeout = 0
+
+    result = await collector.collect()
+
+    assert result.success is False
+    assert "did not finish" in (result.error or "")
+
+
+async def test_finished_scan_is_not_stopped(httpx_mock):
+    httpx_mock.add_response(method="POST", url=f"{BASE_URL}/startscan", json=["SUCCESS", SCAN_ID])
+    httpx_mock.add_response(
+        method="GET", url=re.compile(rf"{BASE_URL}/scanstatus.*"), json=_status("FINISHED")
+    )
+    httpx_mock.add_response(
+        method="GET", url=re.compile(rf"{BASE_URL}/scaneventresults.*"), json=[]
+    )
+
+    result = await _collector().collect()
+
+    assert result.success is True
+    assert httpx_mock.get_requests(method="POST", url=f"{BASE_URL}/stopscan") == []
+
+
 async def test_startscan_error_reply_fails_the_collector(httpx_mock):
     httpx_mock.add_response(
         method="POST",

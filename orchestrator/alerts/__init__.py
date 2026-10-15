@@ -33,6 +33,7 @@ from pydantic import BaseModel
 
 from orchestrator.config import settings
 from orchestrator.i18n import resolve_language, t
+from orchestrator.models import AlertCaseReason, AlertsConfig, RunStatus
 
 logger = logging.getLogger(__name__)
 
@@ -317,6 +318,32 @@ def build_notifiers(language: str | None = None) -> list[Notifier]:
 # ─── Dispatch helper ─────────────────────────────────────────────────────────
 
 _RISK_ORDER = {"unknown": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+
+
+def alert_case_reason(
+    *,
+    new_observable_count: int,
+    risk_level: str,
+    run_status: RunStatus,
+    cfg: AlertsConfig,
+) -> AlertCaseReason | None:
+    """Which rule fires for this run, or None when no alert is due.
+
+    New observables win over the risk level, which wins over a run failure:
+    the reason names the strongest fact the operator should look at first.
+    """
+    if cfg.on_new_observables and new_observable_count > 0:
+        return AlertCaseReason.NEW_OBSERVABLES
+    if should_alert(
+        new_observable_count=0,
+        risk_level=risk_level,
+        on_new_observables=False,
+        min_risk_level=cfg.min_risk_level,
+    ):
+        return AlertCaseReason.RISK_LEVEL
+    if cfg.on_run_failure and run_status == RunStatus.FAILED:
+        return AlertCaseReason.RUN_FAILURE
+    return None
 
 
 def should_alert(

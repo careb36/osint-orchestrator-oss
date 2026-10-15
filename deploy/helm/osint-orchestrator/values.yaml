@@ -88,6 +88,9 @@ persistence:
 # ─── Non-secret configuration (rendered into a ConfigMap as env vars) ────────
 config:
   # In-cluster URLs of the platforms this orchestrator feeds and drives.
+  # openctiEnabled: false runs without the knowledge graph (ADR-008): reports,
+  # findings, the delta and alerts keep working; nothing is pushed to OpenCTI.
+  openctiEnabled: true
   openctiUrl: http://opencti:8080
   openctiSslVerify: true
   spiderfootUrl: http://spiderfoot:5001
@@ -100,9 +103,31 @@ config:
   logLevel: INFO
   metricsEnabled: true
   llm:
+    # ollama | anthropic | openai | nebius | none. Cloud providers need their
+    # key under secrets.values (NEBIUS_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY).
     provider: ollama
     model: llama3.2
     baseUrl: http://ollama:11434
+    # The two routes of the cloud providers (required for nebius): the fast
+    # model qualifies web evidence, the reasoning model writes the synthesis.
+    modelReasoning: ""
+    modelFast: ""
+  # Tavily web research (per-target opt-in; TAVILY_API_KEY under secrets.values).
+  tavily:
+    searchDepth: basic
+    maxResults: 5
+    maxCallsPerRun: 3
+    timeoutSeconds: 120
+  # Nightly purge of runs and report directories older than `days` (0 = off).
+  retention:
+    days: 90
+    cron: "30 3 * * *"
+  # Retry worker for failed alert deliveries.
+  alertRetry:
+    cron: "*/5 * * * *"
+    maxAttempts: 4
+    baseDelaySeconds: 30
+    jitterRatio: 0.25
   alerts:
     webhookUrl: ""
     smtpHost: ""
@@ -126,11 +151,15 @@ secrets:
     # Comma-separated list; empty = API open (a startup warning is logged).
     ORCHESTRATOR_API_KEY: ""
     ORCHESTRATOR_SECRET_KEY: ""
+    # Keys retired by a rotation (comma-separated); verify-only.
+    ORCHESTRATOR_SECRET_KEY_PREVIOUS: ""
     ALERT_WEBHOOK_SECRET: ""
     ALERT_SMTP_USER: ""
     ALERT_SMTP_PASSWORD: ""
     ANTHROPIC_API_KEY: ""
     OPENAI_API_KEY: ""
+    NEBIUS_API_KEY: ""
+    TAVILY_API_KEY: ""
     SHODAN_API_KEY: ""
     VIRUSTOTAL_API_KEY: ""
     CENSYS_API_ID: ""
@@ -172,15 +201,18 @@ livenessProbe:
   periodSeconds: 20
   timeoutSeconds: 5
   failureThreshold: 3
+# /ready answers 503 while the database is offline or the scheduler is not
+# running, so readiness and startup use it; liveness stays on /health, which
+# answers 200 as long as the process does.
 readinessProbe:
   httpGet:
-    path: /health
+    path: /ready
     port: http
   periodSeconds: 10
   timeoutSeconds: 5
 startupProbe:
   httpGet:
-    path: /health
+    path: /ready
     port: http
   periodSeconds: 5
   failureThreshold: 24

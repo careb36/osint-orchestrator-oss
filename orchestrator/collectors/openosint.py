@@ -138,7 +138,13 @@ class OpenOSINTCollector(BaseCollector):
             logger.exception("OpenOSINT failed for %s", fqdn)
             return self._failure(fqdn, str(exc))
 
-        return self._from_graph(graph, fqdn)
+        try:
+            return self._from_graph(graph, fqdn)
+        except Exception as exc:  # noqa: BLE001
+            # A malformed entity or relationship is the tool's bug, not the
+            # run's: report it as a failed collector like any other error.
+            logger.exception("OpenOSINT graph mapping failed for %s", fqdn)
+            return self._failure(fqdn, f"graph mapping: {exc}")
 
     # ── Internal ──────────────────────────────────────────────────────────────
 

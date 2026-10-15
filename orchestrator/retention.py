@@ -20,6 +20,7 @@ from sqlmodel import col
 from orchestrator.config import settings
 from orchestrator.database import get_session
 from orchestrator.models import (
+    AlertCase,
     AlertDelivery,
     AlertRecord,
     EvidenceQualification,
@@ -50,6 +51,7 @@ class RetentionSummary:
     alert_deliveries_deleted: int = 0
     opencti_outbox_deleted: int = 0
     evidence_qualifications_deleted: int = 0
+    alert_cases_deleted: int = 0
     report_dirs_deleted: int = 0
     errors: list[str] = field(default_factory=list)
 
@@ -98,6 +100,7 @@ async def purge_expired(now: datetime | None = None) -> RetentionSummary:
                     (OpenCTIOutbox, OpenCTIOutbox.run_id, "opencti_outbox_deleted"),
                     (AlertDelivery, AlertDelivery.run_id, "alert_deliveries_deleted"),
                     (AlertRecord, AlertRecord.run_id, "alerts_deleted"),
+                    (AlertCase, AlertCase.run_id, "alert_cases_deleted"),
                     (FindingRecord, FindingRecord.run_id, "findings_deleted"),
                     (RunObservable, RunObservable.run_id, "run_observables_deleted"),
                     (
@@ -181,6 +184,7 @@ async def purge_expired(now: datetime | None = None) -> RetentionSummary:
             "alert_deliveries_deleted": summary.alert_deliveries_deleted,
             "opencti_outbox_deleted": summary.opencti_outbox_deleted,
             "evidence_qualifications_deleted": summary.evidence_qualifications_deleted,
+            "alert_cases_deleted": summary.alert_cases_deleted,
             "report_dirs_deleted": summary.report_dirs_deleted,
             "errors": summary.errors,
         },

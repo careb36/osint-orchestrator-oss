@@ -34,19 +34,33 @@ from fastapi import (
     Request,
     Response,
 )
-from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlmodel import select
 
-from orchestrator import metrics
+from orchestrator import alert_cases, metrics
 from orchestrator.auth import log_auth_status, log_secret_key_status, require_api_key
 from orchestrator.config import NEBIUS_DEFAULT_BASE_URL, settings
 from orchestrator.database import create_db_and_tables, get_session
-from orchestrator.evidence import load_manifest_file, manifest_path_for_report, verify_target_chain
+from orchestrator.evidence import (
+    load_manifest_file,
+    manifest_path_for_report,
+    split_keys,
+    verify_target_chain,
+)
 from orchestrator.i18n import resolve_language, t
 from orchestrator.logging_config import configure_logging, request_id_var
-from orchestrator.models import AlertRecord, EvidenceQualification, FindingRecord, Run, Target
+from orchestrator.models import (
+    AlertCase,
+    AlertCaseState,
+    AlertRecord,
+    EvidenceQualification,
+    FindingRecord,
+    Run,
+    Target,
+)
 from orchestrator.pipeline import (
     drain_opencti_outbox,
     get_run_delta,
@@ -114,6 +128,7 @@ async def lifespan(app: FastAPI):
     # Same reasoning for the queues: a row claimed IN_PROGRESS by a process
     # that no longer exists is a row whose drain died mid-send.
     requeued = await requeue_interrupted_deliveries()
+    await alert_cases.refresh_metrics()
     if any(requeued.values()):
         logger.warning(
             "Returned %d alert delivery(ies) and %d OpenCTI outbox row(s) left in progress "
@@ -312,6 +327,10 @@ def _health_hint(component: str, status: str, detail: str) -> tuple[str, str]:
                 "OpenCTI ingestion is enabled.",
                 "Continue monitoring for sink lag or ingestion errors.",
             ),
+            "disabled": (
+                "OpenCTI ingestion is switched off by configuration (ADR-008).",
+                "Set OPENCTI_ENABLED=true to push findings to the knowledge graph.",
+            ),
             "degraded": (
                 "OpenCTI ingest is disabled or not reachable.",
                 "Enable OPENCTI_ENABLED or repair the OpenCTI connection before scheduled runs.",
@@ -328,9 +347,8 @@ def _health_hint(component: str, status: str, detail: str) -> tuple[str, str]:
     return compact[0], compact[1]
 
 
-@app.get("/health", tags=["public"])
-async def health() -> dict[str, Any]:
-    """Liveness probe and small service health snapshot for the dashboard."""
+async def _health_snapshot() -> dict[str, Any]:
+    """Component checks and their rollup, shared by /health and /ready."""
     checks: dict[str, dict[str, str]] = {
         "api": {"status": "ok", "detail": "API is responding"},
         "database": {"status": "ok", "detail": "Database is available"},
@@ -355,8 +373,10 @@ async def health() -> dict[str, Any]:
         checks["scheduler"] = {"status": "degraded", "detail": "Scheduler is not running"}
 
     if not settings.opencti_enabled:
-        # ADR-008: without the sink the knowledge graph is degraded.
-        checks["opencti"] = {"status": "degraded", "detail": "OpenCTI sink disabled"}
+        # ADR-008: the sink is optional. A deployment that chose to run
+        # without it is configured, not degraded, so the choice must not
+        # fail health checks or colour the dashboard as a fault.
+        checks["opencti"] = {"status": "disabled", "detail": "OpenCTI sink disabled"}
 
     for component, payload in checks.items():
         status = payload["status"]
@@ -379,6 +399,26 @@ async def health() -> dict[str, Any]:
         "updated_at": datetime.now(UTC).isoformat(),
         "checks": checks,
     }
+
+
+@app.get("/health", tags=["public"])
+async def health() -> dict[str, Any]:
+    """Liveness: always HTTP 200 while the process answers; the body carries
+    the component checks and their rollup for the dashboard."""
+    return await _health_snapshot()
+
+
+@app.get("/ready", tags=["public"])
+async def ready() -> JSONResponse:
+    """Readiness: the same snapshot, but HTTP 503 while the service cannot do
+    its job (a component is offline, or the scheduler is not running). This is
+    what the compose healthcheck and the Kubernetes readiness probe call, so a
+    dead database or scheduler is visible to the orchestrator around us."""
+    snapshot = await _health_snapshot()
+    ready_now = snapshot["status"] != "offline" and (
+        snapshot["checks"]["scheduler"]["status"] == "ok"
+    )
+    return JSONResponse(snapshot, status_code=200 if ready_now else 503)
 
 
 @app.get("/metrics", include_in_schema=False)
@@ -508,6 +548,76 @@ async def replay_alert_dlq(
     )
     processed = await process_pending_alert_deliveries(limit=limit)
     return {"status": "replayed", **replayed, "processed_now": processed}
+
+
+class AlertCaseAction(BaseModel):
+    """Who acted on the case and, optionally, what they found."""
+
+    by: str = Field(min_length=1, max_length=80)
+    note: str | None = Field(default=None, max_length=500)
+
+
+def _alert_case_payload(case: AlertCase) -> dict[str, Any]:
+    return case.model_dump()
+
+
+@router.get("/alerts", response_model=dict[str, Any], tags=["alerts"])
+async def list_alert_cases(
+    target_id: str | None = None,
+    state: AlertCaseState | None = None,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+) -> dict[str, Any]:
+    """Alert cases newest first: one per run that met an alert rule, with its
+    triage state. ``total`` counts every case the filters match."""
+    rows, total = await alert_cases.list_cases(
+        target_id=target_id,
+        state=state.value if state is not None else None,
+        limit=limit,
+        offset=offset,
+    )
+    return {
+        "items": [_alert_case_payload(row) for row in rows],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get("/alerts/{case_id}", response_model=dict[str, Any], tags=["alerts"])
+async def get_alert_case(case_id: int) -> dict[str, Any]:
+    try:
+        return _alert_case_payload(await alert_cases.get_case(case_id))
+    except alert_cases.AlertCaseNotFoundError:
+        raise HTTPException(status_code=404, detail=t("alert_not_found", case_id=case_id)) from None
+
+
+@router.post("/alerts/{case_id}/ack", response_model=dict[str, Any], tags=["alerts"])
+async def acknowledge_alert_case(case_id: int, action: AlertCaseAction) -> dict[str, Any]:
+    """open → acknowledged: an operator is looking at it."""
+    try:
+        case = await alert_cases.acknowledge_case(case_id, by=action.by, note=action.note)
+    except alert_cases.AlertCaseNotFoundError:
+        raise HTTPException(status_code=404, detail=t("alert_not_found", case_id=case_id)) from None
+    except alert_cases.AlertCaseStateConflictError as exc:
+        raise HTTPException(
+            status_code=409, detail=t("alert_state_conflict", state=exc.state)
+        ) from exc
+    return _alert_case_payload(case)
+
+
+@router.post("/alerts/{case_id}/resolve", response_model=dict[str, Any], tags=["alerts"])
+async def resolve_alert_case(case_id: int, action: AlertCaseAction) -> dict[str, Any]:
+    """open | acknowledged → resolved: nothing more to do."""
+    try:
+        case = await alert_cases.resolve_case(case_id, by=action.by, note=action.note)
+    except alert_cases.AlertCaseNotFoundError:
+        raise HTTPException(status_code=404, detail=t("alert_not_found", case_id=case_id)) from None
+    except alert_cases.AlertCaseStateConflictError as exc:
+        raise HTTPException(
+            status_code=409, detail=t("alert_state_conflict", state=exc.state)
+        ) from exc
+    return _alert_case_payload(case)
 
 
 @router.post("/opencti/outbox/replay", response_model=dict[str, Any], tags=["opencti"])
@@ -788,15 +898,27 @@ async def _risk_levels_by_run(session: Any, run_ids: list[int]) -> dict[int, str
 
 
 @router.get("/runs", response_model=list[dict[str, Any]], tags=["runs"])
-async def list_runs(target_id: str | None = None) -> list[dict[str, Any]]:
-    """List recent runs, optionally filtered by target.
+async def list_runs(
+    target_id: str | None = None,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+) -> list[dict[str, Any]]:
+    """List recent runs, newest first, optionally filtered by target.
+
+    ``limit`` and ``offset`` page through older runs; the default page is the
+    100 most recent, which is what the dashboard reads.
 
     Each row carries ``risk_level``: the synthesised level of the run's
     finding, or ``null`` for a run without one (failed early, synthesis off or
     still running), so the history can show how the risk moved run by run.
     """
     async with get_session() as session:
-        stmt = select(Run).order_by(Run.started_at.desc()).limit(100)  # type: ignore[arg-type]
+        stmt = (
+            select(Run)
+            .order_by(Run.started_at.desc(), Run.id.desc())  # type: ignore[arg-type, union-attr]
+            .offset(offset)
+            .limit(limit)
+        )
         if target_id:
             stmt = stmt.where(Run.target_id == target_id)
         result = await session.exec(stmt)
@@ -970,12 +1092,18 @@ async def get_run_bundle(run_id: int) -> Response:
 @router.get("/targets/{target_id}/chain/verify", response_model=dict[str, Any], tags=["runs"])
 async def verify_target_chain_endpoint(target_id: str) -> dict[str, Any]:
     """Check the manifest chain for every sealed run of a target."""
+    # Only a configured target reaches the verifier and the metric: the id is
+    # a Prometheus label, and an unbounded one would let any caller create a
+    # new time series per request.
+    if not any(target.id == target_id for target in _load_targets()):
+        raise HTTPException(status_code=404, detail=t("target_not_found", target_id=target_id))
     try:
         async with get_session() as session:
             result = await verify_target_chain(
                 target_id=target_id,
                 secret_key=settings.orchestrator_secret_key,
                 session=session,
+                previous_keys=split_keys(settings.orchestrator_secret_key_previous),
             )
         outcome = "ok" if result["ok"] else "broken"
         metrics.evidence_chain_verify_total.labels(target_id, outcome).inc()
