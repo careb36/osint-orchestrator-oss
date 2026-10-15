@@ -160,6 +160,10 @@ from [SECURITY.md](SECURITY.md).
 
 ### Fixed
 
+- Installs declare `sqlalchemy[asyncio]`: recent SQLAlchemy releases stopped
+  pulling in `greenlet`, so a fresh `pip install` (CI, the Docker image) could
+  not import the async engine and every test and container start failed.
+
 - `GET /targets/{id}/chain/verify` answers 404 for a target that is not in
   `targets.yaml`. The id is a label of `evidence_chain_verify_total`, so any
   authenticated caller could add one time series to `/metrics` per request.
