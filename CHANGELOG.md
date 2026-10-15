@@ -11,6 +11,12 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- `GET /ready`: readiness probe that answers 503 while the database is
+  offline or the scheduler is not running, and 200 otherwise, with the same
+  body as `/health`. The compose healthcheck and the Helm readiness and
+  startup probes use it; `/health` stays a liveness check that always answers
+  200.
+
 - Dashboard resilience and performance pass: the routed views sit inside an
   error boundary keyed by the route, whose fallback offers *Try again* and
   *Back to the overview* and which resets on navigation, so one crashed view
@@ -157,6 +163,10 @@ from [SECURITY.md](SECURITY.md).
 
 ### Fixed
 
+- A deployment with `OPENCTI_ENABLED=false` no longer stays `unhealthy`: the
+  compose healthcheck required `/health` to report `ok`, and a disabled sink
+  reported `degraded`. The `opencti` check now reads `disabled`, which does
+  not lower the overall status (ADR-008), and the healthcheck polls `/ready`.
 - Security: model and internet-derived text is made inert more thoroughly.
   HTML tags are stripped until none is left, so a tag re-formed by removing
   an inner one (`<scr<b>ipt>`) or hidden behind a `<` in an attribute goes
