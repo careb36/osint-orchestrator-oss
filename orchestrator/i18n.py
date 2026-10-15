@@ -36,6 +36,14 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "es": "El objetivo '{target_id}' está deshabilitado",
         "en": "Target '{target_id}' is disabled",
     },
+    "alert_not_found": {
+        "es": "No existe el caso de alerta {case_id}",
+        "en": "Alert case {case_id} not found",
+    },
+    "alert_state_conflict": {
+        "es": "El caso de alerta ya está en estado '{state}'",
+        "en": "Alert case is already '{state}'",
+    },
     "run_not_found": {
         "es": "No existe la ejecución {run_id}",
         "en": "Run {run_id} not found",

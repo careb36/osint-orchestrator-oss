@@ -36,10 +36,11 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlmodel import select
 
-from orchestrator import metrics
+from orchestrator import alert_cases, metrics
 from orchestrator.auth import log_auth_status, log_secret_key_status, require_api_key
 from orchestrator.config import NEBIUS_DEFAULT_BASE_URL, settings
 from orchestrator.database import create_db_and_tables, get_session
@@ -51,7 +52,15 @@ from orchestrator.evidence import (
 )
 from orchestrator.i18n import resolve_language, t
 from orchestrator.logging_config import configure_logging, request_id_var
-from orchestrator.models import AlertRecord, EvidenceQualification, FindingRecord, Run, Target
+from orchestrator.models import (
+    AlertCase,
+    AlertCaseState,
+    AlertRecord,
+    EvidenceQualification,
+    FindingRecord,
+    Run,
+    Target,
+)
 from orchestrator.pipeline import (
     drain_opencti_outbox,
     get_run_delta,
@@ -119,6 +128,7 @@ async def lifespan(app: FastAPI):
     # Same reasoning for the queues: a row claimed IN_PROGRESS by a process
     # that no longer exists is a row whose drain died mid-send.
     requeued = await requeue_interrupted_deliveries()
+    await alert_cases.refresh_metrics()
     if any(requeued.values()):
         logger.warning(
             "Returned %d alert delivery(ies) and %d OpenCTI outbox row(s) left in progress "
@@ -538,6 +548,76 @@ async def replay_alert_dlq(
     )
     processed = await process_pending_alert_deliveries(limit=limit)
     return {"status": "replayed", **replayed, "processed_now": processed}
+
+
+class AlertCaseAction(BaseModel):
+    """Who acted on the case and, optionally, what they found."""
+
+    by: str = Field(min_length=1, max_length=80)
+    note: str | None = Field(default=None, max_length=500)
+
+
+def _alert_case_payload(case: AlertCase) -> dict[str, Any]:
+    return case.model_dump()
+
+
+@router.get("/alerts", response_model=dict[str, Any], tags=["alerts"])
+async def list_alert_cases(
+    target_id: str | None = None,
+    state: AlertCaseState | None = None,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+) -> dict[str, Any]:
+    """Alert cases newest first: one per run that met an alert rule, with its
+    triage state. ``total`` counts every case the filters match."""
+    rows, total = await alert_cases.list_cases(
+        target_id=target_id,
+        state=state.value if state is not None else None,
+        limit=limit,
+        offset=offset,
+    )
+    return {
+        "items": [_alert_case_payload(row) for row in rows],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get("/alerts/{case_id}", response_model=dict[str, Any], tags=["alerts"])
+async def get_alert_case(case_id: int) -> dict[str, Any]:
+    try:
+        return _alert_case_payload(await alert_cases.get_case(case_id))
+    except alert_cases.AlertCaseNotFoundError:
+        raise HTTPException(status_code=404, detail=t("alert_not_found", case_id=case_id)) from None
+
+
+@router.post("/alerts/{case_id}/ack", response_model=dict[str, Any], tags=["alerts"])
+async def acknowledge_alert_case(case_id: int, action: AlertCaseAction) -> dict[str, Any]:
+    """open → acknowledged: an operator is looking at it."""
+    try:
+        case = await alert_cases.acknowledge_case(case_id, by=action.by, note=action.note)
+    except alert_cases.AlertCaseNotFoundError:
+        raise HTTPException(status_code=404, detail=t("alert_not_found", case_id=case_id)) from None
+    except alert_cases.AlertCaseStateConflictError as exc:
+        raise HTTPException(
+            status_code=409, detail=t("alert_state_conflict", state=exc.state)
+        ) from exc
+    return _alert_case_payload(case)
+
+
+@router.post("/alerts/{case_id}/resolve", response_model=dict[str, Any], tags=["alerts"])
+async def resolve_alert_case(case_id: int, action: AlertCaseAction) -> dict[str, Any]:
+    """open | acknowledged → resolved: nothing more to do."""
+    try:
+        case = await alert_cases.resolve_case(case_id, by=action.by, note=action.note)
+    except alert_cases.AlertCaseNotFoundError:
+        raise HTTPException(status_code=404, detail=t("alert_not_found", case_id=case_id)) from None
+    except alert_cases.AlertCaseStateConflictError as exc:
+        raise HTTPException(
+            status_code=409, detail=t("alert_state_conflict", state=exc.state)
+        ) from exc
+    return _alert_case_payload(case)
 
 
 @router.post("/opencti/outbox/replay", response_model=dict[str, Any], tags=["opencti"])
