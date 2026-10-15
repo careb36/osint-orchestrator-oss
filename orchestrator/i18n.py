@@ -100,6 +100,14 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "{finding_section}"
         ),
     },
+    "socialosint_note_unverified": {
+        "es": "[análisis de SocialOSINT, no verificado]\n\n{report}",
+        "en": "[SocialOSINT analysis, unverified]\n\n{report}",
+    },
+    "socialosint_note_platforms_skipped": {
+        "es": "Plataformas omitidas por falta de credenciales: {platforms}",
+        "en": "Platforms skipped for lack of credentials: {platforms}",
+    },
     "alert_webhook_no_config": {
         "es": "Canal webhook omitido: ALERT_WEBHOOK_URL no configurado.",
         "en": "Webhook channel skipped: ALERT_WEBHOOK_URL is not configured.",
