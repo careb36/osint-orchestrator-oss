@@ -46,13 +46,35 @@ authorised in writing to assess.
 ```bash
 docker compose up -d --build
 docker compose ps                     # every service healthy (OpenCTI takes 2-3 minutes)
-curl -s http://127.0.0.1:8000/health  # {"status": "ok", ...}
+curl -s http://127.0.0.1:8000/health  # {"status": "ok", ...}; "opencti": "disabled" with OPENCTI_ENABLED=false
+curl -si http://127.0.0.1:8000/ready  # HTTP 200; 503 while the database or the scheduler is down
 ```
 
-The orchestrator's port is published on the loopback interface only
-(`127.0.0.1:${ORCHESTRATOR_PORT:-8000}`). Database migrations run at startup;
-a fresh install reaches the latest schema and an upgrade applies what is
-missing, so no manual migration step exists.
+Every published port binds the loopback interface only: the orchestrator
+(`127.0.0.1:${ORCHESTRATOR_PORT:-8000}`), OpenCTI (`127.0.0.1:8080`),
+SpiderFoot (`127.0.0.1:5001`, no authentication of its own) and the optional
+overlays (SocialOSINT `8001`, Keycloak `8085`, oauth2-proxy `8002`, MISP
+`8443`). Reach OpenCTI or SpiderFoot from your workstation through an SSH
+tunnel (`ssh -L 8080:127.0.0.1:8080 <server>`) or put them behind the same
+reverse proxy as the API. Database migrations run at startup; a fresh install
+reaches the latest schema and an upgrade applies what is missing, so no manual
+migration step exists.
+
+The compose file always starts OpenCTI: the orchestrator service waits for it
+to be healthy. `OPENCTI_ENABLED=false` ([ADR-008](adr/ADR-008-optional-opencti-sink.md))
+stops the ingest, not the containers; a stack without OpenCTI is a Helm or a
+hand-written compose deployment, not this file.
+
+The orchestrator container runs as uid 1000. The `./daily_reports` bind mount
+must be writable by that uid before the first start, or every run fails at the
+report step:
+
+```bash
+mkdir -p daily_reports && sudo chown -R 1000:1000 daily_reports
+```
+
+The `orchestrator-db` and `amass-data` volumes are initialised from the image
+with the right owner and need nothing.
 
 ## Exposing the API and the dashboard
 
@@ -94,7 +116,8 @@ fall back to its default.
 
 ## Observability
 
-`GET /health` (component checks with hints) and `GET /metrics` (Prometheus)
-need no API key. With `ORCHESTRATOR_LOG_FORMAT=json` every log line is one
+`GET /health` (component checks with hints), `GET /ready` (503 until the
+service can work; what the compose healthcheck polls) and `GET /metrics`
+(Prometheus) need no API key. With `ORCHESTRATOR_LOG_FORMAT=json` every log line is one
 object with `request_id`, `target_id`, `run_id` and `collector` fields for a
 log shipper. Details and the alert runbook: [operations.md](operations.md#observability).

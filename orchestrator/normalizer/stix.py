@@ -171,6 +171,10 @@ _TOOL_CONFIDENCE: dict[CollectorName, int] = {
     CollectorName.TAVILY: 60,
 }
 _TAVILY_URL_IN_NOTE = re.compile(r"\|\s*url=([^|]+)")
+# "AS15169", "as15169", "ASN 15169" or a bare "15169". Anything else is not an
+# autonomous-system number and is dropped: emitting number=0 for every
+# unparseable value made unrelated ASNs share one STIX id.
+_ASN = re.compile(r"^(?:AS|ASN)?\s*(\d+)$", re.IGNORECASE)
 
 
 # ── Observable → STIX SCO ─────────────────────────────────────────────────────
@@ -209,12 +213,11 @@ def _build_sco(
             return cls(value=value, custom_properties=custom)
 
         if cls == stix2.AutonomousSystem:
-            raw = value.upper().lstrip("AS")
-            try:
-                number = int(raw)
-            except ValueError:
-                number = 0
-            return cls(number=number, name=value, custom_properties=custom)
+            match = _ASN.match(value)
+            if match is None:
+                logger.warning("Dropping autonomous-system observable with no number: %r", value)
+                return None
+            return cls(number=int(match.group(1)), name=value, custom_properties=custom)
 
         if cls == stix2.UserAccount:
             # account_type, user_id and account_login are all ID contributing
@@ -444,8 +447,11 @@ def normalize(
             note_labels, note_custom = _qualified_note_extras(
                 result, note_text, qualification_by_url
             )
+            # The identity is one per collector, so the target goes into the
+            # id: two targets with the same note text ("no public results…")
+            # must not share a Note that OpenCTI would then merge.
             note = stix2.Note(
-                id=f"note--{_det_uuid(f'{identity_id}|{note_text}')}",
+                id=f"note--{_det_uuid(f'{identity_id}|{result.target_fqdn}|{note_text}')}",
                 abstract=note_text[:128],
                 content=note_text,
                 created_by_ref=identity_id,

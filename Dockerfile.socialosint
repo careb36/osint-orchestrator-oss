@@ -17,7 +17,7 @@
 #   MASTODON_INSTANCE_1_URL, MASTODON_INSTANCE_1_TOKEN
 #   MASTODON_INSTANCE_1_DEFAULT=true
 #
-# See docs/socialosint.md for full documentation.
+# See docs/operations.md (Optional services) for the integration notes.
 
 FROM python:3.11-slim
 
@@ -28,7 +28,7 @@ RUN apt-get update \
 
 # Pin upstream to a reproducible commit. To upgrade:
 #   1. git ls-remote https://github.com/bm-github/owasp-social-osint-agent HEAD
-#   2. Update SOCIALOSINT_REF below and in docs/socialosint.md.
+#   2. Update SOCIALOSINT_REF below and the CHANGELOG.
 #   3. Rebuild: docker compose build --no-cache socialosint
 ARG SOCIALOSINT_REF=afde7af56b212e33672f149a88caf55f718dfd5c
 

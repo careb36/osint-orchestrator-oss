@@ -75,7 +75,9 @@ carry extra variables (SMTP credentials, LLM keys) beyond the ones listed in
 - **Metrics**: `GET /metrics` (no API key needed). Pods carry
   `prometheus.io/scrape` annotations by default; set
   `metrics.serviceMonitor.enabled: true` for the Prometheus Operator.
-- **Probes**: liveness, readiness and startup all use `GET /health`.
+- **Probes**: liveness uses `GET /health` (200 while the process answers);
+  readiness and startup use `GET /ready`, which answers 503 while the database
+  is offline or the scheduler is not running.
 
 ## Values
 

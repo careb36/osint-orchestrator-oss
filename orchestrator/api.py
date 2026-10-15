@@ -34,7 +34,7 @@ from fastapi import (
     Request,
     Response,
 )
-from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func
 from sqlmodel import select
@@ -43,7 +43,12 @@ from orchestrator import metrics
 from orchestrator.auth import log_auth_status, log_secret_key_status, require_api_key
 from orchestrator.config import NEBIUS_DEFAULT_BASE_URL, settings
 from orchestrator.database import create_db_and_tables, get_session
-from orchestrator.evidence import load_manifest_file, manifest_path_for_report, verify_target_chain
+from orchestrator.evidence import (
+    load_manifest_file,
+    manifest_path_for_report,
+    split_keys,
+    verify_target_chain,
+)
 from orchestrator.i18n import resolve_language, t
 from orchestrator.logging_config import configure_logging, request_id_var
 from orchestrator.models import AlertRecord, EvidenceQualification, FindingRecord, Run, Target
@@ -312,6 +317,10 @@ def _health_hint(component: str, status: str, detail: str) -> tuple[str, str]:
                 "OpenCTI ingestion is enabled.",
                 "Continue monitoring for sink lag or ingestion errors.",
             ),
+            "disabled": (
+                "OpenCTI ingestion is switched off by configuration (ADR-008).",
+                "Set OPENCTI_ENABLED=true to push findings to the knowledge graph.",
+            ),
             "degraded": (
                 "OpenCTI ingest is disabled or not reachable.",
                 "Enable OPENCTI_ENABLED or repair the OpenCTI connection before scheduled runs.",
@@ -328,9 +337,8 @@ def _health_hint(component: str, status: str, detail: str) -> tuple[str, str]:
     return compact[0], compact[1]
 
 
-@app.get("/health", tags=["public"])
-async def health() -> dict[str, Any]:
-    """Liveness probe and small service health snapshot for the dashboard."""
+async def _health_snapshot() -> dict[str, Any]:
+    """Component checks and their rollup, shared by /health and /ready."""
     checks: dict[str, dict[str, str]] = {
         "api": {"status": "ok", "detail": "API is responding"},
         "database": {"status": "ok", "detail": "Database is available"},
@@ -355,8 +363,10 @@ async def health() -> dict[str, Any]:
         checks["scheduler"] = {"status": "degraded", "detail": "Scheduler is not running"}
 
     if not settings.opencti_enabled:
-        # ADR-008: without the sink the knowledge graph is degraded.
-        checks["opencti"] = {"status": "degraded", "detail": "OpenCTI sink disabled"}
+        # ADR-008: the sink is optional. A deployment that chose to run
+        # without it is configured, not degraded, so the choice must not
+        # fail health checks or colour the dashboard as a fault.
+        checks["opencti"] = {"status": "disabled", "detail": "OpenCTI sink disabled"}
 
     for component, payload in checks.items():
         status = payload["status"]
@@ -379,6 +389,26 @@ async def health() -> dict[str, Any]:
         "updated_at": datetime.now(UTC).isoformat(),
         "checks": checks,
     }
+
+
+@app.get("/health", tags=["public"])
+async def health() -> dict[str, Any]:
+    """Liveness: always HTTP 200 while the process answers; the body carries
+    the component checks and their rollup for the dashboard."""
+    return await _health_snapshot()
+
+
+@app.get("/ready", tags=["public"])
+async def ready() -> JSONResponse:
+    """Readiness: the same snapshot, but HTTP 503 while the service cannot do
+    its job (a component is offline, or the scheduler is not running). This is
+    what the compose healthcheck and the Kubernetes readiness probe call, so a
+    dead database or scheduler is visible to the orchestrator around us."""
+    snapshot = await _health_snapshot()
+    ready_now = snapshot["status"] != "offline" and (
+        snapshot["checks"]["scheduler"]["status"] == "ok"
+    )
+    return JSONResponse(snapshot, status_code=200 if ready_now else 503)
 
 
 @app.get("/metrics", include_in_schema=False)
@@ -788,15 +818,27 @@ async def _risk_levels_by_run(session: Any, run_ids: list[int]) -> dict[int, str
 
 
 @router.get("/runs", response_model=list[dict[str, Any]], tags=["runs"])
-async def list_runs(target_id: str | None = None) -> list[dict[str, Any]]:
-    """List recent runs, optionally filtered by target.
+async def list_runs(
+    target_id: str | None = None,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+) -> list[dict[str, Any]]:
+    """List recent runs, newest first, optionally filtered by target.
+
+    ``limit`` and ``offset`` page through older runs; the default page is the
+    100 most recent, which is what the dashboard reads.
 
     Each row carries ``risk_level``: the synthesised level of the run's
     finding, or ``null`` for a run without one (failed early, synthesis off or
     still running), so the history can show how the risk moved run by run.
     """
     async with get_session() as session:
-        stmt = select(Run).order_by(Run.started_at.desc()).limit(100)  # type: ignore[arg-type]
+        stmt = (
+            select(Run)
+            .order_by(Run.started_at.desc(), Run.id.desc())  # type: ignore[arg-type, union-attr]
+            .offset(offset)
+            .limit(limit)
+        )
         if target_id:
             stmt = stmt.where(Run.target_id == target_id)
         result = await session.exec(stmt)
@@ -970,12 +1012,18 @@ async def get_run_bundle(run_id: int) -> Response:
 @router.get("/targets/{target_id}/chain/verify", response_model=dict[str, Any], tags=["runs"])
 async def verify_target_chain_endpoint(target_id: str) -> dict[str, Any]:
     """Check the manifest chain for every sealed run of a target."""
+    # Only a configured target reaches the verifier and the metric: the id is
+    # a Prometheus label, and an unbounded one would let any caller create a
+    # new time series per request.
+    if not any(target.id == target_id for target in _load_targets()):
+        raise HTTPException(status_code=404, detail=t("target_not_found", target_id=target_id))
     try:
         async with get_session() as session:
             result = await verify_target_chain(
                 target_id=target_id,
                 secret_key=settings.orchestrator_secret_key,
                 session=session,
+                previous_keys=split_keys(settings.orchestrator_secret_key_previous),
             )
         outcome = "ok" if result["ok"] else "broken"
         metrics.evidence_chain_verify_total.labels(target_id, outcome).inc()
