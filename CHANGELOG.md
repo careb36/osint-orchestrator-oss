@@ -157,6 +157,10 @@ from [SECURITY.md](SECURITY.md).
 
 ### Fixed
 
+- Installs declare `sqlalchemy[asyncio]`: recent SQLAlchemy releases stopped
+  pulling in `greenlet`, so a fresh `pip install` (CI, the Docker image) could
+  not import the async engine and every test and container start failed.
+
 - SpiderFoot scans the run gives up on (timeout, cancellation, a polling
   error) are stopped with `POST /stopscan`; they kept probing the target on
   the SpiderFoot server, and every scheduled run added another.
