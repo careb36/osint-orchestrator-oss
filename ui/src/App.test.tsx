@@ -52,6 +52,35 @@ describe('App shell', () => {
     expect(screen.queryByRole('button', { name: /forget key/i })).not.toBeInTheDocument();
   });
 
+  it('lets an operator acknowledge and resolve an alert case once named', async () => {
+    installFetchMock();
+    const user = userEvent.setup();
+    renderApp(['/alerts']);
+
+    expect(await screen.findByRole('heading', { name: /^alerts$/i })).toBeInTheDocument();
+    // Default filter: open cases only; #8 is acknowledged and hidden.
+    const table = await screen.findByRole('table');
+    expect(within(table).getByText('#7')).toBeInTheDocument();
+    expect(within(table).queryByText('#8')).not.toBeInTheDocument();
+
+    const acknowledge = within(table).getByRole('button', { name: /acknowledge/i });
+    expect(acknowledge).toBeDisabled(); // no name yet
+    await user.type(screen.getByRole('textbox', { name: /your name/i }), 'Rebeca');
+    expect(acknowledge).toBeEnabled();
+    await user.click(acknowledge);
+
+    // The acknowledged case leaves the open list (now empty); the all-states view shows it handled.
+    expect(await screen.findByRole('heading', { name: /no alert cases/i })).toBeInTheDocument();
+    await user.selectOptions(screen.getByRole('combobox', { name: /state/i }), 'all');
+    const row = (await screen.findByText('#7')).closest('tr') as HTMLElement;
+    expect(row).toHaveAttribute('data-state', 'acknowledged');
+    expect(within(row).getByText(/by tester/i)).toBeInTheDocument();
+
+    await user.click(within(row).getByRole('button', { name: /resolve/i }));
+    await waitFor(() => expect((screen.getByText('#7').closest('tr') as HTMLElement).dataset.state).toBe('resolved'));
+    expect(within(screen.getByText('#7').closest('tr') as HTMLElement).queryByRole('button')).not.toBeInTheDocument();
+  });
+
   it('asks for the API key when the API answers 401', async () => {
     installFetchMock({ requireKey: 'test-key' });
     renderApp(['/targets']);

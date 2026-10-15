@@ -56,6 +56,13 @@ describe('accessibility (axe)', () => {
     await expectNoViolations();
   });
 
+  it('alerts', async () => {
+    installFetchMock();
+    renderApp(['/alerts?state=all']);
+    await screen.findByRole('table');
+    await expectNoViolations();
+  });
+
   it('runs', async () => {
     installFetchMock();
     renderApp(['/runs'], 'en');

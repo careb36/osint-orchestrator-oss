@@ -11,6 +11,13 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- Dashboard *Alerts* view (`/alerts`): the alert cases the backend opens for
+  every run that meets a rule, filtered by target and state (open by default),
+  sortable, with the reason, risk and run status as cues and Acknowledge /
+  Resolve actions recorded with the operator's name (kept per browser). The
+  run workspace links to the run's case. Closes the Phase 2 triage item of
+  `ui/docs/dod.md`; MTTR joins the KPI scorecard.
+
 - Dashboard resilience and performance pass: the routed views sit inside an
   error boundary keyed by the route, whose fallback offers *Try again* and
   *Back to the overview* and which resets on navigation, so one crashed view
