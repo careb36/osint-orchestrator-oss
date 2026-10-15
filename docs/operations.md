@@ -79,7 +79,7 @@ Interactive reference: `/docs` (OpenAPI at `/openapi.json`). Public routes are
 | `POST` | `/scheduler/reload` | Reload target cron jobs from `targets.yaml` without restarting the process |
 | `POST` | `/alerts/dlq/replay` | Replay dead-letter alert deliveries (`channel` = `webhook` \| `email`, `limit` = `1..1000`) |
 | `POST` | `/opencti/outbox/replay` | Replay dead-letter OpenCTI bundles (`run_id`, `limit` = `1..1000`) and drain the due ones now |
-| `GET` | `/runs` | 100 most recent runs, newest first, each with the `risk_level` of its finding (`null` without one); `?target_id=` filters |
+| `GET` | `/runs` | Runs newest first, each with the `risk_level` of its finding (`null` without one); `?target_id=` filters, `?limit=` (1–500, default 100) and `?offset=` page through older runs |
 | `GET` | `/runs/{id}` | A run's status, counts, `risk_level`, and `alerts[]` dispatch audit |
 | `GET` | `/runs/{id}/delta` | Net-new observables for that run (from the DB, not the files) |
 | `GET` | `/runs/{id}/report` | Markdown report for a completed run (`text/plain`) |
@@ -88,7 +88,7 @@ Interactive reference: `/docs` (OpenAPI at `/openapi.json`). Public routes are
 | `GET` | `/runs/{id}/manifest` | Signed evidence manifest of a run (`404` when unsealed) |
 | `GET` | `/runs/{id}/report.pdf` | PDF companion of the report (`application/pdf`; `404` when the run has none) |
 | `GET` | `/runs/{id}/bundle` | Every file of the run directory, `manifest.json` included, as one `application/zip` download (`404` without artefacts) |
-| `GET` | `/targets/{id}/chain/verify` | Verify the target's evidence chain |
+| `GET` | `/targets/{id}/chain/verify` | Verify the target's evidence chain; 404 for a target not in `targets.yaml` |
 
 Errors carry a `detail` string in the operator language: `404` unknown target,
 run, report or finding; `400` disabled target; `401` missing or wrong key; `409`

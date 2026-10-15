@@ -11,6 +11,9 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- `GET /runs` takes `limit` (1–500, default 100) and `offset` to page through
+  runs older than the most recent 100.
+
 - Dashboard resilience and performance pass: the routed views sit inside an
   error boundary keyed by the route, whose fallback offers *Try again* and
   *Back to the overview* and which resets on navigation, so one crashed view
@@ -177,6 +180,9 @@ from [SECURITY.md](SECURITY.md).
   hard-coded in Spanish (ADR-004).
 - OpenOSINT: an error while mapping the entity graph is reported as a failed
   collector (`graph mapping: …`) instead of escaping `collect()`.
+- `GET /targets/{id}/chain/verify` answers 404 for a target that is not in
+  `targets.yaml`. The id is a label of `evidence_chain_verify_total`, so any
+  authenticated caller could add one time series to `/metrics` per request.
 - Security: model and internet-derived text is made inert more thoroughly.
   HTML tags are stripped until none is left, so a tag re-formed by removing
   an inner one (`<scr<b>ipt>`) or hidden behind a `<` in an attribute goes
