@@ -42,6 +42,11 @@ dependencies = [
     "openosint @ git+https://github.com/careb36/OpenOSINT@f8855bfbd9c78a6d8c24639b1c30900a963e8f57",
     # Database (operational state only)
     "sqlmodel>=0.0.19",
+    # SQLAlchemy's asyncio extension needs greenlet, which recent SQLAlchemy
+    # releases no longer install by themselves; without this extra every
+    # import of orchestrator.database fails with "requires that the Python
+    # 'greenlet' library is installed" (CI and the image both broke this way).
+    "sqlalchemy[asyncio]>=2.0.0",
     "aiosqlite>=0.20.0",
     "alembic>=1.13",
     # YAML
