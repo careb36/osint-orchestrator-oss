@@ -11,6 +11,13 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- Release workflow: a `v*` tag creates the GitHub Release with that version's
+  `CHANGELOG.md` section as notes (and refuses a tag without one). The image
+  workflow scans every pull-request build with Trivy (CRITICAL and HIGH, fixed
+  vulnerabilities only) and attaches an SBOM to every pushed image. CI installs
+  the `llm` extra, lints `tests/integration/` too and runs mypy as an advisory
+  step. `docs/operations.md` has the backend release checklist.
+
 - Dashboard resilience and performance pass: the routed views sit inside an
   error boundary keyed by the route, whose fallback offers *Try again* and
   *Back to the overview* and which resets on navigation, so one crashed view
