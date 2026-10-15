@@ -47,6 +47,7 @@ advisory with any fix. Security fixes are released and back-referenced in
 | Untrusted content | Text collected from the internet reaches the LLM flattened and delimited as data; every value a model returns is validated before it is stored | `orchestrator/textsafe.py`, `orchestrator/synthesizer/` |
 | Metrics | Label values are bounded; never an observable value, run id or error string | [Operations → Observability](docs/operations.md#observability) |
 | Logs | JSON logs with request ids; no secret material is logged | `orchestrator/logging_config.py` |
+| Container | The orchestrator image runs as uid 1000, never root; images are pinned to a patch release or a commit; compose publishes every port on `127.0.0.1` only | `Dockerfile`, `docker-compose*.yml`, `tests/unit/test_compose_hardening.py` |
 | Retention | Nightly purge of runs/reports after `ORCHESTRATOR_RETENTION_DAYS` (default 90) | [Operations → Retention](docs/operations.md#retention) |
 | Main branch | Ruleset requiring green CI (lint, unit tests, Helm chart, public-release guard) and forbidding force pushes | repository settings |
 
@@ -66,8 +67,10 @@ Before any deployment beyond a laptop:
       can no longer be verified. An empty or default key logs a warning.
 - [ ] `ALERT_WEBHOOK_SECRET` set if webhooks are used (payloads are unsigned
       without it).
-- [ ] Host port 8000 firewalled or unpublished when the auth front door
-      (8002) is the intended entry point.
+- [ ] Every compose port stays on the loopback interface (the shipped files
+      bind `127.0.0.1` for the API, OpenCTI, SpiderFoot and the overlays);
+      only your TLS proxy, or the auth front door (8002) behind it, is
+      reachable from outside.
 - [ ] TLS terminated at a real proxy/ingress in production; the auth overlay
       defaults are development conveniences (`OAUTH2_PROXY_COOKIE_SECURE=false`,
       Keycloak in `start-dev` mode).
@@ -97,6 +100,6 @@ Before any deployment beyond a laptop:
 
 ## 5. Supported versions
 
-Only the current `main` branch (and tagged releases once published) receives
-security fixes. The project is pre-1.0; deployments pin the exact commit SHA
-they run.
+Only the current `main` branch and the latest `vX.Y.Z` tag receive security
+fixes, as a new tag. The project is pre-1.0; deployments pin the tag or the
+exact commit SHA they run.

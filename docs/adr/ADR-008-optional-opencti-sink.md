@@ -7,7 +7,7 @@
 
 ADR-003 established OpenCTI as the single source of truth and treated it as a
 non-optional dependency. In practice, some deployments have no OpenCTI at all: a
-lightweight or public demo install, or an operator who only wants reports,
+lightweight install, or an operator who only wants reports,
 findings, the delta and alerts. Collection, reporting and alerting must work
 there without an OpenCTI instance.
 

@@ -52,6 +52,18 @@ describe('App shell', () => {
     expect(screen.queryByRole('button', { name: /forget key/i })).not.toBeInTheDocument();
   });
 
+  it('shows a switched-off OpenCTI sink as disabled, not as a fault', async () => {
+    installFetchMock();
+    renderApp();
+
+    await screen.findByRole('heading', { name: /^overview$/i });
+    const card = (await screen.findByText('opencti')).closest('article');
+    expect(card).toHaveAttribute('data-status', 'disabled');
+    expect(card).toHaveClass('muted');
+    expect(card).not.toHaveClass('warning');
+    expect(within(card as HTMLElement).getByText(/^disabled$/i)).toBeInTheDocument();
+  });
+
   it('asks for the API key when the API answers 401', async () => {
     installFetchMock({ requireKey: 'test-key' });
     renderApp(['/targets']);

@@ -11,6 +11,25 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- `GET /runs` takes `limit` (1–500, default 100) and `offset` to page through
+  runs older than the most recent 100.
+- `GET /ready`: readiness probe that answers 503 while the database is
+  offline or the scheduler is not running, and 200 otherwise, with the same
+  body as `/health`. The compose healthcheck and the Helm readiness and
+  startup probes use it; `/health` stays a liveness check that always answers
+  200.
+- `ORCHESTRATOR_SECRET_KEY_PREVIOUS`: comma-separated keys retired by a
+  rotation. `chain/verify` accepts manifests signed with any of them while
+  new manifests are signed with `ORCHESTRATOR_SECRET_KEY` only, so rotating
+  the signing key no longer turns every earlier run into `signature_key`.
+  The rotation procedure is in `docs/operations.md`.
+- Release workflow: a `v*` tag creates the GitHub Release with that version's
+  `CHANGELOG.md` section as notes (and refuses a tag without one). The image
+  workflow scans every pull-request build with Trivy (fixable CRITICAL
+  findings block, HIGH ones are reported) and attaches an SBOM to every pushed
+  image. CI installs
+  the `llm` extra, lints `tests/integration/` too and runs mypy as an advisory
+  step. `docs/operations.md` has the backend release checklist.
 - Alert cases: every run that meets an alert rule opens a triage item
   (`alert_cases`, migration `0009`) before any channel is tried, so a
   deployment without a webhook or SMTP still has a queue to work and a
@@ -104,6 +123,26 @@ from [SECURITY.md](SECURITY.md).
 
 ### Changed
 
+- The orchestrator image runs as uid 1000 instead of root (`USER 1000` in
+  `Dockerfile`; the Helm chart already ran it that way). The `./daily_reports`
+  bind mount must be writable by that uid (`docs/deploy.md`).
+- Every compose port binds the loopback interface: OpenCTI (`8080`),
+  SpiderFoot (`5001`), SocialOSINT (`8001`), Keycloak (`8085`), oauth2-proxy
+  (`8002`) and MISP (`8443`) join the orchestrator on `127.0.0.1`. Reach them
+  through an SSH tunnel or your reverse proxy.
+- Image pins: `redis:8.0.6`, `rabbitmq:3.13.7-management`, `mariadb:10.11.19`
+  (patch releases instead of floating minor tags) and the SpiderFoot build
+  context pinned to commit `0f815a2`. A unit test rejects floating tags,
+  unpinned git contexts and non-loopback ports in every compose file.
+- Helm chart: `config.openctiEnabled`, the cloud model routes
+  (`config.llm.modelReasoning` / `modelFast`), `config.tavily.*`,
+  `config.retention.*` and `config.alertRetry.*` are chart values instead of
+  `extraEnv` entries, and an `extraEnv` entry with the same key still wins, so
+  an existing values file renders each key once and needs no migration;
+  `NEBIUS_API_KEY` and `TAVILY_API_KEY` have secret slots;
+  the release notes point at the dashboard; the README explains the published
+  image tags instead of saying none is published.
+
 - Documentation restructured ([ADR-009](docs/adr/ADR-009-documentation-language.md)):
   the README is a short overview in English and Spanish; reference material
   moved to `docs/architecture.md`, `docs/configuration.md` and
@@ -170,6 +209,36 @@ from [SECURITY.md](SECURITY.md).
 - Installs declare `sqlalchemy[asyncio]`: recent SQLAlchemy releases stopped
   pulling in `greenlet`, so a fresh `pip install` (CI, the Docker image) could
   not import the async engine and every test and container start failed.
+- STIX Note ids include the target: the id was derived from the collector
+  identity and the note text only, so two targets with the same note ("no
+  public results matched the query set") shared one Note that OpenCTI merged.
+- Autonomous-system observables without a parseable number are dropped instead
+  of becoming `AS0`: every unparseable value ("AS15169 Google LLC", "ASN")
+  collided on one STIX id. `AS`, `ASN` and bare numbers are accepted.
+- Tavily note segments cannot be forged by a page title or snippet: `|` is
+  replaced before the note is assembled, so a title spelling `| url=…` can no
+  longer attach another page's qualification labels to its Note.
+- SpiderFoot scans the run gives up on (timeout, cancellation, a polling
+  error) are stopped with `POST /stopscan`; they kept probing the target on
+  the SpiderFoot server, and every scheduled run added another.
+- SocialOSINT note text ("analysis, unverified", "platforms skipped") follows
+  the target's language through the i18n catalogue instead of being
+  hard-coded in Spanish (ADR-004).
+- OpenOSINT: an error while mapping the entity graph is reported as a failed
+  collector (`graph mapping: …`) instead of escaping `collect()`.
+- `GET /targets/{id}/chain/verify` answers 404 for a target that is not in
+  `targets.yaml`. The id is a label of `evidence_chain_verify_total`, so any
+  authenticated caller could add one time series to `/metrics` per request.
+- A deployment with `OPENCTI_ENABLED=false` no longer stays `unhealthy`: the
+  compose healthcheck required `/health` to report `ok`, and a disabled sink
+  reported `degraded`. The `opencti` check now reads `disabled`, which does
+  not lower the overall status (ADR-008), and the healthcheck polls `/ready`.
+- Documentation: five files still pointed at the removed `docs/socialosint.md`;
+  ADR-008 still cited the retired public demo; `ui/UX_CHECKLIST.md` was
+  unticked for delivered items; the "Built during the hackathon" tables stopped
+  at #30. `docs/architecture.md` gains an *Operator dashboard* section and
+  ADR-010 records the dashboard decisions. A unit test now fails on a
+  reference to a documentation file that does not exist.
 
 - Security: model and internet-derived text is made inert more thoroughly.
   HTML tags are stripped until none is left, so a tag re-formed by removing

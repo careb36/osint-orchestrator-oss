@@ -21,6 +21,7 @@ Defaults shown are the ones shipped in `.env.example` for Docker.
 | --- | --- | --- |
 | `ORCHESTRATOR_LANGUAGE` | `es` | Operator-facing language, `es` or `en`; a target can override it. |
 | `ORCHESTRATOR_SECRET_KEY` | `insecure-dev-key` | HMAC key that signs the per-run evidence manifests. Empty or the default logs a WARNING at startup. Generate with `openssl rand -hex 32`. |
+| `ORCHESTRATOR_SECRET_KEY_PREVIOUS` | (empty) | Comma-separated keys retired by a rotation. `chain/verify` accepts manifests signed with any of them; new manifests are signed with `ORCHESTRATOR_SECRET_KEY` only. See the rotation procedure in [operations](operations.md#evidence-chain). |
 | `ORCHESTRATOR_DATABASE_URL` | `sqlite+aiosqlite:////app/data/orchestrator.db` | Container path is the persistent volume; use `./orchestrator.db` bare-metal. |
 | `TARGETS_FILE` | `targets.yaml` | Re-read on every API and scheduler call. |
 | `ORCHESTRATOR_RETENTION_DAYS` | `90` | Days to keep runs and report directories; `0` disables the purge. |

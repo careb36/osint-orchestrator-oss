@@ -1,0 +1,46 @@
+name: Release
+
+# A v* tag is the release: the image workflow publishes :<version> and :latest
+# for it; this workflow creates the GitHub Release with that version's section
+# of CHANGELOG.md as its notes, so the tag, the image and the notes always
+# describe the same commit. Cutting a release:
+#   1. move the [Unreleased] entries under "## [X.Y.Z] - YYYY-MM-DD" and merge
+#   2. git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  github-release:
+    name: GitHub Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Release notes from CHANGELOG.md
+        run: |
+          python3 - "${GITHUB_REF_NAME#v}" > /tmp/notes.md <<'PY'
+          import re, sys
+          version = sys.argv[1]
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          match = re.search(
+              rf"^## \[{re.escape(version)}\][^\n]*\n(.*?)(?=^## \[|\Z)", text, re.S | re.M
+          )
+          if match is None:
+              sys.exit(f"CHANGELOG.md has no '## [{version}]' section; add it before tagging")
+          print(match.group(1).strip())
+          PY
+          test -s /tmp/notes.md
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file /tmp/notes.md \
+            --verify-tag
