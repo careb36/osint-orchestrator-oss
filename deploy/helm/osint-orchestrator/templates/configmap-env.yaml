@@ -4,41 +4,50 @@ metadata:
   name: {{ include "osint-orchestrator.fullname" . }}-env
   labels:
     {{- include "osint-orchestrator.labels" . | nindent 4 }}
+{{- /*
+The two paths are fixed: the database and the reports live on the persistent
+volume, targets.yaml comes from its ConfigMap. Every other entry comes from
+values. config.extraEnv is merged last and wins over a named entry with the
+same key, so a values file written when a variable could only be set through
+extraEnv keeps rendering that key exactly once; a duplicate ConfigMap key is
+rejected on install.
+*/}}
+{{- $env := dict
+  "ORCHESTRATOR_DATABASE_URL" "sqlite+aiosqlite:////app/data/orchestrator.db"
+  "TARGETS_FILE" "/app/targets.yaml"
+  "OPENCTI_ENABLED" .Values.config.openctiEnabled
+  "OPENCTI_URL" .Values.config.openctiUrl
+  "OPENCTI_SSL_VERIFY" .Values.config.openctiSslVerify
+  "SPIDERFOOT_URL" .Values.config.spiderfootUrl
+  "SPIDERFOOT_MODULES" .Values.config.spiderfootModules
+  "ORCHESTRATOR_LANGUAGE" .Values.config.language
+  "ORCHESTRATOR_LOG_FORMAT" .Values.config.logFormat
+  "ORCHESTRATOR_LOG_LEVEL" .Values.config.logLevel
+  "ORCHESTRATOR_METRICS_ENABLED" .Values.config.metricsEnabled
+  "LLM_PROVIDER" .Values.config.llm.provider
+  "LLM_MODEL" .Values.config.llm.model
+  "LLM_BASE_URL" .Values.config.llm.baseUrl
+  "LLM_MODEL_REASONING" .Values.config.llm.modelReasoning
+  "LLM_MODEL_FAST" .Values.config.llm.modelFast
+  "TAVILY_SEARCH_DEPTH" .Values.config.tavily.searchDepth
+  "TAVILY_MAX_RESULTS" .Values.config.tavily.maxResults
+  "TAVILY_MAX_CALLS_PER_RUN" .Values.config.tavily.maxCallsPerRun
+  "TAVILY_TIMEOUT_SECONDS" .Values.config.tavily.timeoutSeconds
+  "ORCHESTRATOR_RETENTION_DAYS" .Values.config.retention.days
+  "ORCHESTRATOR_RETENTION_CRON" .Values.config.retention.cron
+  "ALERT_RETRY_CRON" .Values.config.alertRetry.cron
+  "ALERT_RETRY_MAX_ATTEMPTS" .Values.config.alertRetry.maxAttempts
+  "ALERT_RETRY_BASE_DELAY_SECONDS" .Values.config.alertRetry.baseDelaySeconds
+  "ALERT_RETRY_JITTER_RATIO" .Values.config.alertRetry.jitterRatio
+  "ALERT_WEBHOOK_URL" .Values.config.alerts.webhookUrl
+  "ALERT_SMTP_HOST" .Values.config.alerts.smtpHost
+  "ALERT_SMTP_PORT" .Values.config.alerts.smtpPort
+  "ALERT_SMTP_FROM" .Values.config.alerts.smtpFrom
+  "ALERT_EMAIL_TO" .Values.config.alerts.emailTo
+  "ALERT_SMTP_STARTTLS" .Values.config.alerts.smtpStarttls
+}}
+{{- $env = mergeOverwrite $env (.Values.config.extraEnv | default dict) }}
 data:
-  # Paths inside the container. The database and the reports live on the
-  # persistent volume, targets.yaml comes from its ConfigMap.
-  ORCHESTRATOR_DATABASE_URL: "sqlite+aiosqlite:////app/data/orchestrator.db"
-  TARGETS_FILE: "/app/targets.yaml"
-  OPENCTI_ENABLED: {{ .Values.config.openctiEnabled | toString | quote }}
-  OPENCTI_URL: {{ .Values.config.openctiUrl | quote }}
-  OPENCTI_SSL_VERIFY: {{ .Values.config.openctiSslVerify | toString | quote }}
-  SPIDERFOOT_URL: {{ .Values.config.spiderfootUrl | quote }}
-  SPIDERFOOT_MODULES: {{ .Values.config.spiderfootModules | quote }}
-  ORCHESTRATOR_LANGUAGE: {{ .Values.config.language | quote }}
-  ORCHESTRATOR_LOG_FORMAT: {{ .Values.config.logFormat | quote }}
-  ORCHESTRATOR_LOG_LEVEL: {{ .Values.config.logLevel | quote }}
-  ORCHESTRATOR_METRICS_ENABLED: {{ .Values.config.metricsEnabled | toString | quote }}
-  LLM_PROVIDER: {{ .Values.config.llm.provider | quote }}
-  LLM_MODEL: {{ .Values.config.llm.model | quote }}
-  LLM_BASE_URL: {{ .Values.config.llm.baseUrl | quote }}
-  LLM_MODEL_REASONING: {{ .Values.config.llm.modelReasoning | quote }}
-  LLM_MODEL_FAST: {{ .Values.config.llm.modelFast | quote }}
-  TAVILY_SEARCH_DEPTH: {{ .Values.config.tavily.searchDepth | quote }}
-  TAVILY_MAX_RESULTS: {{ .Values.config.tavily.maxResults | toString | quote }}
-  TAVILY_MAX_CALLS_PER_RUN: {{ .Values.config.tavily.maxCallsPerRun | toString | quote }}
-  TAVILY_TIMEOUT_SECONDS: {{ .Values.config.tavily.timeoutSeconds | toString | quote }}
-  ORCHESTRATOR_RETENTION_DAYS: {{ .Values.config.retention.days | toString | quote }}
-  ORCHESTRATOR_RETENTION_CRON: {{ .Values.config.retention.cron | quote }}
-  ALERT_RETRY_CRON: {{ .Values.config.alertRetry.cron | quote }}
-  ALERT_RETRY_MAX_ATTEMPTS: {{ .Values.config.alertRetry.maxAttempts | toString | quote }}
-  ALERT_RETRY_BASE_DELAY_SECONDS: {{ .Values.config.alertRetry.baseDelaySeconds | toString | quote }}
-  ALERT_RETRY_JITTER_RATIO: {{ .Values.config.alertRetry.jitterRatio | toString | quote }}
-  ALERT_WEBHOOK_URL: {{ .Values.config.alerts.webhookUrl | quote }}
-  ALERT_SMTP_HOST: {{ .Values.config.alerts.smtpHost | quote }}
-  ALERT_SMTP_PORT: {{ .Values.config.alerts.smtpPort | toString | quote }}
-  ALERT_SMTP_FROM: {{ .Values.config.alerts.smtpFrom | quote }}
-  ALERT_EMAIL_TO: {{ .Values.config.alerts.emailTo | quote }}
-  ALERT_SMTP_STARTTLS: {{ .Values.config.alerts.smtpStarttls | toString | quote }}
-  {{- range $key, $value := .Values.config.extraEnv }}
+  {{- range $key, $value := $env }}
   {{ $key }}: {{ $value | toString | quote }}
   {{- end }}

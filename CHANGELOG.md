@@ -121,7 +121,9 @@ from [SECURITY.md](SECURITY.md).
 - Helm chart: `config.openctiEnabled`, the cloud model routes
   (`config.llm.modelReasoning` / `modelFast`), `config.tavily.*`,
   `config.retention.*` and `config.alertRetry.*` are chart values instead of
-  `extraEnv` entries; `NEBIUS_API_KEY` and `TAVILY_API_KEY` have secret slots;
+  `extraEnv` entries, and an `extraEnv` entry with the same key still wins, so
+  an existing values file renders each key once and needs no migration;
+  `NEBIUS_API_KEY` and `TAVILY_API_KEY` have secret slots;
   the release notes point at the dashboard; the README explains the published
   image tags instead of saying none is published.
 

@@ -98,6 +98,7 @@ actually change:
 | `config.spiderfootUrl` | `http://spiderfoot:5001` | In-cluster SpiderFoot URL |
 | `config.language` | `es` | Operator-facing language (ADR-004) |
 | `config.logFormat` | `json` | `json` or `text` |
+| `config.extraEnv` | `{}` | Any further variable, verbatim; an entry here overrides a named `config.*` value with the same key, so values files written before a key had its own value keep working |
 | `targets.targets` / `targets.existingConfigMap` | `[]` / `""` | The `targets.yaml` content |
 | `persistence.size` | `5Gi` | Database + daily reports volume |
 | `ingress.enabled` | `false` | Expose the API (put the API key in front of it, always) |
