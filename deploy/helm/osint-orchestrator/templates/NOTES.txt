@@ -29,6 +29,9 @@ Or from your workstation:
   curl -H "X-API-Key: $ORCHESTRATOR_API_KEY" http://localhost:8000/targets
   curl http://localhost:8000/metrics
 
+The operator dashboard is served by the same pod; with the port-forward above
+open http://localhost:8000/console in a browser (it asks for the API key).
+
 Logs (JSON lines by default):
 
   kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "osint-orchestrator.fullname" . }} -f

@@ -94,6 +94,13 @@ from [SECURITY.md](SECURITY.md).
 
 ### Changed
 
+- Helm chart: `config.openctiEnabled`, the cloud model routes
+  (`config.llm.modelReasoning` / `modelFast`), `config.tavily.*`,
+  `config.retention.*` and `config.alertRetry.*` are chart values instead of
+  `extraEnv` entries; `NEBIUS_API_KEY` and `TAVILY_API_KEY` have secret slots;
+  the release notes point at the dashboard; the README explains the published
+  image tags instead of saying none is published.
+
 - Documentation restructured ([ADR-009](docs/adr/ADR-009-documentation-language.md)):
   the README is a short overview in English and Spanish; reference material
   moved to `docs/architecture.md`, `docs/configuration.md` and
