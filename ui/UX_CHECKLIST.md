@@ -1,7 +1,7 @@
 # UX acceptance checklist
 
 Every item below was delivered by the dashboard pull requests (#67–#77); the
-phased record is in [docs/dod.md](docs/dod.md).
+phased record is in [ui/docs/dod.md](docs/dod.md).
 
 ## Baseline requirements
 

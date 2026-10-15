@@ -30,9 +30,12 @@ accident.
   request) and sent as `X-API-Key`. No users, sessions or roles exist in the
   backend, so none exist in the UI. The optional OIDC front door (ADR-006)
   stays in front of the whole API.
-- **Hardening:** the shell is served with `script-src 'self'; style-src 'self'`
-  and no inline script; CI rejects a build that violates it. Assets are
-  immutable-cached; client routes that look like files answer 404.
+- **Hardening:** the shell is served with `default-src 'none'; script-src
+  'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src
+  'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'` (the
+  constants in `orchestrator/api.py`) and no inline script; CI rejects a build
+  that violates it. Assets are immutable-cached; client routes that look like
+  files answer 404.
 - **Language follows ADR-004:** Spanish by default, English switch, one
   catalogue with parity enforced by a unit test; persisted identifiers (run
   status, risk level) are shown through `value.*` labels and never changed.

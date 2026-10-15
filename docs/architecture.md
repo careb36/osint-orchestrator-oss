@@ -79,9 +79,12 @@ stays the source of truth for runs, findings and evidence (ADR-003).
 Access follows ADR-005: the shell is public, every data route needs the static
 API key, which the browser keeps in `sessionStorage` (or `localStorage` when
 the operator asks to be remembered) and sends as `X-API-Key`. There are no
-users or roles. The shell is served with a `Content-Security-Policy` of
-`script-src 'self'; style-src 'self'` and no inline script, which CI checks on
-the built `index.html`. Text follows ADR-004: Spanish by default with an
+users or roles. The shell is served with a `Content-Security-Policy` that
+allows nothing by default and only same-origin scripts, styles, connections,
+images and fonts (`default-src 'none'; script-src 'self'; style-src 'self';
+connect-src 'self'; img-src 'self' data:; font-src 'self'; base-uri 'none';
+form-action 'none'; frame-ancestors 'none'`, see `orchestrator/api.py`) and no
+inline script, which CI checks on the built `index.html`. Text follows ADR-004: Spanish by default with an
 English switch, one catalogue with parity enforced by a test. The scope, KPIs
 and phased definition of done are in `ui/docs/`; the decision is ADR-010.
 

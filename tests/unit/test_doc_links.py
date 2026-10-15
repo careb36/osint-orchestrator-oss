@@ -13,7 +13,10 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _TEXT_SUFFIXES = {".md", ".py", ".toml", ".yml", ".yaml", ".txt", ".example", ""}
-_DOC_PATH = re.compile(r"(?<![\w/.-])docs/(?:adr/)?[A-Za-z0-9._-]+\.md")
+# A page path, optionally written relative to the citing file with a leading
+# dot segment or two. The lookbehind keeps a page under the dashboard's own
+# documentation directory from matching as a page under the root one.
+_DOC_PATH = re.compile(r"(?<![\w/.-])(?:\.\./|\./)*docs/(?:adr/)?[A-Za-z0-9._-]+\.md")
 
 
 def _tracked_text_files() -> list[Path]:
@@ -38,7 +41,11 @@ def test_every_referenced_docs_file_exists() -> None:
             continue
         for match in set(_DOC_PATH.findall(text)):
             # A Markdown link is relative to its file; prose and code name
-            # the path from the repository root.
-            if not ((path.parent / match).exists() or (REPO_ROOT / match).exists()):
+            # the path from the repository root. A path that starts with a dot
+            # segment is only ever relative to its file.
+            candidates = [path.parent / match]
+            if not match.startswith("."):
+                candidates.append(REPO_ROOT / match)
+            if not any(candidate.exists() for candidate in candidates):
                 missing.setdefault(match, []).append(str(path.relative_to(REPO_ROOT)))
     assert missing == {}, f"references to documentation files that do not exist: {missing}"
