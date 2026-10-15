@@ -157,6 +157,10 @@ from [SECURITY.md](SECURITY.md).
 
 ### Fixed
 
+- Installs declare `sqlalchemy[asyncio]`: recent SQLAlchemy releases stopped
+  pulling in `greenlet`, so a fresh `pip install` (CI, the Docker image) could
+  not import the async engine and every test and container start failed.
+
 - Documentation: five files still pointed at the removed `docs/socialosint.md`;
   ADR-008 still cited the retired public demo; `ui/UX_CHECKLIST.md` was
   unticked for delivered items; the "Built during the hackathon" tables stopped
