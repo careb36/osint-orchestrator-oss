@@ -85,6 +85,11 @@ def _is_retryable_status(status_code: int) -> bool:
     return status_code == 429 or status_code >= 500
 
 
+def _no_pipes(text: str) -> str:
+    """Replace ``|`` so internet-derived text cannot forge a note segment."""
+    return text.replace("|", "/")
+
+
 class TavilyCollector(BaseCollector):
     """Web-search collector built around the Tavily API. Disabled by default."""
 
@@ -337,10 +342,19 @@ class TavilyCollector(BaseCollector):
         url = cls._safe_url(item.get("url"))
         if url is None:
             return None
-        title = flatten_untrusted(str(item.get("title") or "")) or "result"
-        snippet = flatten_untrusted(str(item.get("content") or item.get("snippet") or ""))
+        # " | " separates the segments and the normaliser finds the url segment
+        # by it, so a page title or snippet must not be able to spell one.
+        title = _no_pipes(flatten_untrusted(str(item.get("title") or ""))) or "result"
+        snippet = _no_pipes(
+            flatten_untrusted(str(item.get("content") or item.get("snippet") or ""))
+        )
         published = item.get("published_date") or item.get("publishedAt") or "unknown"
-        bits = ["tavily", title, f"url={url}", f"published={flatten_untrusted(str(published))}"]
+        bits = [
+            "tavily",
+            title,
+            f"url={url}",
+            f"published={_no_pipes(flatten_untrusted(str(published)))}",
+        ]
         if snippet:
             bits.append(f"snippet={snippet[:200]}")
         return " | ".join(bits)

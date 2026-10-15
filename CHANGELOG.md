@@ -11,6 +11,8 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- `GET /runs` takes `limit` (1–500, default 100) and `offset` to page through
+  runs older than the most recent 100.
 - `GET /ready`: readiness probe that answers 503 while the database is
   offline or the scheduler is not running, and 200 otherwise, with the same
   body as `/health`. The compose healthcheck and the Helm readiness and
@@ -166,7 +168,26 @@ from [SECURITY.md](SECURITY.md).
 - Installs declare `sqlalchemy[asyncio]`: recent SQLAlchemy releases stopped
   pulling in `greenlet`, so a fresh `pip install` (CI, the Docker image) could
   not import the async engine and every test and container start failed.
-
+- STIX Note ids include the target: the id was derived from the collector
+  identity and the note text only, so two targets with the same note ("no
+  public results matched the query set") shared one Note that OpenCTI merged.
+- Autonomous-system observables without a parseable number are dropped instead
+  of becoming `AS0`: every unparseable value ("AS15169 Google LLC", "ASN")
+  collided on one STIX id. `AS`, `ASN` and bare numbers are accepted.
+- Tavily note segments cannot be forged by a page title or snippet: `|` is
+  replaced before the note is assembled, so a title spelling `| url=…` can no
+  longer attach another page's qualification labels to its Note.
+- SpiderFoot scans the run gives up on (timeout, cancellation, a polling
+  error) are stopped with `POST /stopscan`; they kept probing the target on
+  the SpiderFoot server, and every scheduled run added another.
+- SocialOSINT note text ("analysis, unverified", "platforms skipped") follows
+  the target's language through the i18n catalogue instead of being
+  hard-coded in Spanish (ADR-004).
+- OpenOSINT: an error while mapping the entity graph is reported as a failed
+  collector (`graph mapping: …`) instead of escaping `collect()`.
+- `GET /targets/{id}/chain/verify` answers 404 for a target that is not in
+  `targets.yaml`. The id is a label of `evidence_chain_verify_total`, so any
+  authenticated caller could add one time series to `/metrics` per request.
 - A deployment with `OPENCTI_ENABLED=false` no longer stays `unhealthy`: the
   compose healthcheck required `/health` to report `ok`, and a disabled sink
   reported `degraded`. The `opencti` check now reads `disabled`, which does

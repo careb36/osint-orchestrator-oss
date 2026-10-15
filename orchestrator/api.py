@@ -813,15 +813,27 @@ async def _risk_levels_by_run(session: Any, run_ids: list[int]) -> dict[int, str
 
 
 @router.get("/runs", response_model=list[dict[str, Any]], tags=["runs"])
-async def list_runs(target_id: str | None = None) -> list[dict[str, Any]]:
-    """List recent runs, optionally filtered by target.
+async def list_runs(
+    target_id: str | None = None,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+) -> list[dict[str, Any]]:
+    """List recent runs, newest first, optionally filtered by target.
+
+    ``limit`` and ``offset`` page through older runs; the default page is the
+    100 most recent, which is what the dashboard reads.
 
     Each row carries ``risk_level``: the synthesised level of the run's
     finding, or ``null`` for a run without one (failed early, synthesis off or
     still running), so the history can show how the risk moved run by run.
     """
     async with get_session() as session:
-        stmt = select(Run).order_by(Run.started_at.desc()).limit(100)  # type: ignore[arg-type]
+        stmt = (
+            select(Run)
+            .order_by(Run.started_at.desc(), Run.id.desc())  # type: ignore[arg-type, union-attr]
+            .offset(offset)
+            .limit(limit)
+        )
         if target_id:
             stmt = stmt.where(Run.target_id == target_id)
         result = await session.exec(stmt)
@@ -995,6 +1007,11 @@ async def get_run_bundle(run_id: int) -> Response:
 @router.get("/targets/{target_id}/chain/verify", response_model=dict[str, Any], tags=["runs"])
 async def verify_target_chain_endpoint(target_id: str) -> dict[str, Any]:
     """Check the manifest chain for every sealed run of a target."""
+    # Only a configured target reaches the verifier and the metric: the id is
+    # a Prometheus label, and an unbounded one would let any caller create a
+    # new time series per request.
+    if not any(target.id == target_id for target in _load_targets()):
+        raise HTTPException(status_code=404, detail=t("target_not_found", target_id=target_id))
     try:
         async with get_session() as session:
             result = await verify_target_chain(
