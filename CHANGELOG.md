@@ -157,6 +157,15 @@ from [SECURITY.md](SECURITY.md).
 
 ### Fixed
 
+- STIX Note ids include the target: the id was derived from the collector
+  identity and the note text only, so two targets with the same note ("no
+  public results matched the query set") shared one Note that OpenCTI merged.
+- Autonomous-system observables without a parseable number are dropped instead
+  of becoming `AS0`: every unparseable value ("AS15169 Google LLC", "ASN")
+  collided on one STIX id. `AS`, `ASN` and bare numbers are accepted.
+- Tavily note segments cannot be forged by a page title or snippet: `|` is
+  replaced before the note is assembled, so a title spelling `| url=…` can no
+  longer attach another page's qualification labels to its Note.
 - Security: model and internet-derived text is made inert more thoroughly.
   HTML tags are stripped until none is left, so a tag re-formed by removing
   an inner one (`<scr<b>ipt>`) or hidden behind a `<` in an attribute goes
