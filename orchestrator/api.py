@@ -43,7 +43,12 @@ from orchestrator import metrics
 from orchestrator.auth import log_auth_status, log_secret_key_status, require_api_key
 from orchestrator.config import NEBIUS_DEFAULT_BASE_URL, settings
 from orchestrator.database import create_db_and_tables, get_session
-from orchestrator.evidence import load_manifest_file, manifest_path_for_report, verify_target_chain
+from orchestrator.evidence import (
+    load_manifest_file,
+    manifest_path_for_report,
+    split_keys,
+    verify_target_chain,
+)
 from orchestrator.i18n import resolve_language, t
 from orchestrator.logging_config import configure_logging, request_id_var
 from orchestrator.models import AlertRecord, EvidenceQualification, FindingRecord, Run, Target
@@ -976,6 +981,7 @@ async def verify_target_chain_endpoint(target_id: str) -> dict[str, Any]:
                 target_id=target_id,
                 secret_key=settings.orchestrator_secret_key,
                 session=session,
+                previous_keys=split_keys(settings.orchestrator_secret_key_previous),
             )
         outcome = "ok" if result["ok"] else "broken"
         metrics.evidence_chain_verify_total.labels(target_id, outcome).inc()

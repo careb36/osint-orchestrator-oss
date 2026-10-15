@@ -155,8 +155,14 @@ Offline check of a manifest signature (each file is checked with `sha256sum`):
 python3 -c 'import hashlib,hmac,json,sys; m=json.load(open(sys.argv[1])); s=m.pop("signature"); body=json.dumps(m,ensure_ascii=False,separators=(",",":"),sort_keys=True).encode(); print(hmac.compare_digest(s,"hmac-sha256:"+hmac.new(sys.argv[2].encode(),body,hashlib.sha256).hexdigest()))' manifest.json "$ORCHESTRATOR_SECRET_KEY"
 ```
 
-Rotating the key never re-signs old manifests; runs signed before the rotation
-report `signature_key` and are verified with the retired key.
+**Rotating the signing key.** Old manifests are never re-signed. Move the
+current key to `ORCHESTRATOR_SECRET_KEY_PREVIOUS` (comma-separated when more
+than one key has been retired), put the new key in `ORCHESTRATOR_SECRET_KEY`
+and restart: new runs are signed with the new key and `chain/verify` still
+accepts the manifests signed with a retired one. A manifest that matches none
+of the configured keys reports `signature_key`. Keep every retired key for as
+long as the runs it signed are within your retention period; the offline check
+above takes whichever key signed that manifest.
 
 ## Alerts
 

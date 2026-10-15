@@ -11,6 +11,12 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- `ORCHESTRATOR_SECRET_KEY_PREVIOUS`: comma-separated keys retired by a
+  rotation. `chain/verify` accepts manifests signed with any of them while
+  new manifests are signed with `ORCHESTRATOR_SECRET_KEY` only, so rotating
+  the signing key no longer turns every earlier run into `signature_key`.
+  The rotation procedure is in `docs/operations.md`.
+
 - Dashboard resilience and performance pass: the routed views sit inside an
   error boundary keyed by the route, whose fallback offers *Try again* and
   *Back to the overview* and which resets on navigation, so one crashed view
