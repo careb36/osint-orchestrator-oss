@@ -57,8 +57,12 @@ RUN mkdir -p /app/daily_reports /app/data /app/amass/data \
     && useradd --uid 1000 --gid 1000 --no-create-home --shell /usr/sbin/nologin app \
     && chown -R 1000:1000 /app/daily_reports /app/data /app/amass/data
 
+# The application default is ./orchestrator.db, which under /app is owned by
+# root and unwritable for uid 1000: the image points the database at the data
+# directory it owns. Compose and the Helm chart set the same value explicitly.
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    ORCHESTRATOR_DATABASE_URL=sqlite+aiosqlite:////app/data/orchestrator.db
 
 EXPOSE 8000
 

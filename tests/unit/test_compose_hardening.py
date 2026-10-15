@@ -64,3 +64,12 @@ def test_image_runs_as_uid_1000() -> None:
     assert lines.index("USER 1000") < lines.index(
         next(line for line in lines if line.startswith("CMD "))
     )
+
+
+def test_image_keeps_the_database_in_the_directory_uid_1000_owns() -> None:
+    """The application default (./orchestrator.db under /app) is root-owned and
+    unwritable for uid 1000: the smoke test failed with "unable to open
+    database file" until the image pointed the database at /app/data."""
+    text = DOCKERFILE.read_text(encoding="utf-8")
+    assert "ORCHESTRATOR_DATABASE_URL=sqlite+aiosqlite:////app/data/orchestrator.db" in text
+    assert "chown -R 1000:1000 /app/daily_reports /app/data" in text
