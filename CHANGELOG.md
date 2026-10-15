@@ -118,6 +118,14 @@ from [SECURITY.md](SECURITY.md).
   (patch releases instead of floating minor tags) and the SpiderFoot build
   context pinned to commit `0f815a2`. A unit test rejects floating tags,
   unpinned git contexts and non-loopback ports in every compose file.
+- Helm chart: `config.openctiEnabled`, the cloud model routes
+  (`config.llm.modelReasoning` / `modelFast`), `config.tavily.*`,
+  `config.retention.*` and `config.alertRetry.*` are chart values instead of
+  `extraEnv` entries, and an `extraEnv` entry with the same key still wins, so
+  an existing values file renders each key once and needs no migration;
+  `NEBIUS_API_KEY` and `TAVILY_API_KEY` have secret slots;
+  the release notes point at the dashboard; the README explains the published
+  image tags instead of saying none is published.
 
 - Documentation restructured ([ADR-009](docs/adr/ADR-009-documentation-language.md)):
   the README is a short overview in English and Spanish; reference material

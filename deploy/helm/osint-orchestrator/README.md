@@ -21,7 +21,10 @@ revisited.
 ## Install
 
 ```bash
-# 1. Build and push the image (none is published yet)
+# 1. The image. Releases are published to GHCR by the repository's workflow:
+#    ghcr.io/careb36/osint-orchestrator-oss:<version> for every v* tag (the
+#    chart's appVersion is the default tag) and :main for the main branch.
+#    To run your own build instead, push it and set image.repository/tag:
 docker build -t registry.example.com/osint-orchestrator:0.1.0 .
 docker push registry.example.com/osint-orchestrator:0.1.0
 
@@ -83,12 +86,19 @@ actually change:
 
 | Key | Default | Meaning |
 |---|---|---|
-| `image.repository` / `image.tag` | `ghcr.io/careb36/osint-orchestrator-oss` / appVersion | Where you pushed the image |
-| `secrets.existingSecret` | `""` | Secret carrying `OPENCTI_ADMIN_TOKEN`, `ORCHESTRATOR_API_KEY`, ... |
+| `image.repository` / `image.tag` | `ghcr.io/careb36/osint-orchestrator-oss` / appVersion | The published image, or where you pushed your own |
+| `secrets.existingSecret` | `""` | Secret carrying `OPENCTI_ADMIN_TOKEN`, `ORCHESTRATOR_API_KEY`, `NEBIUS_API_KEY`, `TAVILY_API_KEY`, ... |
+| `config.openctiEnabled` | `true` | `false` runs without the knowledge graph (ADR-008) |
 | `config.openctiUrl` | `http://opencti:8080` | In-cluster OpenCTI URL |
+| `config.llm.provider` | `ollama` | `ollama`, `anthropic`, `openai`, `nebius` or `none`; cloud providers take their key from `secrets.values` |
+| `config.llm.modelReasoning` / `modelFast` | `""` | The two model routes of the cloud providers (required for `nebius`) |
+| `config.tavily.*` | `basic` / 5 / 3 / 120 | Search depth, results per query, calls per run, timeout |
+| `config.retention.days` / `cron` | 90 / `30 3 * * *` | Nightly purge of old runs and reports (0 disables) |
+| `config.alertRetry.*` | `*/5 * * * *` / 4 / 30 / 0.25 | Alert delivery retry schedule, attempts, base delay, jitter |
 | `config.spiderfootUrl` | `http://spiderfoot:5001` | In-cluster SpiderFoot URL |
 | `config.language` | `es` | Operator-facing language (ADR-004) |
 | `config.logFormat` | `json` | `json` or `text` |
+| `config.extraEnv` | `{}` | Any further variable, verbatim; an entry here overrides a named `config.*` value with the same key, so values files written before a key had its own value keep working |
 | `targets.targets` / `targets.existingConfigMap` | `[]` / `""` | The `targets.yaml` content |
 | `persistence.size` | `5Gi` | Database + daily reports volume |
 | `ingress.enabled` | `false` | Expose the API (put the API key in front of it, always) |
