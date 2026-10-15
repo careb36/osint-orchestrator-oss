@@ -163,6 +163,10 @@ from [SECURITY.md](SECURITY.md).
 
 ### Fixed
 
+- Installs declare `sqlalchemy[asyncio]`: recent SQLAlchemy releases stopped
+  pulling in `greenlet`, so a fresh `pip install` (CI, the Docker image) could
+  not import the async engine and every test and container start failed.
+
 - A deployment with `OPENCTI_ENABLED=false` no longer stays `unhealthy`: the
   compose healthcheck required `/health` to report `ok`, and a disabled sink
   reported `degraded`. The `opencti` check now reads `disabled`, which does
