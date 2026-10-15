@@ -169,6 +169,10 @@ from [SECURITY.md](SECURITY.md).
 
 ### Fixed
 
+- Installs declare `sqlalchemy[asyncio]`: recent SQLAlchemy releases stopped
+  pulling in `greenlet`, so a fresh `pip install` (CI, the Docker image) could
+  not import the async engine and every test and container start failed.
+
 - Security: model and internet-derived text is made inert more thoroughly.
   HTML tags are stripped until none is left, so a tag re-formed by removing
   an inner one (`<scr<b>ipt>`) or hidden behind a `<` in an attribute goes
