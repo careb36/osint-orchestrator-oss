@@ -256,7 +256,9 @@ services:
       # the base-stack quick-start.
       - "127.0.0.1:${ORCHESTRATOR_PORT:-8000}:8000"
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import json, sys, urllib.request; payload = json.loads(urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).read().decode()); sys.exit(0 if payload.get('status') == 'ok' else 1)\""]
+      # /ready answers 503 while a component is offline or the scheduler is
+      # not running; urlopen raises on a non-2xx status, which fails the check.
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=5)\""]
       interval: 15s
       timeout: 5s
       retries: 5

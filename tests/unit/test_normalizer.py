@@ -139,6 +139,21 @@ def test_notes_become_stix_notes():
     assert "test note" in notes[0]["content"]
 
 
+def test_same_note_text_gets_a_different_id_per_target():
+    """The identity is per collector, so without the target in the id two
+    targets' "no results" notes would merge into one object in OpenCTI."""
+    note = "tavily: no public results matched the query set"
+    ids = {
+        next(
+            o["id"]
+            for o in normalize(_make_result(target_fqdn=fqdn, notes=[note])).get("objects", [])
+            if o.get("type") == "note"
+        )
+        for fqdn in ("a.example", "b.example")
+    }
+    assert len(ids) == 2
+
+
 def test_empty_notes_skipped():
     result = _make_result(observables=[], notes=["", "   ", ""])
     bundle = normalize(result)
@@ -216,12 +231,20 @@ def test_autonomous_system_numeric():
     assert ases[0]["number"] == 64496
 
 
-def test_autonomous_system_non_numeric_fallback():
-    result = _make_result(observables=[Observable(type="autonomous-system", value="not-a-number")])
+@pytest.mark.parametrize("value", ["as64496", "ASN 64496", "64496", " AS64496 "])
+def test_autonomous_system_accepts_the_usual_spellings(value: str):
+    result = _make_result(observables=[Observable(type="autonomous-system", value=value)])
     bundle = normalize(result)
     ases = [o for o in bundle.get("objects", []) if o.get("type") == "autonomous-system"]
-    assert len(ases) == 1
-    assert ases[0]["number"] == 0
+    assert [o["number"] for o in ases] == [64496]
+
+
+@pytest.mark.parametrize("value", ["not-a-number", "AS-foo", "ASN", "AS15169 Google LLC"])
+def test_autonomous_system_without_a_number_is_dropped_not_as0(value: str):
+    """Every unparseable value used to become AS0, so unrelated ASNs shared one id."""
+    result = _make_result(observables=[Observable(type="autonomous-system", value=value)])
+    bundle = normalize(result)
+    assert [o for o in bundle.get("objects", []) if o.get("type") == "autonomous-system"] == []
 
 
 # ── Tests: empty result ───────────────────────────────────────────────────────
