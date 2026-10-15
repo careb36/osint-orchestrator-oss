@@ -157,6 +157,10 @@ from [SECURITY.md](SECURITY.md).
 
 ### Fixed
 
+- Installs declare `sqlalchemy[asyncio]`: recent SQLAlchemy releases stopped
+  pulling in `greenlet`, so a fresh `pip install` (CI, the Docker image) could
+  not import the async engine and every test and container start failed.
+
 - STIX Note ids include the target: the id was derived from the collector
   identity and the note text only, so two targets with the same note ("no
   public results matched the query set") shared one Note that OpenCTI merged.
