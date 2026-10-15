@@ -77,7 +77,7 @@ llm = [
 ]
 # socialosint: the OWASP SocialOSINT Agent is NOT pip-installable (no pyproject.toml
 # in the upstream repo). The integration uses the Docker service (see Dockerfile.socialosint
-# and docs/socialosint.md). No extra Python dependencies are needed in the orchestrator
+# and docs/operations.md). No extra Python dependencies are needed in the orchestrator
 # because the collector communicates with the service via httpx (already a core dep).
 socialosint = []
 

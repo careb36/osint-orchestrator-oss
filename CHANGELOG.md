@@ -209,6 +209,13 @@ from [SECURITY.md](SECURITY.md).
   compose healthcheck required `/health` to report `ok`, and a disabled sink
   reported `degraded`. The `opencti` check now reads `disabled`, which does
   not lower the overall status (ADR-008), and the healthcheck polls `/ready`.
+- Documentation: five files still pointed at the removed `docs/socialosint.md`;
+  ADR-008 still cited the retired public demo; `ui/UX_CHECKLIST.md` was
+  unticked for delivered items; the "Built during the hackathon" tables stopped
+  at #30. `docs/architecture.md` gains an *Operator dashboard* section and
+  ADR-010 records the dashboard decisions. A unit test now fails on a
+  reference to a documentation file that does not exist.
+
 - Security: model and internet-derived text is made inert more thoroughly.
   HTML tags are stripped until none is left, so a tag re-formed by removing
   an inner one (`<scr<b>ipt>`) or hidden behind a `<` in an attribute goes

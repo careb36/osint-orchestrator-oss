@@ -6,7 +6,7 @@ Talks to a running OWASP SocialOSINT web service
 The web service performs LLM-powered OSINT on configured social accounts and
 returns a markdown analysis report.
 
-Integration decision (see docs/socialosint.md):
+Integration decision (see docs/operations.md, Optional services):
   The agent ships both a CLI (--stdin) and a FastAPI web server (/api/v1/).
   We use the HTTP interface because it:
     - Decouples credentials from the orchestrator container (platform tokens
