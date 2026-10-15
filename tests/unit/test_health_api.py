@@ -5,9 +5,11 @@ fault (ADR-008)."""
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import StaticPool
@@ -103,3 +105,12 @@ def test_database_failure_is_offline_and_not_ready(
     assert health.json()["status"] == "offline"
     assert ready.status_code == 503
     assert ready.json()["status"] == "offline"
+
+
+def test_compose_healthcheck_polls_the_readiness_route() -> None:
+    """/health always answers 200, so a healthcheck on it could never fail."""
+    compose = Path(__file__).resolve().parents[2] / "docker-compose.yml"
+    services = yaml.safe_load(compose.read_text(encoding="utf-8"))["services"]
+    test = " ".join(services["orchestrator"]["healthcheck"]["test"])
+    assert "/ready" in test
+    assert "/health" not in test
