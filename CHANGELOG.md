@@ -160,7 +160,15 @@ from [SECURITY.md](SECURITY.md).
 - Installs declare `sqlalchemy[asyncio]`: recent SQLAlchemy releases stopped
   pulling in `greenlet`, so a fresh `pip install` (CI, the Docker image) could
   not import the async engine and every test and container start failed.
-
+- STIX Note ids include the target: the id was derived from the collector
+  identity and the note text only, so two targets with the same note ("no
+  public results matched the query set") shared one Note that OpenCTI merged.
+- Autonomous-system observables without a parseable number are dropped instead
+  of becoming `AS0`: every unparseable value ("AS15169 Google LLC", "ASN")
+  collided on one STIX id. `AS`, `ASN` and bare numbers are accepted.
+- Tavily note segments cannot be forged by a page title or snippet: `|` is
+  replaced before the note is assembled, so a title spelling `| url=…` can no
+  longer attach another page's qualification labels to its Note.
 - SpiderFoot scans the run gives up on (timeout, cancellation, a polling
   error) are stopped with `POST /stopscan`; they kept probing the target on
   the SpiderFoot server, and every scheduled run added another.

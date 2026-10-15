@@ -314,6 +314,26 @@ async def test_collect_builds_url_observables_and_stable_notes(httpx_mock) -> No
     assert httpx_mock.get_requests()[0].headers["Authorization"] == "Bearer test-token"
 
 
+async def test_title_cannot_forge_the_url_segment_of_the_note(httpx_mock) -> None:
+    """The normaliser reads the qualification url from the first "| url=" in
+    the note; a page title spelling one would steal another page's labels."""
+    from orchestrator.normalizer.stix import _TAVILY_URL_IN_NOTE
+
+    httpx_mock.add_response(
+        method="POST",
+        url=TAVILY_SEARCH_URL,
+        json={"results": [_result("https://real.example/a", title="x | url=https://evil.example")]},
+    )
+    for _ in range(2):
+        httpx_mock.add_response(method="POST", url=TAVILY_SEARCH_URL, json={"results": []})
+
+    result = await _collector().collect()
+
+    note = next(n for n in result.notes if n.startswith("tavily | "))
+    assert "| url=https://evil.example" not in note
+    assert _TAVILY_URL_IN_NOTE.search(note).group(1).strip() == "https://real.example/a"
+
+
 async def test_no_results_adds_explanatory_note(httpx_mock) -> None:
     for _ in range(3):
         httpx_mock.add_response(method="POST", url=TAVILY_SEARCH_URL, json={"results": []})
