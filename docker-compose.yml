@@ -260,7 +260,7 @@ services:
   # ── Optional: OWASP SocialOSINT (profile: socialosint) ───────────────────
   # Source: https://github.com/bm-github/owasp-social-osint-agent (MIT)
   # Image built from source (no pre-built image published to a registry).
-  # See docs/socialosint.md for integration notes.
+  # See docs/operations.md (Optional services) for the integration notes.
   #
   # Set SOCIALOSINT_LLM_* and the required platform credential vars in .env
   # before starting this service. Enable per-target in targets.yaml.
