@@ -172,15 +172,18 @@ livenessProbe:
   periodSeconds: 20
   timeoutSeconds: 5
   failureThreshold: 3
+# /ready answers 503 while the database is offline or the scheduler is not
+# running, so readiness and startup use it; liveness stays on /health, which
+# answers 200 as long as the process does.
 readinessProbe:
   httpGet:
-    path: /health
+    path: /ready
     port: http
   periodSeconds: 10
   timeoutSeconds: 5
 startupProbe:
   httpGet:
-    path: /health
+    path: /ready
     port: http
   periodSeconds: 5
   failureThreshold: 24

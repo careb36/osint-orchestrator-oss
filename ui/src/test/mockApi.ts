@@ -4,12 +4,13 @@ import type { ChainVerification, DeltaRow, EvidenceRow, Finding, HealthStatus, R
 // The default deployment (OpenCTI sink off, ADR-008): the backend promotes the
 // overall status to degraded whenever a check is, so the fixture does too.
 export const sampleHealth: HealthStatus = {
-  status: 'degraded',
+  status: 'ok',
   version: '0.1.0-test',
   checks: {
     database: { status: 'ok', detail: 'SQLite reachable' },
     scheduler: { status: 'ok', detail: 'APScheduler running' },
-    opencti: { status: 'degraded', detail: 'OpenCTI sink disabled' },
+    // A switched-off sink is a configuration, not a fault (ADR-008).
+    opencti: { status: 'disabled', detail: 'OpenCTI sink disabled' },
   },
 };
 

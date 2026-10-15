@@ -34,7 +34,7 @@ from fastapi import (
     Request,
     Response,
 )
-from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func
 from sqlmodel import select
@@ -312,6 +312,10 @@ def _health_hint(component: str, status: str, detail: str) -> tuple[str, str]:
                 "OpenCTI ingestion is enabled.",
                 "Continue monitoring for sink lag or ingestion errors.",
             ),
+            "disabled": (
+                "OpenCTI ingestion is switched off by configuration (ADR-008).",
+                "Set OPENCTI_ENABLED=true to push findings to the knowledge graph.",
+            ),
             "degraded": (
                 "OpenCTI ingest is disabled or not reachable.",
                 "Enable OPENCTI_ENABLED or repair the OpenCTI connection before scheduled runs.",
@@ -328,9 +332,8 @@ def _health_hint(component: str, status: str, detail: str) -> tuple[str, str]:
     return compact[0], compact[1]
 
 
-@app.get("/health", tags=["public"])
-async def health() -> dict[str, Any]:
-    """Liveness probe and small service health snapshot for the dashboard."""
+async def _health_snapshot() -> dict[str, Any]:
+    """Component checks and their rollup, shared by /health and /ready."""
     checks: dict[str, dict[str, str]] = {
         "api": {"status": "ok", "detail": "API is responding"},
         "database": {"status": "ok", "detail": "Database is available"},
@@ -355,8 +358,10 @@ async def health() -> dict[str, Any]:
         checks["scheduler"] = {"status": "degraded", "detail": "Scheduler is not running"}
 
     if not settings.opencti_enabled:
-        # ADR-008: without the sink the knowledge graph is degraded.
-        checks["opencti"] = {"status": "degraded", "detail": "OpenCTI sink disabled"}
+        # ADR-008: the sink is optional. A deployment that chose to run
+        # without it is configured, not degraded, so the choice must not
+        # fail health checks or colour the dashboard as a fault.
+        checks["opencti"] = {"status": "disabled", "detail": "OpenCTI sink disabled"}
 
     for component, payload in checks.items():
         status = payload["status"]
@@ -379,6 +384,26 @@ async def health() -> dict[str, Any]:
         "updated_at": datetime.now(UTC).isoformat(),
         "checks": checks,
     }
+
+
+@app.get("/health", tags=["public"])
+async def health() -> dict[str, Any]:
+    """Liveness: always HTTP 200 while the process answers; the body carries
+    the component checks and their rollup for the dashboard."""
+    return await _health_snapshot()
+
+
+@app.get("/ready", tags=["public"])
+async def ready() -> JSONResponse:
+    """Readiness: the same snapshot, but HTTP 503 while the service cannot do
+    its job (a component is offline, or the scheduler is not running). This is
+    what the compose healthcheck and the Kubernetes readiness probe call, so a
+    dead database or scheduler is visible to the orchestrator around us."""
+    snapshot = await _health_snapshot()
+    ready_now = snapshot["status"] != "offline" and (
+        snapshot["checks"]["scheduler"]["status"] == "ok"
+    )
+    return JSONResponse(snapshot, status_code=200 if ready_now else 503)
 
 
 @app.get("/metrics", include_in_schema=False)

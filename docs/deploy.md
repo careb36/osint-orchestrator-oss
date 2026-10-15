@@ -46,7 +46,8 @@ authorised in writing to assess.
 ```bash
 docker compose up -d --build
 docker compose ps                     # every service healthy (OpenCTI takes 2-3 minutes)
-curl -s http://127.0.0.1:8000/health  # {"status": "ok", ...}
+curl -s http://127.0.0.1:8000/health  # {"status": "ok", ...}; "opencti": "disabled" with OPENCTI_ENABLED=false
+curl -si http://127.0.0.1:8000/ready  # HTTP 200; 503 while the database or the scheduler is down
 ```
 
 The orchestrator's port is published on the loopback interface only
@@ -94,7 +95,8 @@ fall back to its default.
 
 ## Observability
 
-`GET /health` (component checks with hints) and `GET /metrics` (Prometheus)
-need no API key. With `ORCHESTRATOR_LOG_FORMAT=json` every log line is one
+`GET /health` (component checks with hints), `GET /ready` (503 until the
+service can work; what the compose healthcheck polls) and `GET /metrics`
+(Prometheus) need no API key. With `ORCHESTRATOR_LOG_FORMAT=json` every log line is one
 object with `request_id`, `target_id`, `run_id` and `collector` fields for a
 log shipper. Details and the alert runbook: [operations.md](operations.md#observability).

@@ -13,6 +13,11 @@ from [SECURITY.md](SECURITY.md).
 
 - `GET /runs` takes `limit` (1–500, default 100) and `offset` to page through
   runs older than the most recent 100.
+- `GET /ready`: readiness probe that answers 503 while the database is
+  offline or the scheduler is not running, and 200 otherwise, with the same
+  body as `/health`. The compose healthcheck and the Helm readiness and
+  startup probes use it; `/health` stays a liveness check that always answers
+  200.
 
 - Dashboard resilience and performance pass: the routed views sit inside an
   error boundary keyed by the route, whose fallback offers *Try again* and
@@ -183,6 +188,10 @@ from [SECURITY.md](SECURITY.md).
 - `GET /targets/{id}/chain/verify` answers 404 for a target that is not in
   `targets.yaml`. The id is a label of `evidence_chain_verify_total`, so any
   authenticated caller could add one time series to `/metrics` per request.
+- A deployment with `OPENCTI_ENABLED=false` no longer stays `unhealthy`: the
+  compose healthcheck required `/health` to report `ok`, and a disabled sink
+  reported `degraded`. The `opencti` check now reads `disabled`, which does
+  not lower the overall status (ADR-008), and the healthcheck polls `/ready`.
 - Security: model and internet-derived text is made inert more thoroughly.
   HTML tags are stripped until none is left, so a tag re-formed by removing
   an inner one (`<scr<b>ipt>`) or hidden behind a `<` in an attribute goes
