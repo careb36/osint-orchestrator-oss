@@ -254,6 +254,28 @@ async def test_happy_path_report_goes_to_notes(httpx_mock) -> None:
     assert "osint analysis" in combined.lower()  # text from the fixture report
 
 
+async def test_notes_follow_the_target_language(httpx_mock) -> None:
+    """ADR-004: operator-facing note text is localised, not hard-coded Spanish."""
+    _register_happy_path(httpx_mock)
+    target = _target(language="en")
+    target.collectors.socialosint.enabled = True
+    target.collectors.socialosint.usernames = ["testhandle"]
+    target.collectors.socialosint.platforms = ["twitter", "github"]
+
+    result = await _collector(target).collect()
+
+    assert result.notes[0].startswith("[SocialOSINT analysis, unverified]\n\n")
+    assert "no verificado" not in " ".join(result.notes)
+
+
+def test_skipped_platforms_note_is_localised() -> None:
+    collector = _collector()
+    es = collector._build_result({}, "", ["mastodon"], language="es").notes
+    en = collector._build_result({}, "", ["mastodon"], language="en").notes
+    assert es == ["Plataformas omitidas por falta de credenciales: mastodon"]
+    assert en == ["Platforms skipped for lack of credentials: mastodon"]
+
+
 # ─── Deterministic ids: casing must not matter ────────────────────────────────
 
 

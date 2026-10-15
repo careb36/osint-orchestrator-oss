@@ -169,6 +169,14 @@ from [SECURITY.md](SECURITY.md).
 - Tavily note segments cannot be forged by a page title or snippet: `|` is
   replaced before the note is assembled, so a title spelling `| url=…` can no
   longer attach another page's qualification labels to its Note.
+- SpiderFoot scans the run gives up on (timeout, cancellation, a polling
+  error) are stopped with `POST /stopscan`; they kept probing the target on
+  the SpiderFoot server, and every scheduled run added another.
+- SocialOSINT note text ("analysis, unverified", "platforms skipped") follows
+  the target's language through the i18n catalogue instead of being
+  hard-coded in Spanish (ADR-004).
+- OpenOSINT: an error while mapping the entity graph is reported as a failed
+  collector (`graph mapping: …`) instead of escaping `collect()`.
 - Security: model and internet-derived text is made inert more thoroughly.
   HTML tags are stripped until none is left, so a tag re-formed by removing
   an inner one (`<scr<b>ipt>`) or hidden behind a `<` in an attribute goes
