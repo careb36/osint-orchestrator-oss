@@ -31,6 +31,7 @@ EXPECTED_TABLES = {
     "run_observables",
     "findings",
     "alerts",
+    "alert_cases",
     "alert_deliveries",
     "opencti_outbox",
 }
@@ -42,6 +43,15 @@ EXPECTED_COLUMNS: dict[str, set[str]] = {
     "seen_observables": {"id", "target_id", "stix_id"},
     "run_observables": {"id", "run_id", "stix_id", "stix_type", "value"},
     "alerts": {"id", "run_id", "channel", "status"},
+    "alert_cases": {
+        "id",
+        "run_id",
+        "target_id",
+        "state",
+        "reason",
+        "acknowledged_at",
+        "resolved_at",
+    },
     "alert_deliveries": {"id", "run_id", "target_id", "channel", "status", "attempts"},
     "opencti_outbox": {"id", "run_id", "target_id", "status", "attempts", "bundle_json"},
 }

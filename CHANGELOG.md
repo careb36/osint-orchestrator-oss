@@ -11,6 +11,16 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- Alert cases: every run that meets an alert rule opens a triage item
+  (`alert_cases`, migration `0009`) before any channel is tried, so a
+  deployment without a webhook or SMTP still has a queue to work and a
+  failed delivery never loses the alert. `GET /alerts`, `GET /alerts/{id}`,
+  `POST /alerts/{id}/ack` and `POST /alerts/{id}/resolve`; the operator's
+  name is free text (ADR-005). New per-target rule `alerts.on_run_failure`.
+  Metrics `alert_cases{state}` and `alert_case_time_to_acknowledge_seconds`
+  make the time-to-acknowledge KPI measurable. Retention purges cases with
+  their run.
+
 - Dashboard resilience and performance pass: the routed views sit inside an
   error boundary keyed by the route, whose fallback offers *Try again* and
   *Back to the overview* and which resets on navigation, so one crashed view

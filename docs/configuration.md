@@ -220,4 +220,5 @@ scheduled run can expand without limit.
 | `enabled` | `true` | Evaluate alert rules after each run |
 | `on_new_observables` | `true` | Alert when the run has new observables |
 | `min_risk_level` | `high` | Also alert when the synthesised risk is at or above this level |
+| `on_run_failure` | `false` | Also alert (and open a case with reason `run_failure`) when the run failed |
 | `include_values` | `true` | `false` sends counts and types only, no observable values |

@@ -1017,7 +1017,8 @@ async def _dispatch_alerts(
     report_path: str | None,
 ) -> None:
     """Evaluate alert rules and dispatch configured channels."""
-    from orchestrator.alerts import AlertEvent, AlertObservable, build_notifiers, should_alert
+    from orchestrator.alert_cases import open_case
+    from orchestrator.alerts import AlertEvent, AlertObservable, alert_case_reason, build_notifiers
     from orchestrator.models import Finding as FindingModel
 
     cfg = target.alerts
@@ -1035,15 +1036,28 @@ async def _dispatch_alerts(
     delta_rows = await get_run_delta(run_id)
     new_observable_count = len(delta_rows)
 
-    if not should_alert(
+    reason = alert_case_reason(
         new_observable_count=new_observable_count,
         risk_level=risk_level,
-        on_new_observables=cfg.on_new_observables,
-        min_risk_level=cfg.min_risk_level,
-    ):
+        run_status=run_status,
+        cfg=cfg,
+    )
+    if reason is None:
         if run_status == RunStatus.FAILED:
             logger.info("Run %d FAILED without findings — no alert dispatched.", run_id)
         return
+
+    # The case first: it is what the operator triages, and it must exist even
+    # when no channel is configured or every channel fails.
+    await open_case(
+        run_id=run_id,
+        target_id=target.id,
+        run_status=run_status.value,
+        risk_level=risk_level,
+        new_observable_count=new_observable_count,
+        reason=reason.value,
+        session_factory=get_session,
+    )
 
     new_obs_for_event: list[AlertObservable] = []
     if cfg.include_values:

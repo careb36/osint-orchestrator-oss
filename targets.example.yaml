@@ -106,6 +106,9 @@ targets:
       # Disparar también cuando el nivel de riesgo sea >= este umbral, aunque
       # no haya observables nuevos. Valores: low | medium | high | critical.
       min_risk_level: high
+      # Disparar también cuando el run falle (un objetivo que deja de
+      # recolectarse en silencio es un hallazgo para el operador).
+      on_run_failure: false
       # Si es false, el payload sólo contiene conteos y tipos, nunca valores
       # de observables (p. ej. nombres de dominio, IPs). Ver SECURITY.md.
       include_values: true

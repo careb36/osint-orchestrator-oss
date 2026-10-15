@@ -155,6 +155,16 @@ alerts_total = Counter(
     "Alert lifecycle events by channel and status (sent | failed | retried | dlq)",
     ["channel", "status"],
 )
+alert_cases = Gauge(
+    f"{PREFIX}_alert_cases",
+    "Alert cases waiting for an operator, by triage state (open | acknowledged)",
+    ["state"],
+)
+alert_case_time_to_acknowledge_seconds = Histogram(
+    f"{PREFIX}_alert_case_time_to_acknowledge_seconds",
+    "Seconds from an alert case being opened to its acknowledgement (MTTA/MTTR source)",
+    buckets=(60, 300, 900, 1800, 3600, 4 * 3600, 12 * 3600, 24 * 3600, 3 * 24 * 3600),
+)
 evidence_chain_verify_total = Counter(
     f"{PREFIX}_evidence_chain_verify_total",
     "Evidence chain verification outcomes per target (ok | broken | error)",

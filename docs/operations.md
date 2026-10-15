@@ -78,6 +78,10 @@ Interactive reference: `/docs` (OpenAPI at `/openapi.json`). Public routes are
 | `POST` | `/scheduler/reload/preview` | Preview target cron changes from `targets.yaml` without mutating jobs |
 | `POST` | `/scheduler/reload` | Reload target cron jobs from `targets.yaml` without restarting the process |
 | `POST` | `/alerts/dlq/replay` | Replay dead-letter alert deliveries (`channel` = `webhook` \| `email`, `limit` = `1..1000`) |
+| `GET` | `/alerts` | Alert cases newest first (`?target_id=`, `?state=open\|acknowledged\|resolved`, `limit`, `offset`) with `total` |
+| `GET` | `/alerts/{id}` | One alert case |
+| `POST` | `/alerts/{id}/ack` | `open` → `acknowledged`; body `{"by": "<operator>", "note": "…"}`; 409 from any other state |
+| `POST` | `/alerts/{id}/resolve` | `open` or `acknowledged` → `resolved`; same body; 409 when already resolved |
 | `POST` | `/opencti/outbox/replay` | Replay dead-letter OpenCTI bundles (`run_id`, `limit` = `1..1000`) and drain the due ones now |
 | `GET` | `/runs` | 100 most recent runs, newest first, each with the `risk_level` of its finding (`null` without one); `?target_id=` filters |
 | `GET` | `/runs/{id}` | A run's status, counts, `risk_level`, and `alerts[]` dispatch audit |
@@ -173,11 +177,39 @@ The webhook body carries `target_id`, `run_id`, `run_status`, `risk_level`,
 HMAC-SHA256 of the raw body with the shared secret. Payloads include observable
 values unless the target sets `include_values: false`.
 
+### Alert cases (triage)
+
+Every run that meets an alert rule opens one **alert case** before any channel
+is tried, so a deployment without a webhook or SMTP still has a list to work
+through, and a failed delivery never loses the alert. The case records the
+rule that fired (`reason`: `new_observables`, `risk_level` or `run_failure`,
+the last one only with `alerts.on_run_failure: true` on the target), the run's
+status and risk level, and its triage state:
+
+| State | Meaning | How it gets there |
+| --- | --- | --- |
+| `open` | Nobody has looked at it | Opened by the pipeline |
+| `acknowledged` | An operator is on it | `POST /alerts/{id}/ack` with the operator's name |
+| `resolved` | Nothing more to do | `POST /alerts/{id}/resolve` from `open` or `acknowledged` |
+
+The dashboard's *Alerts* view lists open cases first and offers both actions;
+the name is free text because the API has no users (ADR-005). Cases are purged
+with their run by retention. Two metrics follow the queue: `alert_cases{state}`
+(open and acknowledged counts) and `alert_case_time_to_acknowledge_seconds`
+(a histogram observed on every acknowledgement). Mean time to acknowledge over
+the last day, in PromQL:
+
+```promql
+increase(osint_orchestrator_alert_case_time_to_acknowledge_seconds_sum[1d])
+  / increase(osint_orchestrator_alert_case_time_to_acknowledge_seconds_count[1d])
+```
+
 ## Retention
 
 A nightly job (`ORCHESTRATOR_RETENTION_CRON`) deletes runs that finished more
 than `ORCHESTRATOR_RETENTION_DAYS` ago (default `90`, `0` disables it) with their
-observables, findings, qualified evidence, alerts and queued deliveries. A
+observables, findings, qualified evidence, alert cases, alerts and queued
+deliveries. A
 `daily_reports/<date>` directory is deleted once its whole day is older than the
 cutoff and no remaining run started that day, so a kept run never loses its
 report or manifest. The delta memory (`seen_observables`) is never purged. The default is operational, not a legal retention period: when reports
@@ -225,6 +257,8 @@ run id.
 | `llm_tokens_total` | `provider`, `model`, `direction` (`input`, `output`) | LLM token usage by provider and model, split by prompt vs completion direction |
 | `llm_model_available` | `provider`, `model`, `route` (`reasoning`, `fast`) | Startup preflight gauge: `1` when the configured route model is listed by the provider `GET /models`, `0` when it is not served |
 | `alerts_total` | `channel`, `status` | Alert lifecycle events (`sent`, `failed`, `retried`, `dlq`) |
+| `alert_cases` | `state` | Alert cases waiting for an operator (`open`, `acknowledged`) |
+| `alert_case_time_to_acknowledge_seconds` | — | Histogram: seconds from a case opening to its acknowledgement |
 | `evidence_chain_verify_total` | `target_id`, `outcome` | Evidence-chain verifications by outcome (`ok`, `broken`, `error`) |
 | `evidence_qualified_total` | `target_id`, `category` | Qualified evidence rows by category (`adverse_media`, `sanctions`, `litigation`, `regulatory_action`, `corporate_profile`, `unrelated`) |
 | `scheduled_jobs` | — | Cron jobs registered in the scheduler |
