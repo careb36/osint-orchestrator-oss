@@ -94,6 +94,18 @@ from [SECURITY.md](SECURITY.md).
 
 ### Changed
 
+- The orchestrator image runs as uid 1000 instead of root (`USER 1000` in
+  `Dockerfile`; the Helm chart already ran it that way). The `./daily_reports`
+  bind mount must be writable by that uid (`docs/deploy.md`).
+- Every compose port binds the loopback interface: OpenCTI (`8080`),
+  SpiderFoot (`5001`), SocialOSINT (`8001`), Keycloak (`8085`), oauth2-proxy
+  (`8002`) and MISP (`8443`) join the orchestrator on `127.0.0.1`. Reach them
+  through an SSH tunnel or your reverse proxy.
+- Image pins: `redis:8.0.6`, `rabbitmq:3.13.7-management`, `mariadb:10.11.19`
+  (patch releases instead of floating minor tags) and the SpiderFoot build
+  context pinned to commit `0f815a2`. A unit test rejects floating tags,
+  unpinned git contexts and non-loopback ports in every compose file.
+
 - Documentation restructured ([ADR-009](docs/adr/ADR-009-documentation-language.md)):
   the README is a short overview in English and Spanish; reference material
   moved to `docs/architecture.md`, `docs/configuration.md` and
