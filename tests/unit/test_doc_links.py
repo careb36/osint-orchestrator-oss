@@ -1,4 +1,5 @@
-"""Every `docs/...md` path mentioned in a tracked text file exists.
+"""Every documentation page path (under `docs/`, ending in `.md`) that a tracked
+text file mentions exists.
 
 The SocialOSINT page was removed in the documentation restructure and five
 files kept pointing at it; this keeps the next removal honest.
