@@ -12,6 +12,7 @@ import smtplib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from time import perf_counter
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import httpx
 import stix2
@@ -59,6 +60,9 @@ from orchestrator.sinks.opencti import OpenCTISink
 from orchestrator.synthesizer import synthesize
 from orchestrator.synthesizer.providers import LLMClient, get_client
 from orchestrator.synthesizer.qualify import persist_qualifications, qualify_evidence
+
+if TYPE_CHECKING:
+    from orchestrator.alerts import AlertEvent
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +138,7 @@ async def _qualification_client(
     return client
 
 
-def _qualification_payload(row: EvidenceQualification) -> dict[str, object]:
+def _qualification_payload(row: EvidenceQualification) -> dict[str, Any]:
     return row.model_dump(mode="json")
 
 
@@ -255,12 +259,12 @@ async def requeue_interrupted_deliveries() -> dict[str, int]:
     async with get_session() as session:
         alerts = await session.exec(
             update(AlertDelivery)
-            .where(AlertDelivery.status == AlertDeliveryStatus.IN_PROGRESS)
+            .where(col(AlertDelivery.status) == AlertDeliveryStatus.IN_PROGRESS)
             .values(status=AlertDeliveryStatus.PENDING, next_attempt_at=now, updated_at=now)
         )
         outbox = await session.exec(
             update(OpenCTIOutbox)
-            .where(OpenCTIOutbox.status == OpenCTIOutboxStatus.IN_PROGRESS)
+            .where(col(OpenCTIOutbox.status) == OpenCTIOutboxStatus.IN_PROGRESS)
             .values(status=OpenCTIOutboxStatus.PENDING, next_retry_at=now, updated_at=now)
         )
         await session.commit()
@@ -285,7 +289,7 @@ async def _update_opencti_outbox_metrics() -> None:
                     [OpenCTIOutboxStatus.PENDING, OpenCTIOutboxStatus.IN_PROGRESS]
                 )
             )
-            .order_by(OpenCTIOutbox.created_at.asc())
+            .order_by(col(OpenCTIOutbox.created_at).asc())
         )
         pending = result.all()
         dead = await _count_by_status(session, OpenCTIOutbox, OpenCTIOutboxStatus.DEAD_LETTER)
@@ -519,12 +523,14 @@ async def drain_opencti_outbox(limit: int = 100) -> dict[str, int]:
                 select(OpenCTIOutbox.id)
                 .where(OpenCTIOutbox.status == OpenCTIOutboxStatus.PENDING)
                 .where(col(OpenCTIOutbox.next_retry_at) <= now)
-                .order_by(OpenCTIOutbox.id.asc())
+                .order_by(col(OpenCTIOutbox.id).asc())
                 .limit(capped_limit)
             )
         ).all()
 
     for row_id in due_ids:
+        # IDs selected from persisted rows are non-null primary keys.
+        assert row_id is not None
         async with get_session() as session:
             claimed = await _claim_row(
                 session,
@@ -535,7 +541,8 @@ async def drain_opencti_outbox(limit: int = 100) -> dict[str, int]:
             )
             if not claimed:
                 continue  # another drain took it, or it was replayed meanwhile
-            item = await session.get(OpenCTIOutbox, row_id)
+            # The claim matched an existing row; preserve the failure if retention removes it.
+            item = cast(OpenCTIOutbox, await session.get(OpenCTIOutbox, row_id))
             target_id, work_name = item.target_id, item.work_name
             bundle_json, attempt = item.bundle_json, item.attempts + 1
 
@@ -569,7 +576,7 @@ async def replay_opencti_dead_letters(
         stmt = (
             select(OpenCTIOutbox)
             .where(OpenCTIOutbox.status == OpenCTIOutboxStatus.DEAD_LETTER)
-            .order_by(OpenCTIOutbox.id.asc())
+            .order_by(col(OpenCTIOutbox.id).asc())
             .limit(capped_limit)
         )
         if run_id is not None:
@@ -719,7 +726,7 @@ async def _run_target_pipeline(target: Target, run_id: int, log_ctx: dict) -> Ru
     # Normalize all results to STIX bundles, computing is_new in memory
     # BEFORE any DB write (Issue #8: only persist SeenObservable after
     # successful ingestion so a second run re-reports un-ingested observables).
-    bundles: list[tuple[object, list[tuple[str, str, str, bool]]]] = []
+    bundles: list[tuple[stix2.Bundle, list[tuple[str, str, str, bool]]]] = []
     # Each bundle is paired with its list of (stix_id, stix_type, value, is_new).
 
     seen_run_stix_ids: set[str] = set()
@@ -901,7 +908,8 @@ async def _run_target_pipeline(target: Target, run_id: int, log_ctx: dict) -> Ru
             report_dir=target.report_dir,
             language=target.language,
             finding=finding,
-            synthesis_status=synthesis_status,
+            # synthesize returns only these three statuses, despite its str annotation.
+            synthesis_status=cast(Literal["ok", "skipped", "failed"], synthesis_status),
         )
         report_path = str(report_md.resolve())
     except Exception as exc:  # noqa: BLE001
@@ -928,9 +936,9 @@ async def _run_target_pipeline(target: Target, run_id: int, log_ctx: dict) -> Ru
                     previous = await session.exec(
                         select(Run.manifest_sha256)
                         .where(Run.target_id == target.id)
-                        .where(Run.manifest_sha256.is_not(None))
+                        .where(col(Run.manifest_sha256).is_not(None))
                         .where(Run.id != run_id)
-                        .order_by(Run.started_at.desc(), Run.id.desc())
+                        .order_by(col(Run.started_at).desc(), col(Run.id).desc())
                         .limit(1)
                     )
                     manifest = build_manifest(
@@ -1170,7 +1178,7 @@ async def _queue_failed_alert_delivery(
     target_id: str,
     channel: str,
     language: str | None,
-    event: object,
+    event: AlertEvent,
     first_error: str | None,
     max_attempts: int,
     permanent: bool = False,
@@ -1301,12 +1309,14 @@ async def process_pending_alert_deliveries(limit: int = 100) -> dict[str, int]:
                 select(AlertDelivery.id)
                 .where(AlertDelivery.status == AlertDeliveryStatus.PENDING)
                 .where(col(AlertDelivery.next_attempt_at) <= now)
-                .order_by(AlertDelivery.id.asc())
+                .order_by(col(AlertDelivery.id).asc())
                 .limit(capped_limit)
             )
         ).all()
 
     for row_id in due_ids:
+        # IDs selected from persisted rows are non-null primary keys.
+        assert row_id is not None
         async with get_session() as session:
             claimed = await _claim_row(
                 session,
@@ -1317,7 +1327,8 @@ async def process_pending_alert_deliveries(limit: int = 100) -> dict[str, int]:
             )
             if not claimed:
                 continue
-            delivery = await session.get(AlertDelivery, row_id)
+            # The claim matched an existing row; preserve the failure if retention removes it.
+            delivery = cast(AlertDelivery, await session.get(AlertDelivery, row_id))
             channel, language = delivery.channel, delivery.language
             payload_json, attempt = delivery.payload_json, delivery.attempts + 1
 
@@ -1360,7 +1371,7 @@ async def replay_alert_dead_letters(
         stmt = (
             select(AlertDelivery)
             .where(AlertDelivery.status == AlertDeliveryStatus.DEAD_LETTER)
-            .order_by(AlertDelivery.id.asc())
+            .order_by(col(AlertDelivery.id).asc())
             .limit(capped_limit)
         )
         if channel:
