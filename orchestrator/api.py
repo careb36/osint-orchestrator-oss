@@ -24,6 +24,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any
 
+import jsonschema
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -43,6 +44,7 @@ from sqlmodel import select
 from orchestrator import alert_cases, metrics
 from orchestrator.auth import log_auth_status, log_secret_key_status, require_api_key
 from orchestrator.config import NEBIUS_DEFAULT_BASE_URL, settings
+from orchestrator.contracts import load_schema
 from orchestrator.database import create_db_and_tables, get_session
 from orchestrator.evidence import (
     load_manifest_file,
@@ -77,6 +79,7 @@ from orchestrator.scheduler import (
     shutdown_scheduler,
     start_scheduler,
 )
+from orchestrator.sinks import OpenCTIIngestError, OpenCTISink
 from orchestrator.synthesizer.providers.openai_compat import preflight_configured_models
 from orchestrator.synthesizer.qualify import load_run_qualifications
 from orchestrator.targets import load_targets
@@ -631,6 +634,64 @@ async def replay_opencti_outbox(
     replayed = await replay_opencti_dead_letters(run_id=run_id, limit=limit)
     processed = await drain_opencti_outbox(limit=limit)
     return {"status": "replayed", **replayed, "processed_now": processed}
+
+
+@router.post("/bundles", response_model=dict[str, Any], tags=["bundles"])
+async def ingest_external_bundle(
+    request: Request,
+    work_name: str = Query(default="external-stix"),
+) -> dict[str, Any]:
+    """Intake a STIX 2.1 bundle from an external producer into OpenCTI (ADR-011).
+
+    The body is the bundle JSON. It is validated against the pinned contract
+    schema (``orchestrator/contracts``), parsed with ``pycti`` imported first (so
+    the OpenCTI SCOs ``bank-account``/``text`` resolve), and handed to
+    ``OpenCTISink``, which owns retries and rejection reporting.
+
+    A failed ingest is not queued: the producer keeps its bundle and gets the
+    reason back, 502 when the sink reports a failed ingest (objects rejected,
+    client not configured) and 503 when OpenCTI could not be reached once the
+    sink's retries were spent, so it can retry.
+    """
+    if not settings.opencti_enabled:
+        raise HTTPException(status_code=409, detail=t("opencti_sink_disabled"))
+
+    try:
+        data = await request.json()
+    except ValueError as exc:  # json.JSONDecodeError and UnicodeDecodeError
+        raise HTTPException(status_code=400, detail=t("bundle.invalid_json", error=exc)) from exc
+
+    try:
+        jsonschema.validate(instance=data, schema=load_schema())
+    except jsonschema.ValidationError as exc:
+        raise HTTPException(
+            status_code=422, detail=t("bundle.contract_violation", error=exc.message)
+        ) from exc
+
+    import pycti  # noqa: F401  (registers the OpenCTI SCOs before stix2.parse)
+    import stix2
+
+    try:
+        bundle = stix2.parse(data, allow_custom=True)
+    except Exception as exc:  # noqa: BLE001 — a malformed bundle must not 500
+        raise HTTPException(status_code=422, detail=t("bundle.parse_failed", error=exc)) from exc
+
+    try:
+        await OpenCTISink().ingest_async(bundle, work_name=work_name)
+    except OpenCTIIngestError as exc:
+        raise HTTPException(status_code=502, detail=t("bundle.ingest_failed", error=exc)) from exc
+    except Exception as exc:  # noqa: BLE001 — pycti/requests errors once retries are spent
+        # The raw error can carry the OpenCTI URL; it goes to the log, not to
+        # the producer.
+        logger.error(
+            "External bundle ingest failed: work=%s error=%s",
+            work_name,
+            exc,
+            extra={"work": work_name, "error": str(exc)},
+        )
+        raise HTTPException(status_code=503, detail=t("bundle.ingest_unavailable")) from exc
+
+    return {"status": "ingested", "work_name": work_name, "objects": len(bundle.objects)}
 
 
 def _ui_dist_index() -> Path | None:

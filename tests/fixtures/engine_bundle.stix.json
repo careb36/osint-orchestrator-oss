@@ -1,0 +1,83 @@
+{
+  "type": "bundle",
+  "id": "bundle--a1b2c3d4-5678-5abc-8def-0123456789ab",
+  "objects": [
+    {
+      "type": "marking-definition",
+      "spec_version": "2.1",
+      "id": "marking-definition--f88d31f6-486f-44da-b317-01333bde0b82",
+      "created": "2017-01-20T00:00:00.000Z",
+      "definition_type": "tlp",
+      "name": "TLP:AMBER",
+      "definition": { "tlp": "amber" }
+    },
+    {
+      "type": "identity",
+      "spec_version": "2.1",
+      "id": "identity--a1b2c3d4-5678-5abc-8def-000000000001",
+      "created": "2026-01-01T00:00:00.000Z",
+      "modified": "2026-01-01T00:00:00.000Z",
+      "name": "Persona Ejemplo",
+      "description": "rol: contador",
+      "identity_class": "individual",
+      "labels": ["demo_simulado", "persona"],
+      "confidence": 85,
+      "object_marking_refs": ["marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"],
+      "x_opencti_score": 85
+    },
+    {
+      "type": "bank-account",
+      "spec_version": "2.1",
+      "id": "bank-account--41ec7dd3-4634-5f31-b572-308cba7c0767",
+      "value": "0000001",
+      "account_number": "0000001",
+      "iban": "UY-BROU-0000001",
+      "object_marking_refs": ["marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"],
+      "x_opencti_description": "banco: BROU",
+      "x_opencti_labels": ["demo_simulado", "cuenta"],
+      "x_opencti_score": 85
+    },
+    {
+      "type": "text",
+      "spec_version": "2.1",
+      "id": "text--c9337897-8ca1-50c6-ad37-04dd5bf38233",
+      "value": "Activo ejemplo",
+      "object_marking_refs": ["marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"],
+      "x_opencti_labels": ["demo_simulado", "activo"],
+      "x_opencti_score": 85
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--b2c3d4e5-5678-5abc-8def-000000000002",
+      "created": "2026-01-01T00:00:00.000Z",
+      "modified": "2026-01-01T00:00:00.000Z",
+      "relationship_type": "related-to",
+      "source_ref": "identity--a1b2c3d4-5678-5abc-8def-000000000001",
+      "target_ref": "bank-account--41ec7dd3-4634-5f31-b572-308cba7c0767",
+      "description": "titular de la cuenta",
+      "labels": ["demo_simulado", "titularidad"],
+      "confidence": 85,
+      "object_marking_refs": ["marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"],
+      "x_investigation_relation": ["titularidad"],
+      "x_opencti_score": 85
+    },
+    {
+      "type": "note",
+      "spec_version": "2.1",
+      "id": "note--c3d4e5f6-5678-5abc-8def-000000000003",
+      "created": "2026-01-01T00:00:00.000Z",
+      "modified": "2026-01-01T00:00:00.000Z",
+      "content": "es titular de la cuenta 0000001",
+      "object_refs": ["relationship--b2c3d4e5-5678-5abc-8def-000000000002"],
+      "external_references": [
+        {
+          "source_name": "demo_simulado",
+          "external_id": "declaracion.txt:12",
+          "description": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "object_marking_refs": ["marking-definition--f88d31f6-486f-44da-b317-01333bde0b82"]
+    }
+  ]
+}

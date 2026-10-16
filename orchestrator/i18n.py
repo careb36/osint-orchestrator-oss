@@ -148,6 +148,26 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "es": "La ingesta a OpenCTI está deshabilitada (OPENCTI_ENABLED=false)",
         "en": "OpenCTI ingest is disabled (OPENCTI_ENABLED=false)",
     },
+    "bundle.invalid_json": {
+        "es": "El cuerpo no es JSON válido: {error}",
+        "en": "The request body is not valid JSON: {error}",
+    },
+    "bundle.contract_violation": {
+        "es": "El bundle no cumple el contrato: {error}",
+        "en": "The bundle does not satisfy the contract: {error}",
+    },
+    "bundle.parse_failed": {
+        "es": "No se pudo interpretar el bundle STIX: {error}",
+        "en": "The STIX bundle cannot be parsed: {error}",
+    },
+    "bundle.ingest_failed": {
+        "es": "La ingesta en OpenCTI falló: {error}",
+        "en": "OpenCTI ingest failed: {error}",
+    },
+    "bundle.ingest_unavailable": {
+        "es": "No se pudo entregar el bundle a OpenCTI; reintente más tarde",
+        "en": "The bundle could not be delivered to OpenCTI; retry later",
+    },
     "manifest.not_found": {
         "es": "No existe el manifiesto de la ejecución {run_id}",
         "en": "Manifest for run {run_id} not found",

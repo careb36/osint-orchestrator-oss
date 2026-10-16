@@ -102,6 +102,7 @@ and phased definition of done are in `ui/docs/`; the decision is ADR-010.
 | [008](adr/ADR-008-optional-opencti-sink.md) | The OpenCTI sink can be disabled |
 | [009](adr/ADR-009-documentation-language.md) | Documentation in English, README in English and Spanish |
 | [010](adr/ADR-010-operator-dashboard.md) | Operator dashboard as a React SPA served by the API, API-key access |
+| [011](adr/ADR-011-external-stix-producers.md) | External STIX 2.1 producers as an intake path (`ingest_bundle`, `POST /bundles`) |
 
 ## Third-party tools
 
