@@ -1,4 +1,7 @@
 import type {
+  AlertCase,
+  AlertCaseAction,
+  AlertCaseList,
   ChainVerification,
   DeltaRow,
   EvidenceRow,
@@ -194,6 +197,20 @@ export const api = {
   getRunEvidence: (runId: string | number) => request<EvidenceRow[]>(`/runs/${runId}/evidence`),
   getRunManifest: (runId: string | number) => request<Record<string, unknown>>(`/runs/${runId}/manifest`),
   getRiskTrends: () => request<RiskTrend[]>('/analytics/risk-trends'),
+  getAlerts: (filters: { targetId?: string; state?: string; limit?: number; offset?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (filters.targetId) params.set('target_id', filters.targetId);
+    if (filters.state) params.set('state', filters.state);
+    if (filters.limit !== undefined) params.set('limit', String(filters.limit));
+    if (filters.offset !== undefined) params.set('offset', String(filters.offset));
+    const query = params.toString();
+    return request<AlertCaseList>(query ? `/alerts?${query}` : '/alerts');
+  },
+  getAlert: (caseId: string | number) => request<AlertCase>(`/alerts/${caseId}`),
+  acknowledgeAlert: (caseId: string | number, action: AlertCaseAction) =>
+    request<AlertCase>(`/alerts/${caseId}/ack`, { method: 'POST', body: action }),
+  resolveAlert: (caseId: string | number, action: AlertCaseAction) =>
+    request<AlertCase>(`/alerts/${caseId}/resolve`, { method: 'POST', body: action }),
   verifyChain: (targetId: string) =>
     request<ChainVerification>(`/targets/${encodeURIComponent(targetId)}/chain/verify`),
   triggerRun: (targetId: string) =>

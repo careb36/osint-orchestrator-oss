@@ -10,7 +10,7 @@ import { useListControls } from '../hooks/useListControls';
 import { useStartRun } from '../hooks/useStartRun';
 import { useLocale, type MessageKey } from '../i18n';
 import { api, ApiError, downloadArtifact, downloadRunBundle, downloadRunPdf } from '../lib/api';
-import { alertStatusTone, formatDateTime, formatDuration, riskTone, runStatusTone } from '../lib/format';
+import { alertCaseTone, alertStatusTone, formatDateTime, formatDuration, riskTone, runStatusTone } from '../lib/format';
 import { buildHandoffSummary, describeVerification } from '../lib/handoff';
 import { distinct, filterDelta, filterEvidence, sortEvidence, type EvidenceSortKey } from '../lib/listing';
 import { isActiveStatus } from '../lib/overview';
@@ -60,6 +60,13 @@ export function RunWorkspacePage() {
 
   const run = useQuery({ queryKey: ['run', runId], queryFn: () => api.getRun(runId), enabled: Boolean(runId) });
   const finding = useQuery({ queryKey: ['run', runId, 'finding'], queryFn: () => api.getRunFinding(runId, { optional: true }), enabled: Boolean(runId) });
+  // The run's alert case, if a rule fired: cases are listed per target, not per run.
+  const alertCase = useQuery({
+    queryKey: ['alerts', run.data?.target_id ?? '', 'all'],
+    queryFn: () => api.getAlerts({ targetId: run.data!.target_id, limit: 200 }),
+    enabled: Boolean(run.data?.target_id),
+    select: (list) => list.items.find((row) => row.run_id === run.data?.id) ?? null,
+  });
   // Loaded for every tab: the handoff summary counts the evidence by relevance.
   const evidence = useQuery({ queryKey: ['run', runId, 'evidence'], queryFn: () => api.getRunEvidence(runId), enabled: Boolean(runId) });
   const delta = useQuery({ queryKey: ['run', runId, 'delta'], queryFn: () => api.getRunDelta(runId), enabled: artifact === 'delta' });
@@ -476,6 +483,14 @@ export function RunWorkspacePage() {
 
           <div className="handoff-block">
             <h3>{t('handoff.alertsTitle')}</h3>
+            {alertCase.data ? (
+              <p>
+                <Link to={`/alerts?target=${encodeURIComponent(run.data.target_id)}&state=all`}>{t('handoff.alertCase', { id: alertCase.data.id })}</Link>{' '}
+                <StatusPill label={alertCase.data.state} tone={alertCaseTone(alertCase.data.state)} />
+              </p>
+            ) : alertCase.isSuccess ? (
+              <p className="muted">{t('handoff.noAlertCase')}</p>
+            ) : null}
             {run.data.alerts.length === 0 ? (
               <p className="muted">{t('handoff.noAlerts')}</p>
             ) : (

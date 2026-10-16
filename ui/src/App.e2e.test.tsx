@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import App from './App';
@@ -77,6 +77,13 @@ describe('operator smoke flow', () => {
 
     await user.click(screen.getByRole('link', { name: /^back$/i }));
     expect(await screen.findByRole('heading', { name: 'example.com' })).toBeInTheDocument();
+
+    // Triage: the run's open case is acknowledged from the Alerts view.
+    await user.click(within(nav).getByRole('link', { name: /alerts/i }));
+    expect(await screen.findByRole('heading', { name: /^alerts$/i })).toBeInTheDocument();
+    await user.type(screen.getByRole('textbox', { name: /your name/i }), 'analyst');
+    await user.click(within(await screen.findByRole('table')).getByRole('button', { name: /acknowledge/i }));
+    await waitFor(() => expect(screen.queryByText('#7')).not.toBeInTheDocument());
 
     expect(errors).not.toHaveBeenCalled();
     expect(uiTelemetry.filter((entry) => entry.event === 'ui_error' || entry.event === 'error_boundary_triggered')).toEqual([]);
