@@ -27,6 +27,7 @@ from orchestrator.config import settings
 PROTECTED_GET = "/targets"
 AUTH_EXEMPT_PATHS = {
     "/health",
+    "/ready",
     "/metrics",
     "/",
     "/docs",

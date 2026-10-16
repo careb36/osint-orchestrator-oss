@@ -123,6 +123,7 @@ from [SECURITY.md](SECURITY.md).
 
 ### Changed
 
+- Tests only: the auth-exemption test now covers `/ready`.
 - The orchestrator image runs as uid 1000 instead of root (`USER 1000` in
   `Dockerfile`; the Helm chart already ran it that way). The `./daily_reports`
   bind mount must be writable by that uid (`docs/deploy.md`).

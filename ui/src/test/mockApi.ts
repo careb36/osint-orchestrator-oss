@@ -1,8 +1,8 @@
 import { vi } from 'vitest';
 import type { ChainVerification, DeltaRow, EvidenceRow, Finding, HealthStatus, RiskTrend, RunDetail, RunSummary, TargetSummary } from '../types';
 
-// The default deployment (OpenCTI sink off, ADR-008): the backend promotes the
-// overall status to degraded whenever a check is, so the fixture does too.
+// The default deployment has the OpenCTI sink off (ADR-008). A disabled check
+// does not degrade the rollup, so the overall status stays ok.
 export const sampleHealth: HealthStatus = {
   status: 'ok',
   version: '0.1.0-test',
