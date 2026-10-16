@@ -646,18 +646,26 @@ async def ingest_external_bundle(
     The body is the bundle JSON. It is validated against the pinned contract
     schema (``orchestrator/contracts``), parsed with ``pycti`` imported first (so
     the OpenCTI SCOs ``bank-account``/``text`` resolve), and handed to
-    ``OpenCTISink``, which owns retries, rejection reporting and the outbox.
+    ``OpenCTISink``, which owns retries and rejection reporting.
+
+    A failed ingest is not queued: the producer keeps its bundle and gets the
+    reason back, 502 when the sink reports a failed ingest (objects rejected,
+    client not configured) and 503 when OpenCTI could not be reached once the
+    sink's retries were spent, so it can retry.
     """
     if not settings.opencti_enabled:
         raise HTTPException(status_code=409, detail=t("opencti_sink_disabled"))
 
-    data = await request.json()
+    try:
+        data = await request.json()
+    except ValueError as exc:  # json.JSONDecodeError and UnicodeDecodeError
+        raise HTTPException(status_code=400, detail=t("bundle.invalid_json", error=exc)) from exc
 
     try:
         jsonschema.validate(instance=data, schema=load_schema())
     except jsonschema.ValidationError as exc:
         raise HTTPException(
-            status_code=422, detail=f"bundle does not satisfy the contract: {exc.message}"
+            status_code=422, detail=t("bundle.contract_violation", error=exc.message)
         ) from exc
 
     import pycti  # noqa: F401  (registers the OpenCTI SCOs before stix2.parse)
@@ -666,12 +674,22 @@ async def ingest_external_bundle(
     try:
         bundle = stix2.parse(data, allow_custom=True)
     except Exception as exc:  # noqa: BLE001 — a malformed bundle must not 500
-        raise HTTPException(status_code=422, detail=f"cannot parse bundle: {exc}") from exc
+        raise HTTPException(status_code=422, detail=t("bundle.parse_failed", error=exc)) from exc
 
     try:
         await OpenCTISink().ingest_async(bundle, work_name=work_name)
     except OpenCTIIngestError as exc:
-        raise HTTPException(status_code=502, detail=f"OpenCTI ingest failed: {exc}") from exc
+        raise HTTPException(status_code=502, detail=t("bundle.ingest_failed", error=exc)) from exc
+    except Exception as exc:  # noqa: BLE001 — pycti/requests errors once retries are spent
+        # The raw error can carry the OpenCTI URL; it goes to the log, not to
+        # the producer.
+        logger.error(
+            "External bundle ingest failed: work=%s error=%s",
+            work_name,
+            exc,
+            extra={"work": work_name, "error": str(exc)},
+        )
+        raise HTTPException(status_code=503, detail=t("bundle.ingest_unavailable")) from exc
 
     return {"status": "ingested", "work_name": work_name, "objects": len(bundle.objects)}
 

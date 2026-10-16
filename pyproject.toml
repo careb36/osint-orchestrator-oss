@@ -26,8 +26,8 @@ dependencies = [
     "pydantic-settings>=2.3.0",
     # STIX 2.1
     "stix2>=3.0.1",
-    # Contrato del intake de productores STIX externos (ADR-011): POST /bundles
-    # valida el bundle contra orchestrator/contracts/stix-bundle.schema.json.
+    # External STIX producers' intake contract (ADR-011): POST /bundles
+    # validates the bundle against orchestrator/contracts/stix-bundle.schema.json.
     "jsonschema>=4.18",
     # OpenCTI client. Must match the opencti/platform tag in docker-compose.yml:
     # an unpinned pycti resolves to the latest release, whose GraphQL inputs the

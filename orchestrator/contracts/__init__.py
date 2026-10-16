@@ -1,12 +1,14 @@
-"""Contrato del bundle STIX 2.1 de productores externos (JSON Schema).
+"""Contract for STIX 2.1 bundles from external producers (JSON Schema).
 
-Copia fijada del esquema que publica el productor ``investigation-assistant``
-(ver su ``stix_export/schema/`` y su ``IA-ADR-005``). El ``$id`` y el
-``x-contract-version`` son los del productor; este repo es el **consumidor** y
-fija una copia idéntica para validar la ingesta sin acoplar el código de ambos.
+A pinned copy of the schema published by the ``investigation-assistant``
+producer (its ``stix_export/schema/`` and its ``IA-ADR-005``). The ``$id`` and
+``x-contract-version`` are the producer's: this repository is the **consumer**
+and keeps an identical copy to validate the intake without coupling the code of
+the two projects. The schema's own title and description stay in the
+producer's language because the file must stay byte-identical to theirs.
 
-Si el productor cambia el formato, sube la versión del contrato; entonces se
-actualiza esta copia y ``SCHEMA_VERSION`` (el test de contrato lo exige).
+When the producer changes the format it bumps the contract version; this copy
+and ``SCHEMA_VERSION`` are then updated together (the contract test enforces it).
 """
 
 from __future__ import annotations
@@ -20,6 +22,5 @@ SCHEMA_FILE = "stix-bundle.schema.json"
 
 
 def load_schema() -> dict[str, Any]:
-    """Carga el JSON Schema del contrato (paquete instalado o árbol fuente)."""
-    return json.loads(
-        files(__package__).joinpath(SCHEMA_FILE).read_text(encoding="utf-8"))
+    """Load the contract's JSON Schema (installed package or source tree)."""
+    return json.loads(files(__package__).joinpath(SCHEMA_FILE).read_text(encoding="utf-8"))

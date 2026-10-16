@@ -11,6 +11,14 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- External STIX 2.1 intake (ADR-011): `python -m orchestrator.ingest_bundle
+  <file> [--work-name …] [--dry-run]` and `POST /bundles` validate a producer's
+  bundle against the pinned JSON Schema in `orchestrator/contracts/`, parse it
+  with pycti's SCOs registered and hand it to the OpenCTI sink. A failed ingest
+  is reported to the producer, not queued: the CLI exits 1 (2 for an unreadable
+  bundle) and the endpoint answers 400, 422, 502 or 503 with a localised
+  reason. The sink's rejection error now names the first rejected objects by id
+  and type. New dependency: `jsonschema`.
 - `GET /runs` takes `limit` (1–500, default 100) and `offset` to page through
   runs older than the most recent 100.
 - `GET /ready`: readiness probe that answers 503 while the database is

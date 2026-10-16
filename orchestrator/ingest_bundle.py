@@ -5,8 +5,13 @@ The normalizer is the only *producer* of STIX inside the orchestrator
 ``orchestrator/normalizer/stix.py`` builds the objects. ADR-011 admits
 *external producers* — tooling that already emits STIX 2.1, such as the
 ``investigation-assistant`` engine — as an **intake path only**: the bundle is
-parsed and handed to ``OpenCTISink``, which owns retries, per-object rejection
-reporting and the outbox. Nothing here builds or rewrites STIX.
+parsed and handed to ``OpenCTISink``, which owns retries and per-object
+rejection reporting. Nothing here builds or rewrites STIX.
+
+A failed ingest is not queued in the OpenCTI outbox, which belongs to pipeline
+runs: the command logs the reason and exits 1, and the producer's bundle file is
+what gets retried. Exit codes: 0 ingested (or parsed, with ``--dry-run``), 1 the
+ingest failed, 2 the file is not a readable STIX 2.1 bundle.
 
     python -m orchestrator.ingest_bundle bundle.stix.json \\
         [--work-name investigation-assistant:conexion_ganadera] [--dry-run]
@@ -26,6 +31,7 @@ from pathlib import Path
 
 import pycti  # noqa: F401  (side effect: registers the OpenCTI SCOs)
 import stix2
+import stix2.exceptions
 
 from orchestrator.config import settings
 from orchestrator.logging_config import configure_logging
@@ -48,7 +54,7 @@ def load_bundle(path: Path) -> stix2.Bundle:
         raise ValueError(f"{path}: not a STIX 2.1 bundle")
     try:
         return stix2.parse(data, allow_custom=True)
-    except stix2.ParseError as exc:
+    except (stix2.exceptions.STIXError, ValueError) as exc:
         raise ValueError(f"{path}: cannot parse the bundle: {exc}") from exc
 
 
@@ -85,6 +91,9 @@ def main(argv: list[str] | None = None) -> int:
         sink.ingest(bundle, args.work_name)
     except OpenCTIIngestError as exc:
         logger.error("ingest_bundle failed: %s", exc)
+        return 1
+    except Exception as exc:  # noqa: BLE001 — pycti/requests errors once retries are spent
+        logger.error("ingest_bundle failed: OpenCTI unreachable or refused the request: %s", exc)
         return 1
     print(f"{total} objects ingested into {settings.opencti_url} as work_name={args.work_name}")
     return 0

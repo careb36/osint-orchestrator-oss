@@ -125,8 +125,8 @@ def _rejected_summary(failed: list, limit: int = 10) -> str:
     for item in failed[:limit]:
         if isinstance(item, dict):
             ident = item.get("id") or item.get("standard_id") or "?"
-            tipo = item.get("type") or item.get("entity_type") or "?"
-            parts.append(f"{ident} ({tipo})")
+            kind = item.get("type") or item.get("entity_type") or "?"
+            parts.append(f"{ident} ({kind})")
         else:
             parts.append(str(item)[:80])
     extra = f" (+{len(failed) - limit} more)" if len(failed) > limit else ""

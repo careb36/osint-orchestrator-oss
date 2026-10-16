@@ -26,7 +26,7 @@ relaxing ADR-002:
 - `orchestrator/ingest_bundle.py` runs as
   `python -m orchestrator.ingest_bundle <file> [--work-name …] [--dry-run]`.
   It parses a bundle from disk and hands it to the existing `OpenCTISink`, which
-  keeps ownership of retries, per-object rejection reporting and the outbox.
+  keeps ownership of retries and per-object rejection reporting.
 - **Nothing in the intake builds or rewrites STIX.** It only parses and ingests;
   `normalizer/stix.py` remains the only producer.
 - **`pycti` is imported before `stix2.parse`** because pycti registers the
@@ -41,9 +41,17 @@ relaxing ADR-002:
   intake fixtures against it, so a change to the engine's output is caught here
   before it reaches OpenCTI.
 - The same intake is exposed over HTTP as `POST /bundles` (API-key protected,
-  ADR-004): it validates the body against the pinned schema, parses with
-  ``pycti`` imported first, and ingests via `OpenCTISink` — the engine
+  ADR-005): it validates the body against the pinned schema, parses with
+  `pycti` imported first, and ingests via `OpenCTISink`. The engine
   (`investigation-assistant`) posts its bundle there after export.
+- **A failed external ingest is not queued.** The OpenCTI outbox belongs to
+  pipeline runs (its rows carry a `run_id` and a `target_id`), and an external
+  bundle has neither. Once the sink's retries are spent, the failure goes back
+  to the producer, which still holds the bundle: the CLI exits 1, and the
+  endpoint answers 502 when the sink reports a failed ingest and 503 when
+  OpenCTI could not be reached. Error details are localised (ADR-004); the
+  raw error of an unreachable OpenCTI goes to the log only, since it can carry
+  the platform's internal URL.
 
 ## Consequences
 
@@ -66,4 +74,8 @@ relaxing ADR-002:
 - **Convert external bundles into a `CollectorResult`:** rejected — it drops the
   evidence notes and re-classifies already-reviewed data.
 - **Let producers write to OpenCTI directly:** rejected — it bypasses the
-  retries, rejection reporting and the outbox the sink centralises.
+  retries and the rejection reporting the sink centralises.
+- **Queue failed external bundles in the OpenCTI outbox:** deferred. It needs
+  outbox rows without a run (a migration) and a decision on how long the
+  orchestrator keeps a third party's bundle; until then the producer is the
+  durable copy and retries on a 502, a 503 or exit code 1.
