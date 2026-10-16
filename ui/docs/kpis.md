@@ -46,10 +46,12 @@ guardrail below:
 | --- | --- | --- |
 | Task completion time | Measured: median minutes from `started_at` to `finished_at` over the terminal runs of the loaded window (100 most recent) | Overview, key figures |
 | Adoption | Withheld: no operator identity or session event exists (ADR-005: one shared API key, no users) | — |
-| MTTR | Withheld: alerts have a dispatch status but no acknowledgement or resolution event | — |
+| MTTR | Measurable: the backend records `acknowledged_at` per alert case and exposes `alert_case_time_to_acknowledge_seconds`; the weekly review reads the histogram (mean = `_sum / _count` over the window) | Prometheus; the Alerts view shows who handled each case |
 
-Adoption and MTTR return to the scorecard when the backend emits the events
-they need; until then the two targets above are not evaluated.
+Adoption returns to the scorecard when the backend emits an operator identity
+event; until then its target is not evaluated. MTTR is measured from the
+acknowledgement event (time to acknowledge, the operator-controlled part of the
+response) rather than from channel delivery.
 
 ## Guardrail
 

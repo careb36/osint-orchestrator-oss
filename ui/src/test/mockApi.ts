@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import type { ChainVerification, DeltaRow, EvidenceRow, Finding, HealthStatus, RiskTrend, RunDetail, RunSummary, TargetSummary } from '../types';
+import type { AlertCase, ChainVerification, DeltaRow, EvidenceRow, Finding, HealthStatus, RiskTrend, RunDetail, RunSummary, TargetSummary } from '../types';
 
 // The default deployment (OpenCTI sink off, ADR-008): the backend promotes the
 // overall status to degraded whenever a check is, so the fixture does too.
@@ -169,6 +169,78 @@ export const sampleDelta: DeltaRow[] = [
   { stix_id: 'url--1', stix_type: 'url', value: 'https://paste.example/abc' },
 ];
 
+export const sampleAlertCases: AlertCase[] = [
+  {
+    id: 7,
+    run_id: sampleRuns[0].id,
+    target_id: sampleRuns[0].target_id,
+    created_at: '2026-10-01T06:12:00',
+    run_status: 'success',
+    risk_level: 'high',
+    new_observable_count: 2,
+    reason: 'new_observables',
+    state: 'open',
+    acknowledged_at: null,
+    acknowledged_by: null,
+    resolved_at: null,
+    resolved_by: null,
+    note: null,
+  },
+  {
+    id: 8,
+    run_id: sampleRuns[1].id,
+    target_id: sampleRuns[1].target_id,
+    created_at: '2026-09-30T06:05:00',
+    run_status: 'failed',
+    risk_level: 'unknown',
+    new_observable_count: 0,
+    reason: 'run_failure',
+    state: 'acknowledged',
+    acknowledged_at: '2026-09-30T07:00:00',
+    acknowledged_by: 'ana',
+    resolved_at: null,
+    resolved_by: null,
+    note: 'collector outage',
+  },
+];
+
+/**
+ * The alert routes keep state across a test (acknowledge, then resolve), on a
+ * copy of the fixture so one test never sees another's triage.
+ */
+function alertRoutes(): Route[] {
+  const cases = sampleAlertCases.map((row) => ({ ...row }));
+  const act = (match: RegExpMatchArray, kind: 'ack' | 'resolve') => {
+    const row = cases.find((candidate) => candidate.id === Number(match[1]));
+    if (!row) return null;
+    if (kind === 'ack') {
+      row.state = 'acknowledged';
+      row.acknowledged_at = '2026-10-01T09:00:00';
+      row.acknowledged_by = 'tester';
+    } else {
+      row.state = 'resolved';
+      row.resolved_at = '2026-10-01T09:30:00';
+      row.resolved_by = 'tester';
+    }
+    return row;
+  };
+  return [
+    {
+      pattern: /^\/alerts(?:\?(.*))?$/,
+      body: (match: RegExpMatchArray) => {
+        const params = new URLSearchParams(match[1] ?? '');
+        const target = params.get('target_id');
+        const state = params.get('state');
+        const items = cases.filter((row) => (!target || row.target_id === target) && (!state || row.state === state));
+        return { items, total: items.length, limit: Number(params.get('limit') ?? 100), offset: 0 };
+      },
+    },
+    { pattern: /^\/alerts\/(\d+)\/ack$/, body: (match: RegExpMatchArray) => act(match, 'ack') },
+    { pattern: /^\/alerts\/(\d+)\/resolve$/, body: (match: RegExpMatchArray) => act(match, 'resolve') },
+    { pattern: /^\/alerts\/(\d+)$/, body: (match: RegExpMatchArray) => cases.find((row) => row.id === Number(match[1])) ?? null },
+  ];
+}
+
 type Route = {
   pattern: RegExp;
   status?: number;
@@ -224,7 +296,7 @@ function jsonResponse(status: number, body: unknown): Response {
  * Returns the mock so tests can assert on the calls made.
  */
 export function installFetchMock(options: MockOptions = {}) {
-  const routes = [...(options.routes ?? []), ...defaultRoutes];
+  const routes = [...(options.routes ?? []), ...alertRoutes(), ...defaultRoutes];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
     const path = url.replace(/^https?:\/\/[^/]+/, '');

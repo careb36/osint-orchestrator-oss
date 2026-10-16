@@ -17,6 +17,7 @@ const TargetsPage = lazy(() => import('./pages/TargetsPage').then((m) => ({ defa
 const TargetDetailPage = lazy(() => import('./pages/TargetDetailPage').then((m) => ({ default: m.TargetDetailPage })));
 const RunsPage = lazy(() => import('./pages/RunsPage').then((m) => ({ default: m.RunsPage })));
 const RunWorkspacePage = lazy(() => import('./pages/RunWorkspacePage').then((m) => ({ default: m.RunWorkspacePage })));
+const AlertsPage = lazy(() => import('./pages/AlertsPage').then((m) => ({ default: m.AlertsPage })));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage').then((m) => ({ default: m.NotFoundPage })));
 
 /**
@@ -117,6 +118,7 @@ function AppShell() {
               <Route path="/targets/:targetId/runs/:runId" element={<RunWorkspaceRoute />} />
               <Route path="/runs" element={<RunsPage />} />
               <Route path="/runs/:runId" element={<RunWorkspaceRoute />} />
+              <Route path="/alerts" element={<AlertsPage />} />
               <Route path="*" element={<NotFoundPage />} />
             </Routes>
           </ViewBoundary>

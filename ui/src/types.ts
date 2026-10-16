@@ -124,3 +124,34 @@ export type ChainVerification = {
   /** Operator-language explanation of `reason`, set by the API when the chain is broken. */
   message?: string;
 };
+
+export type AlertCaseState = 'open' | 'acknowledged' | 'resolved' | string;
+export type AlertCaseReason = 'new_observables' | 'risk_level' | 'run_failure' | string;
+
+/** One triage item per run that met an alert rule (orchestrator/models.py::AlertCase). */
+export type AlertCase = {
+  id: number;
+  run_id: number;
+  target_id: string;
+  created_at: string;
+  run_status: RunStatus;
+  risk_level: string;
+  new_observable_count: number;
+  reason: AlertCaseReason;
+  state: AlertCaseState;
+  acknowledged_at: string | null;
+  acknowledged_by: string | null;
+  resolved_at: string | null;
+  resolved_by: string | null;
+  note: string | null;
+};
+
+export type AlertCaseList = {
+  items: AlertCase[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+/** Body of POST /alerts/{id}/ack and /resolve: free text, there are no users (ADR-005). */
+export type AlertCaseAction = { by: string; note?: string };

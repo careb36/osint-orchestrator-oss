@@ -18,7 +18,7 @@ Definition of done for Phase 1: the shell is stable enough to ship to operators 
 The goal of this phase is to make the running system legible to an analyst without deep investigation work.
 
 - [x] Dashboard with target health, current runs, and recent findings.
-- [ ] Alert and issue overview with priority cues and triage affordances. *Deferred: the API exposes alert deliveries per run only (`GET /runs/{id}`), not an alert list or acknowledgement state, so there is nothing to triage from the UI yet.*
+- [x] Alert and issue overview with priority cues and triage affordances. *The Alerts view lists the alert cases the backend opens for every run that meets a rule (`GET /alerts`), with the reason, risk and run status as cues, and Acknowledge / Resolve actions (`POST /alerts/{id}/ack|resolve`).*
 - [x] Search and filtering across targets and recent investigations.
 - [x] Status cues that distinguish queued, in progress, completed, and failed states.
 - [x] Empty-state guidance when no runs or findings are present.

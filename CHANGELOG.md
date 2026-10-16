@@ -39,6 +39,12 @@ from [SECURITY.md](SECURITY.md).
   Metrics `alert_cases{state}` and `alert_case_time_to_acknowledge_seconds`
   make the time-to-acknowledge KPI measurable. Retention purges cases with
   their run.
+- Dashboard *Alerts* view (`/alerts`): the alert cases the backend opens for
+  every run that meets a rule, filtered by target and state (open by default),
+  sortable, with the reason, risk and run status as cues and Acknowledge /
+  Resolve actions recorded with the operator's name (kept per browser). The
+  run workspace links to the run's case. Closes the Phase 2 triage item of
+  `ui/docs/dod.md`; MTTR joins the KPI scorecard.
 
 - Dashboard resilience and performance pass: the routed views sit inside an
   error boundary keyed by the route, whose fallback offers *Try again* and
