@@ -119,6 +119,20 @@ def backoff_delay(attempt: int, base: float | None = None) -> float:
     )
 
 
+def _rejected_summary(failed: list, limit: int = 10) -> str:
+    """Render the first rejected objects as ``id (type)`` for the error message."""
+    parts = []
+    for item in failed[:limit]:
+        if isinstance(item, dict):
+            ident = item.get("id") or item.get("standard_id") or "?"
+            tipo = item.get("type") or item.get("entity_type") or "?"
+            parts.append(f"{ident} ({tipo})")
+        else:
+            parts.append(str(item)[:80])
+    extra = f" (+{len(failed) - limit} more)" if len(failed) > limit else ""
+    return ", ".join(parts) + extra
+
+
 class OpenCTISink:
     """
     Ingests STIX 2.1 bundles into OpenCTI through pycti's ``OpenCTIApiClient``
@@ -180,7 +194,7 @@ class OpenCTISink:
         if failed:
             raise OpenCTIIngestError(
                 f"{len(failed)} of {object_count} objects rejected by OpenCTI "
-                "after pycti's own per-object retries",
+                f"after pycti's own per-object retries: {_rejected_summary(failed)}",
                 transient=False,
             )
         logger.info("OpenCTI ingest OK: work=%s objects=%d", work_name, object_count)

@@ -1,0 +1,39 @@
+{
+  "type": "bundle",
+  "id": "bundle--a1b2c3d4-0000-4000-8000-000000000001",
+  "objects": [
+    {
+      "type": "identity",
+      "spec_version": "2.1",
+      "id": "identity--a1b2c3d4-0000-4000-8000-000000000002",
+      "created": "2026-01-01T00:00:00.000Z",
+      "modified": "2026-01-01T00:00:00.000Z",
+      "name": "Example Person",
+      "identity_class": "individual"
+    },
+    {
+      "type": "bank-account",
+      "spec_version": "2.1",
+      "id": "bank-account--41ec7dd3-4634-5f31-b572-308cba7c0767",
+      "value": "0000001",
+      "account_number": "0000001",
+      "iban": "UY-BROU-0000001"
+    },
+    {
+      "type": "text",
+      "spec_version": "2.1",
+      "id": "text--c9337897-8ca1-50c6-ad37-04dd5bf38233",
+      "value": "Example asset"
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--a1b2c3d4-0000-4000-8000-000000000003",
+      "created": "2026-01-01T00:00:00.000Z",
+      "modified": "2026-01-01T00:00:00.000Z",
+      "relationship_type": "related-to",
+      "source_ref": "identity--a1b2c3d4-0000-4000-8000-000000000002",
+      "target_ref": "bank-account--41ec7dd3-4634-5f31-b572-308cba7c0767"
+    }
+  ]
+}
