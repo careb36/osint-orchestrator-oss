@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from orchestrator.config import settings
 from orchestrator.synthesizer.model_routing import resolve_model_for_route
@@ -22,7 +22,9 @@ try:
 
     _HAS_ANTHROPIC = True
 except ImportError:
-    _anthropic_sdk = None
+    # SDK attributes are only used after the availability check.
+    if not TYPE_CHECKING:
+        _anthropic_sdk = None
     _HAS_ANTHROPIC = False
 
 _PROVIDER = "anthropic"
@@ -66,7 +68,7 @@ class AnthropicClient:
         )
         started = time.monotonic()
         try:
-            response = await client.messages.create(
+            response = await client.messages.create(  # type: ignore[call-overload]  # SDK stubs omit the supported temperature argument.
                 model=model,
                 max_tokens=settings.llm_max_tokens,
                 temperature=0,
@@ -107,4 +109,4 @@ class AnthropicClient:
             },
         )
         record_request(_PROVIDER, model, "ok", in_tokens=in_tokens, out_tokens=out_tokens)
-        return str(response.content[0].text)  # type: ignore[union-attr]
+        return str(response.content[0].text)  # type: ignore[union-attr]  # SDK content union is wider than text completions.

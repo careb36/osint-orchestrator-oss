@@ -387,9 +387,9 @@ async def _fetch_history(target_id: str, current_run_id: int) -> list[tuple[int,
         run_stmt = (
             select(Run)
             .where(Run.target_id == target_id)
-            .where(Run.id < current_run_id)
+            .where(col(Run.id) < current_run_id)
             .where(col(Run.status).in_([RunStatus.SUCCESS, RunStatus.PARTIAL]))
-            .order_by(Run.id.desc())  # type: ignore[union-attr]
+            .order_by(col(Run.id).desc())
             .limit(n)
         )
         prior_runs = (await session.exec(run_stmt)).all()

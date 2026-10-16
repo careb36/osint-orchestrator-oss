@@ -38,7 +38,8 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from sqlalchemy import func
-from sqlmodel import select
+from sqlalchemy import select as sa_select
+from sqlmodel import col, select
 
 from orchestrator import alert_cases, metrics
 from orchestrator.auth import log_auth_status, log_secret_key_status, require_api_key
@@ -812,18 +813,18 @@ async def risk_trends() -> list[dict[str, Any]]:
     runs_by_target: dict[str, list[dict[str, Any]]] = defaultdict(list)
     findings_by_run_id: dict[int, FindingRecord] = {}
     async with get_session() as session:
-        ranked_runs = select(
-            Run.id.label("id"),
-            Run.target_id.label("target_id"),
-            Run.status.label("status"),
-            Run.started_at.label("started_at"),
-            Run.new_observables.label("new_observables"),
+        ranked_runs = sa_select(
+            col(Run.id).label("id"),
+            col(Run.target_id).label("target_id"),
+            col(Run.status).label("status"),
+            col(Run.started_at).label("started_at"),
+            col(Run.new_observables).label("new_observables"),
             func.row_number()
-            .over(partition_by=Run.target_id, order_by=Run.started_at.desc())
+            .over(partition_by=Run.target_id, order_by=col(Run.started_at).desc())
             .label("rank"),
         ).subquery()
-        runs_result = await session.exec(
-            select(
+        runs_result = await session.execute(
+            sa_select(
                 ranked_runs.c.id,
                 ranked_runs.c.target_id,
                 ranked_runs.c.status,
@@ -848,7 +849,7 @@ async def risk_trends() -> list[dict[str, Any]]:
 
         if run_ids:
             findings_result = await session.exec(
-                select(FindingRecord).where(FindingRecord.run_id.in_(run_ids))
+                select(FindingRecord).where(col(FindingRecord.run_id).in_(run_ids))
             )
             findings_by_run_id.update({record.run_id: record for record in findings_result.all()})
 
@@ -891,7 +892,7 @@ async def _risk_levels_by_run(session: Any, run_ids: list[int]) -> dict[int, str
         return {}
     result = await session.exec(
         select(FindingRecord.run_id, FindingRecord.risk_level).where(
-            FindingRecord.run_id.in_(run_ids)  # type: ignore[attr-defined]
+            col(FindingRecord.run_id).in_(run_ids)
         )
     )
     return {int(run_id): str(risk_level) for run_id, risk_level in result.all()}
@@ -915,7 +916,7 @@ async def list_runs(
     async with get_session() as session:
         stmt = (
             select(Run)
-            .order_by(Run.started_at.desc(), Run.id.desc())  # type: ignore[arg-type, union-attr]
+            .order_by(col(Run.started_at).desc(), col(Run.id).desc())
             .offset(offset)
             .limit(limit)
         )

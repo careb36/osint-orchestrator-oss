@@ -28,7 +28,7 @@ import logging
 import random
 import re
 import time
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import httpx
 
@@ -49,7 +49,9 @@ try:
 
     _HAS_OPENAI = True
 except ImportError:
-    _openai_sdk = None
+    # SDK attributes are only used after the availability check.
+    if not TYPE_CHECKING:
+        _openai_sdk = None
     _HAS_OPENAI = False
 
 
@@ -162,7 +164,11 @@ async def preflight_configured_models(
     for route, model in _model_route_pairs():
         available = model in served_model_ids_set
         metrics.llm_model_available.labels(provider_name, model, route).set(1 if available else 0)
-        log_extra = {"provider": provider_name, "model": model, "route": route}
+        log_extra: dict[str, str | list[str]] = {
+            "provider": provider_name,
+            "model": model,
+            "route": route,
+        }
         if available:
             logger.info(
                 "LLM model available provider=%s model=%s route=%s",
@@ -248,7 +254,7 @@ def _rejects_json_schema(exc: Exception) -> bool:
 def _retry_after_seconds(exc: Exception) -> float | None:
     """Seconds from a ``Retry-After`` header, if the provider sent a numeric one."""
     headers = getattr(getattr(exc, "response", None), "headers", None)
-    raw = headers.get("retry-after") if hasattr(headers, "get") else None
+    raw = headers.get("retry-after") if headers is not None and hasattr(headers, "get") else None
     if raw is None:
         return None
     try:

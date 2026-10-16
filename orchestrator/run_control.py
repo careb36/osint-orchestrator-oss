@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
-from sqlmodel import select
+from sqlmodel import col, select
 
 from orchestrator.database import get_session
 from orchestrator.models import Run, RunStatus
@@ -37,7 +37,7 @@ async def create_pending_run(target_id: str) -> int | None:
         existing = await session.exec(
             select(Run.id)
             .where(Run.target_id == target_id)
-            .where(Run.status.in_([RunStatus.PENDING, RunStatus.RUNNING]))
+            .where(col(Run.status).in_([RunStatus.PENDING, RunStatus.RUNNING]))
             .limit(1)
         )
         if existing.first() is not None:
@@ -67,7 +67,7 @@ async def mark_interrupted_runs() -> int:
     async with get_session() as session:
         stale = (
             await session.exec(
-                select(Run).where(Run.status.in_([RunStatus.PENDING, RunStatus.RUNNING]))
+                select(Run).where(col(Run.status).in_([RunStatus.PENDING, RunStatus.RUNNING]))
             )
         ).all()
         for run in stale:

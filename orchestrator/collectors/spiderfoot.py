@@ -25,6 +25,7 @@ import ipaddress
 import logging
 import re
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 import httpx
@@ -271,7 +272,7 @@ class SpiderFootCollector(BaseCollector):
             return data
         return []
 
-    def _parse(self, events: list[dict | list], fqdn: str) -> CollectorResult:
+    def _parse(self, events: Sequence[dict | list], fqdn: str) -> CollectorResult:
         """
         Convert SpiderFoot event rows to CollectorResult.
 

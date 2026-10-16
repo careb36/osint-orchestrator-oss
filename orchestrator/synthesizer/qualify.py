@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from sqlmodel import select
+from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from orchestrator.config import settings
@@ -110,7 +110,7 @@ def _run_qualifications_query(run_id: int):
     return (
         select(EvidenceQualification)
         .where(EvidenceQualification.run_id == run_id)
-        .order_by(EvidenceQualification.url.asc(), EvidenceQualification.id.asc())
+        .order_by(col(EvidenceQualification.url).asc(), col(EvidenceQualification.id).asc())
     )
 
 
