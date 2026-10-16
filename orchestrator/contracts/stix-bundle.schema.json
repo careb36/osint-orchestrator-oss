@@ -1,0 +1,210 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/careb36/investigation-assistant/schema/stix-bundle-1.0.0.json",
+  "x-contract-version": "1.0.0",
+  "title": "Bundle STIX 2.1 del motor investigation-assistant",
+  "description": "Contrato entre el motor (productor) y osint-orchestrator/OpenCTI (consumidor).\n\nDescribe el bundle STIX 2.1 que emite `stix_export.exporter` (un caso =\nun bundle). El orquestador ingesta estos bundles en OpenCTI; este esquema es\nla única fuente de verdad del formato y se valida con `jsonschema` en los dos\nrepos (tests de contrato). Si el formato cambia, se sube `x-contract-version`\ny se actualizan ambas copias.\n\nReglas fijadas:\n- ids deterministas `<tipo>--<uuid5>` (fórmula del orquestador).\n- `bank-account` exige `value` e `iban` (requisito del SCO de OpenCTI); los SCO\n  no llevan `created`/`modified`.\n- una sola relación `related-to` por par (origen, destino); el tipo AML va en\n  `labels` y `x_investigation_relation`.\n- cada cita del corpus genera una `note` con `external_references` (sha256).\n- TLP viaja como `marking-definition` y todos los objetos lo referencian.",
+  "type": "object",
+  "required": ["type", "id", "objects"],
+  "properties": {
+    "type": { "const": "bundle" },
+    "spec_version": { "const": "2.1" },
+    "id": { "$ref": "#/$defs/idBundle" },
+    "objects": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/object" }
+    }
+  },
+  "$defs": {
+    "timestamp": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+    },
+    "confidence": { "type": "integer", "minimum": 0, "maximum": 100 },
+    "labels": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "ref": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]+--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "markingRefs": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/idMarking" }
+    },
+    "objectRefs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ref" }
+    },
+    "externalReference": {
+      "type": "object",
+      "required": ["source_name", "external_id"],
+      "properties": {
+        "source_name": { "type": "string", "minLength": 1 },
+        "external_id": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" }
+      }
+    },
+    "idBundle": { "type": "string", "pattern": "^bundle--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+    "idIdentity": { "type": "string", "pattern": "^identity--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+    "idGrouping": { "type": "string", "pattern": "^grouping--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+    "idRelationship": { "type": "string", "pattern": "^relationship--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+    "idNote": { "type": "string", "pattern": "^note--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+    "idBankAccount": { "type": "string", "pattern": "^bank-account--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+    "idText": { "type": "string", "pattern": "^text--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+    "idMarking": { "type": "string", "pattern": "^marking-definition--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+
+    "identity": {
+      "type": "object",
+      "required": ["type", "spec_version", "id", "name", "identity_class",
+                   "created", "modified", "labels", "confidence", "object_marking_refs"],
+      "properties": {
+        "type": { "const": "identity" },
+        "spec_version": { "const": "2.1" },
+        "id": { "$ref": "#/$defs/idIdentity" },
+        "name": { "type": "string", "minLength": 1 },
+        "identity_class": { "enum": ["individual", "organization"] },
+        "description": { "type": "string" },
+        "created": { "$ref": "#/$defs/timestamp" },
+        "modified": { "$ref": "#/$defs/timestamp" },
+        "labels": { "$ref": "#/$defs/labels" },
+        "confidence": { "$ref": "#/$defs/confidence" },
+        "x_opencti_score": { "$ref": "#/$defs/confidence" },
+        "object_marking_refs": { "$ref": "#/$defs/markingRefs" }
+      }
+    },
+
+    "bankAccount": {
+      "type": "object",
+      "required": ["type", "spec_version", "id", "value", "iban", "object_marking_refs"],
+      "properties": {
+        "type": { "const": "bank-account" },
+        "spec_version": { "const": "2.1" },
+        "id": { "$ref": "#/$defs/idBankAccount" },
+        "value": { "type": "string", "minLength": 1 },
+        "account_number": { "type": "string" },
+        "iban": { "type": "string", "minLength": 1 },
+        "x_opencti_description": { "type": "string" },
+        "x_opencti_labels": { "$ref": "#/$defs/labels" },
+        "x_opencti_score": { "$ref": "#/$defs/confidence" },
+        "object_marking_refs": { "$ref": "#/$defs/markingRefs" }
+      }
+    },
+
+    "text": {
+      "type": "object",
+      "required": ["type", "spec_version", "id", "value", "object_marking_refs"],
+      "properties": {
+        "type": { "const": "text" },
+        "spec_version": { "const": "2.1" },
+        "id": { "$ref": "#/$defs/idText" },
+        "value": { "type": "string", "minLength": 1 },
+        "x_opencti_labels": { "$ref": "#/$defs/labels" },
+        "x_opencti_score": { "$ref": "#/$defs/confidence" },
+        "object_marking_refs": { "$ref": "#/$defs/markingRefs" }
+      }
+    },
+
+    "grouping": {
+      "type": "object",
+      "required": ["type", "spec_version", "id", "name", "context",
+                   "created", "modified", "labels", "object_marking_refs"],
+      "properties": {
+        "type": { "const": "grouping" },
+        "spec_version": { "const": "2.1" },
+        "id": { "$ref": "#/$defs/idGrouping" },
+        "name": { "type": "string", "minLength": 1 },
+        "context": { "type": "string" },
+        "created": { "$ref": "#/$defs/timestamp" },
+        "modified": { "$ref": "#/$defs/timestamp" },
+        "labels": { "$ref": "#/$defs/labels" },
+        "confidence": { "$ref": "#/$defs/confidence" },
+        "x_opencti_score": { "$ref": "#/$defs/confidence" },
+        "object_refs": { "$ref": "#/$defs/objectRefs" },
+        "object_marking_refs": { "$ref": "#/$defs/markingRefs" }
+      }
+    },
+
+    "relationship": {
+      "type": "object",
+      "required": ["type", "spec_version", "id", "relationship_type",
+                   "source_ref", "target_ref", "created", "modified",
+                   "labels", "confidence", "x_investigation_relation",
+                   "object_marking_refs"],
+      "properties": {
+        "type": { "const": "relationship" },
+        "spec_version": { "const": "2.1" },
+        "id": { "$ref": "#/$defs/idRelationship" },
+        "relationship_type": { "const": "related-to" },
+        "source_ref": { "$ref": "#/$defs/ref" },
+        "target_ref": { "$ref": "#/$defs/ref" },
+        "description": { "type": "string" },
+        "created": { "$ref": "#/$defs/timestamp" },
+        "modified": { "$ref": "#/$defs/timestamp" },
+        "labels": { "$ref": "#/$defs/labels" },
+        "confidence": { "$ref": "#/$defs/confidence" },
+        "x_opencti_score": { "$ref": "#/$defs/confidence" },
+        "x_investigation_relation": { "$ref": "#/$defs/labels" },
+        "x_investigation_evidence_kind": { "enum": ["derivada"] },
+        "object_marking_refs": { "$ref": "#/$defs/markingRefs" }
+      }
+    },
+
+    "note": {
+      "type": "object",
+      "required": ["type", "spec_version", "id", "content", "object_refs",
+                   "external_references", "created", "modified",
+                   "object_marking_refs"],
+      "properties": {
+        "type": { "const": "note" },
+        "spec_version": { "const": "2.1" },
+        "id": { "$ref": "#/$defs/idNote" },
+        "content": { "type": "string", "minLength": 1 },
+        "created": { "$ref": "#/$defs/timestamp" },
+        "modified": { "$ref": "#/$defs/timestamp" },
+        "object_refs": { "$ref": "#/$defs/objectRefs" },
+        "external_references": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/externalReference" }
+        },
+        "object_marking_refs": { "$ref": "#/$defs/markingRefs" }
+      }
+    },
+
+    "markingDefinition": {
+      "type": "object",
+      "required": ["type", "spec_version", "id", "created", "definition_type", "definition"],
+      "properties": {
+        "type": { "const": "marking-definition" },
+        "spec_version": { "const": "2.1" },
+        "id": { "$ref": "#/$defs/idMarking" },
+        "created": { "$ref": "#/$defs/timestamp" },
+        "definition_type": { "const": "tlp" },
+        "name": { "type": "string" },
+        "definition": {
+          "type": "object",
+          "required": ["tlp"],
+          "properties": {
+            "tlp": { "enum": ["white", "green", "amber", "red"] }
+          }
+        }
+      }
+    },
+
+    "object": {
+      "oneOf": [
+        { "$ref": "#/$defs/identity" },
+        { "$ref": "#/$defs/bankAccount" },
+        { "$ref": "#/$defs/text" },
+        { "$ref": "#/$defs/grouping" },
+        { "$ref": "#/$defs/relationship" },
+        { "$ref": "#/$defs/note" },
+        { "$ref": "#/$defs/markingDefinition" }
+      ]
+    }
+  }
+}

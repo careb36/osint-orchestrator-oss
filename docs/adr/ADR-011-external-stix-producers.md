@@ -34,6 +34,12 @@ relaxing ADR-002:
   know. Without it, a bundle carrying them cannot even be parsed.
 - Rejected objects are reported **by id and type** in the sink error, so the
   producer can be pointed at exactly what OpenCTI refused.
+- The shared bundle contract is pinned as a **JSON Schema**
+  (`orchestrator/contracts/stix-bundle.schema.json`, draft 2020-12,
+  `x-contract-version: 1.0.0`): a copy of the producer's schema
+  (`investigation-assistant`, its `IA-ADR-005`). A contract test validates
+  intake fixtures against it, so a change to the engine's output is caught here
+  before it reaches OpenCTI.
 
 ## Consequences
 
@@ -43,6 +49,9 @@ relaxing ADR-002:
   `value`, and its id derives from `iban`; `text` requires `value`.
 - Producers stay responsible for their own id determinism and mark handling; the
   sink only ingests.
+- The schema copy must stay in sync with the producer: when the producer bumps
+  its contract version, `orchestrator/contracts/SCHEMA_VERSION` and the copied
+  schema are updated together (the contract test enforces the version match).
 - The intake is CLI-only for now. A scheduled or streaming intake would be a
   separate decision, as would accepting bundles from untrusted producers.
 
