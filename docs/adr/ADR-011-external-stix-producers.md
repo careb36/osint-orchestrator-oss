@@ -40,6 +40,10 @@ relaxing ADR-002:
   (`investigation-assistant`, its `IA-ADR-005`). A contract test validates
   intake fixtures against it, so a change to the engine's output is caught here
   before it reaches OpenCTI.
+- The same intake is exposed over HTTP as `POST /bundles` (API-key protected,
+  ADR-004): it validates the body against the pinned schema, parses with
+  ``pycti`` imported first, and ingests via `OpenCTISink` — the engine
+  (`investigation-assistant`) posts its bundle there after export.
 
 ## Consequences
 
@@ -52,8 +56,10 @@ relaxing ADR-002:
 - The schema copy must stay in sync with the producer: when the producer bumps
   its contract version, `orchestrator/contracts/SCHEMA_VERSION` and the copied
   schema are updated together (the contract test enforces the version match).
-- The intake is CLI-only for now. A scheduled or streaming intake would be a
-  separate decision, as would accepting bundles from untrusted producers.
+- The intake is available as a CLI (`python -m orchestrator.ingest_bundle`) and
+  over HTTP (`POST /bundles`, API-key protected). A scheduled or streaming
+  intake would be a separate decision, as would accepting bundles from
+  untrusted producers.
 
 ## Alternatives
 

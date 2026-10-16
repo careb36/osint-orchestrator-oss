@@ -24,6 +24,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any
 
+import jsonschema
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -43,6 +44,7 @@ from sqlmodel import select
 from orchestrator import alert_cases, metrics
 from orchestrator.auth import log_auth_status, log_secret_key_status, require_api_key
 from orchestrator.config import NEBIUS_DEFAULT_BASE_URL, settings
+from orchestrator.contracts import load_schema
 from orchestrator.database import create_db_and_tables, get_session
 from orchestrator.evidence import (
     load_manifest_file,
@@ -77,6 +79,7 @@ from orchestrator.scheduler import (
     shutdown_scheduler,
     start_scheduler,
 )
+from orchestrator.sinks import OpenCTIIngestError, OpenCTISink
 from orchestrator.synthesizer.providers.openai_compat import preflight_configured_models
 from orchestrator.synthesizer.qualify import load_run_qualifications
 from orchestrator.targets import load_targets
@@ -631,6 +634,46 @@ async def replay_opencti_outbox(
     replayed = await replay_opencti_dead_letters(run_id=run_id, limit=limit)
     processed = await drain_opencti_outbox(limit=limit)
     return {"status": "replayed", **replayed, "processed_now": processed}
+
+
+@router.post("/bundles", response_model=dict[str, Any], tags=["bundles"])
+async def ingest_external_bundle(
+    request: Request,
+    work_name: str = Query(default="external-stix"),
+) -> dict[str, Any]:
+    """Intake a STIX 2.1 bundle from an external producer into OpenCTI (ADR-011).
+
+    The body is the bundle JSON. It is validated against the pinned contract
+    schema (``orchestrator/contracts``), parsed with ``pycti`` imported first (so
+    the OpenCTI SCOs ``bank-account``/``text`` resolve), and handed to
+    ``OpenCTISink``, which owns retries, rejection reporting and the outbox.
+    """
+    if not settings.opencti_enabled:
+        raise HTTPException(status_code=409, detail=t("opencti_sink_disabled"))
+
+    data = await request.json()
+
+    try:
+        jsonschema.validate(instance=data, schema=load_schema())
+    except jsonschema.ValidationError as exc:
+        raise HTTPException(
+            status_code=422, detail=f"bundle does not satisfy the contract: {exc.message}"
+        ) from exc
+
+    import pycti  # noqa: F401  (registers the OpenCTI SCOs before stix2.parse)
+    import stix2
+
+    try:
+        bundle = stix2.parse(data, allow_custom=True)
+    except Exception as exc:  # noqa: BLE001 — a malformed bundle must not 500
+        raise HTTPException(status_code=422, detail=f"cannot parse bundle: {exc}") from exc
+
+    try:
+        await OpenCTISink().ingest_async(bundle, work_name=work_name)
+    except OpenCTIIngestError as exc:
+        raise HTTPException(status_code=502, detail=f"OpenCTI ingest failed: {exc}") from exc
+
+    return {"status": "ingested", "work_name": work_name, "objects": len(bundle.objects)}
 
 
 def _ui_dist_index() -> Path | None:
