@@ -823,7 +823,7 @@ async def risk_trends() -> list[dict[str, Any]]:
             .over(partition_by=Run.target_id, order_by=col(Run.started_at).desc())
             .label("rank"),
         ).subquery()
-        runs_result = await session.execute(
+        runs_result = await session.exec(  # type: ignore[call-overload]  # SQLModel overloads omit SQLAlchemy Select statements.
             sa_select(
                 ranked_runs.c.id,
                 ranked_runs.c.target_id,
