@@ -114,6 +114,11 @@ Read the [changelog](../CHANGELOG.md) for removed settings before upgrading;
 `.env` keys that no longer exist are ignored, but a renamed one would silently
 fall back to its default.
 
+When upgrading an existing OpenCTI install from 6.8.x to 6.9.x, OpenCTI runs
+its schema migrations on first start. Back up the data listed in the
+[persistence and backups table](#persistence-and-backups) first, and expect
+the first `opencti` start to take longer than its usual healthcheck window.
+
 ## Observability
 
 `GET /health` (component checks with hints), `GET /ready` (503 until the

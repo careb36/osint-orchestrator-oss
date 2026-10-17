@@ -113,5 +113,5 @@ and phased definition of done are in `ui/docs/`; the decision is ADR-010.
 | [Tavily](https://tavily.com) | Search API, called at run time for due-diligence queries |
 | [OWASP Amass](https://github.com/owasp-amass/amass) | Engine sidecar `owaspamass/amass:v5.1.1`, results read with `oam_subs` |
 | [OWASP SocialOSINT](https://github.com/bm-github/owasp-social-osint-agent) | Sidecar service, official platform APIs only |
-| [OpenCTI](https://github.com/OpenCTI-Platform/opencti) | `opencti/platform:6.8.11`; `pycti` is pinned to the same version |
+| [OpenCTI](https://github.com/OpenCTI-Platform/opencti) | `opencti/platform:6.9.29`; `pycti` is pinned to the same version |
 | MISP | Through the official OpenCTI connector; no custom code |
