@@ -17,7 +17,7 @@ import json
 from importlib.resources import files
 from typing import Any
 
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.1.0"
 SCHEMA_FILE = "stix-bundle.schema.json"
 
 

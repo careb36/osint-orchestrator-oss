@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/careb36/investigation-assistant/schema/stix-bundle-1.0.0.json",
-  "x-contract-version": "1.0.0",
+  "$id": "https://github.com/careb36/investigation-assistant/schema/stix-bundle-1.1.0.json",
+  "x-contract-version": "1.1.0",
   "title": "Bundle STIX 2.1 del motor investigation-assistant",
   "description": "Contrato entre el motor (productor) y osint-orchestrator/OpenCTI (consumidor).\n\nDescribe el bundle STIX 2.1 que emite `stix_export.exporter` (un caso =\nun bundle). El orquestador ingesta estos bundles en OpenCTI; este esquema es\nla única fuente de verdad del formato y se valida con `jsonschema` en los dos\nrepos (tests de contrato). Si el formato cambia, se sube `x-contract-version`\ny se actualizan ambas copias.\n\nReglas fijadas:\n- ids deterministas `<tipo>--<uuid5>` (fórmula del orquestador).\n- `bank-account` exige `value` e `iban` (requisito del SCO de OpenCTI); los SCO\n  no llevan `created`/`modified`.\n- una sola relación `related-to` por par (origen, destino); el tipo AML va en\n  `labels` y `x_investigation_relation`.\n- cada cita del corpus genera una `note` con `external_references` (sha256).\n- TLP viaja como `marking-definition` y todos los objetos lo referencian.",
   "type": "object",
@@ -66,7 +66,7 @@
         "spec_version": { "const": "2.1" },
         "id": { "$ref": "#/$defs/idIdentity" },
         "name": { "type": "string", "minLength": 1 },
-        "identity_class": { "enum": ["individual", "organization"] },
+        "identity_class": { "enum": ["individual", "organization", "system"] },
         "description": { "type": "string" },
         "created": { "$ref": "#/$defs/timestamp" },
         "modified": { "$ref": "#/$defs/timestamp" },

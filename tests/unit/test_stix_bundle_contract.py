@@ -38,7 +38,7 @@ def _validate(bundle: dict[str, Any]) -> None:
 
 
 def test_schema_is_the_pinned_version() -> None:
-    assert SCHEMA_VERSION == "1.0.0"
+    assert SCHEMA_VERSION == "1.1.0"
     assert load_schema()["x-contract-version"] == SCHEMA_VERSION
 
 
@@ -68,3 +68,18 @@ def test_the_schema_rejects_an_object_of_unknown_type() -> None:
         _validate({**bundle, "objects": [unknown]})
     # The bundle's own id is valid, so the rejection is the object's, not the id's.
     assert list(excinfo.value.absolute_path)[:2] == ["objects", 0]
+
+
+def test_the_schema_rejects_an_identity_with_unknown_class() -> None:
+    bundle = _load()
+    identity_index = next(
+        i
+        for i, obj in enumerate(bundle["objects"])
+        if obj.get("name") == "investigation-assistant"
+    )
+    identity = {**bundle["objects"][identity_index], "identity_class": "group"}
+    objects = list(bundle["objects"])
+    objects[identity_index] = identity
+    with pytest.raises(jsonschema.ValidationError) as excinfo:
+        _validate({**bundle, "objects": objects})
+    assert list(excinfo.value.absolute_path)[:2] == ["objects", identity_index]
