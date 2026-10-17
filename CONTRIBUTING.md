@@ -33,6 +33,7 @@ pip install -e ".[dev,llm]"
 # Quality gates — the same commands CI runs
 ruff check orchestrator/ tests/unit/
 ruff format --check orchestrator/ tests/unit/
+mypy orchestrator/ --ignore-missing-imports
 pytest tests/unit/ -v -m "not integration"
 
 # Only if you touched deploy/helm/ (both flags matter; see below)
