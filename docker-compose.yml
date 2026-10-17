@@ -105,7 +105,7 @@ services:
   # ── OpenCTI Platform ─────────────────────────────────────────────────────────
 
   opencti:
-    image: opencti/platform:6.8.11
+    image: opencti/platform:6.9.29
     restart: unless-stopped
     depends_on:
       elasticsearch:
@@ -151,7 +151,7 @@ services:
       start_period: 120s
 
   worker:
-    image: opencti/worker:6.8.11
+    image: opencti/worker:6.9.29
     restart: unless-stopped
     depends_on:
       opencti:
@@ -165,7 +165,7 @@ services:
   # ── Built-in OpenCTI connectors ───────────────────────────────────────────
 
   connector-import-file-stix:
-    image: opencti/connector-import-file-stix:6.8.11
+    image: opencti/connector-import-file-stix:6.9.29
     restart: unless-stopped
     depends_on:
       opencti:
@@ -179,7 +179,7 @@ services:
       CONNECTOR_LOG_LEVEL: "error"
 
   connector-opencti:
-    image: opencti/connector-opencti:6.8.11
+    image: opencti/connector-opencti:6.9.29
     restart: unless-stopped
     depends_on:
       opencti:

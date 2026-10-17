@@ -32,7 +32,7 @@ dependencies = [
     # OpenCTI client. Must match the opencti/platform tag in docker-compose.yml:
     # an unpinned pycti resolves to the latest release, whose GraphQL inputs the
     # older platform rejects (e.g. x_opencti_modified_at on NoteAddInput).
-    "pycti==6.8.11",
+    "pycti==6.9.29",
     # HTTP collector calls
     "httpx>=0.27.0",
     # OSINT collectors.
