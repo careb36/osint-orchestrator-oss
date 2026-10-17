@@ -13,8 +13,10 @@ import shutil
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any, cast
 
 from sqlalchemy import delete, select
+from sqlalchemy.engine import Result
 from sqlmodel import col
 
 from orchestrator.config import settings
@@ -83,11 +85,11 @@ async def purge_expired(now: datetime | None = None) -> RetentionSummary:
         async with get_session() as session:
             # Identify expired run ids.  Use finished_at when available,
             # fall back to started_at for runs that never completed.
-            stmt = select(Run.id).where(
+            stmt = select(col(Run.id)).where(
                 col(Run.finished_at).isnot(None) & (col(Run.finished_at) < cutoff)
                 | col(Run.finished_at).is_(None) & (col(Run.started_at) < cutoff)
             )
-            result = await session.exec(stmt)
+            result = await session.exec(stmt)  # type: ignore[call-overload]  # SQLModel's exec stubs exclude SQLAlchemy Select, which it supports at runtime.
             expired_ids = [row[0] if not isinstance(row, int) else row for row in result.all()]
 
             if expired_ids:
@@ -112,14 +114,14 @@ async def purge_expired(now: datetime | None = None) -> RetentionSummary:
                     deleted = 0
                     for i in range(0, len(expired_ids), _BATCH_SIZE):
                         batch = expired_ids[i : i + _BATCH_SIZE]
-                        res = await session.exec(delete(model).where(id_column.in_(batch)))
+                        res = await session.exec(delete(model).where(col(id_column).in_(batch)))
                         deleted += res.rowcount
                     setattr(summary, counter_attr, deleted)
 
                 runs_deleted = 0
                 for i in range(0, len(expired_ids), _BATCH_SIZE):
                     batch = expired_ids[i : i + _BATCH_SIZE]
-                    res = await session.exec(delete(Run).where(Run.id.in_(batch)))
+                    res = await session.exec(delete(Run).where(col(Run.id).in_(batch)))
                     runs_deleted += res.rowcount
                 summary.runs_deleted = runs_deleted
 
@@ -196,7 +198,13 @@ async def _surviving_run_dates(cutoff: datetime) -> set[str]:
     """Directory names (UTC start dates) of runs still in the database that
     started before *cutoff*; later dates are never purge candidates."""
     async with get_session() as session:
-        result = await session.exec(select(Run.started_at).where(col(Run.started_at) < cutoff))
+        # SQLAlchemy select returns Result here; SQLModel's exec stub declares TupleResult.
+        result = cast(
+            Result[Any],
+            await session.exec(  # type: ignore[call-overload]  # SQLModel's exec stubs exclude SQLAlchemy Select, which it supports at runtime.
+                select(col(Run.started_at)).where(col(Run.started_at) < cutoff)
+            ),
+        )
         return {_bundle_date(started_at) for started_at in result.scalars().all()}
 
 
