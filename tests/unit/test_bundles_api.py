@@ -14,7 +14,7 @@ from orchestrator.api import app
 from orchestrator.config import settings
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "engine_bundle.stix.json"
-OBJECTS = 6  # marking-definition + identity + bank-account + text + relationship + note
+OBJECTS = 7  # marking-definition + two identities + bank-account + text + relationship + note
 
 
 class _FakeSink:
@@ -114,7 +114,7 @@ def test_a_failed_ingest_is_502_with_the_sink_reason(monkeypatch: pytest.MonkeyP
     from orchestrator.sinks import OpenCTIIngestError
 
     sink = _FailingSink(
-        OpenCTIIngestError("1 of 6 objects rejected: text--x (text)", transient=False)
+        OpenCTIIngestError("1 of 7 objects rejected: text--x (text)", transient=False)
     )
     with _client_with_sink(monkeypatch, sink) as test_client:
         res = test_client.post("/bundles", json=_bundle())

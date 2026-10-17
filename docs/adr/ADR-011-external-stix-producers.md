@@ -36,7 +36,7 @@ relaxing ADR-002:
   producer can be pointed at exactly what OpenCTI refused.
 - The shared bundle contract is pinned as a **JSON Schema**
   (`orchestrator/contracts/stix-bundle.schema.json`, draft 2020-12,
-  `x-contract-version: 1.0.0`): a copy of the producer's schema
+  `x-contract-version: 1.1.0`): a copy of the producer's schema
   (`investigation-assistant`, its `IA-ADR-005`). A contract test validates
   intake fixtures against it, so a change to the engine's output is caught here
   before it reaches OpenCTI.
