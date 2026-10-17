@@ -253,6 +253,8 @@ class CollectorSet(BaseModel):
         # ``timeout_seconds`` (600 s); apply the collector's global default
         # unless the operator set a value explicitly.
         if "timeout_seconds" not in cfg.model_fields_set:
+            # Pydantic always supplies a field name to this field validator.
+            assert info.field_name is not None
             default = _GLOBAL_TIMEOUT_DEFAULTS[info.field_name]
             return cfg.model_copy(update={"timeout_seconds": default()})
         return cfg

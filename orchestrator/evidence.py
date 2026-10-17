@@ -224,12 +224,14 @@ async def verify_target_chain(
     ``anchor_previous_manifest_sha256`` say where, so an auditor holding the
     archived manifests can check the earlier part offline.
     """
-    from sqlmodel import select  # noqa: PLC0415 — keep this module import-light
+    from sqlmodel import col, select  # noqa: PLC0415 — keep this module import-light
 
     from orchestrator.models import Run  # noqa: PLC0415
 
     result = await session.exec(
-        select(Run).where(Run.target_id == target_id).order_by(Run.started_at.asc(), Run.id.asc())
+        select(Run)
+        .where(Run.target_id == target_id)
+        .order_by(col(Run.started_at).asc(), col(Run.id).asc())
     )
     runs = result.all()
     retained_hashes = {run.manifest_sha256 for run in runs if run.manifest_sha256}

@@ -209,17 +209,17 @@ def _build_sco(
 
     cls = _STIX_SCO_MAP.get(obs.type)
     try:
-        if cls in _SIMPLE_VALUE_SCOS:
+        if cls is not None and cls in _SIMPLE_VALUE_SCOS:
             return cls(value=value, custom_properties=custom)
 
-        if cls == stix2.AutonomousSystem:
+        if cls is not None and cls == stix2.AutonomousSystem:
             match = _ASN.match(value)
             if match is None:
                 logger.warning("Dropping autonomous-system observable with no number: %r", value)
                 return None
             return cls(number=int(match.group(1)), name=value, custom_properties=custom)
 
-        if cls == stix2.UserAccount:
+        if cls is not None and cls == stix2.UserAccount:
             # account_type, user_id and account_login are all ID contributing
             # properties for UserAccount, so a producer that sets account_login
             # and one that does not derive DIFFERENT ids for the same account.
@@ -243,7 +243,7 @@ def _build_sco(
                 custom_properties={**custom, **extra_custom},
             )
 
-        if cls == stix2.File:
+        if cls is not None and cls == stix2.File:
             algo = _HASH_ALGO_BY_LEN.get(len(value))
             if algo and _HEX_RE.match(value):
                 return cls(hashes={algo: value}, custom_properties=custom)
@@ -251,7 +251,7 @@ def _build_sco(
             # property and would get a random id, so fall through to Indicator.
             return _fallback_indicator(obs.type, value, identity_id, labels, score, collected_at)
 
-        if cls == stix2.X509Certificate:
+        if cls is not None and cls == stix2.X509Certificate:
             # `subject` is NOT an ID contributing property for X509Certificate
             # (only hashes and serial_number are), so stix2 would assign a
             # random uuid4 and re-create the certificate on every run.
