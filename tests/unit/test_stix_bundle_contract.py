@@ -73,9 +73,7 @@ def test_the_schema_rejects_an_object_of_unknown_type() -> None:
 def test_the_schema_rejects_an_identity_with_unknown_class() -> None:
     bundle = _load()
     identity_index = next(
-        i
-        for i, obj in enumerate(bundle["objects"])
-        if obj.get("name") == "investigation-assistant"
+        i for i, obj in enumerate(bundle["objects"]) if obj.get("name") == "investigation-assistant"
     )
     identity = {**bundle["objects"][identity_index], "identity_class": "group"}
     objects = list(bundle["objects"])
