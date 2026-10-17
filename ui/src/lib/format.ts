@@ -34,6 +34,34 @@ export function alertStatusTone(status: string): Tone {
   }
 }
 
+/** Visual tone of an alert case's triage state (orchestrator/models.py::AlertCaseState). */
+export function alertCaseTone(state: string): Tone {
+  switch (state) {
+    case 'open':
+      return 'warning';
+    case 'acknowledged':
+      return 'info';
+    case 'resolved':
+      return 'ok';
+    default:
+      return '';
+  }
+}
+
+/** Visual tone of the rule that opened an alert case: a failed run is the loudest. */
+export function alertReasonTone(reason: string): Tone {
+  switch (reason) {
+    case 'run_failure':
+      return 'error';
+    case 'risk_level':
+      return 'warning';
+    case 'new_observables':
+      return 'info';
+    default:
+      return '';
+  }
+}
+
 export function riskTone(level: string): Tone {
   switch (level) {
     case 'critical':

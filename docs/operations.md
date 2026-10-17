@@ -84,6 +84,7 @@ Interactive reference: `/docs` (OpenAPI at `/openapi.json`). Public routes are
 | `GET` | `/alerts/{id}` | One alert case |
 | `POST` | `/alerts/{id}/ack` | `open` → `acknowledged`; body `{"by": "<operator>", "note": "…"}`; 409 from any other state |
 | `POST` | `/alerts/{id}/resolve` | `open` or `acknowledged` → `resolved`; same body; 409 when already resolved |
+| `POST` | `/bundles` | Ingest an external STIX 2.1 bundle (ADR-011); body is the bundle, `?work_name=` (default `external-stix`). 400 not JSON, 409 OpenCTI disabled, 422 contract or parse failure, 502 ingest failed, 503 OpenCTI unreachable; a failure is not queued |
 | `POST` | `/opencti/outbox/replay` | Replay dead-letter OpenCTI bundles (`run_id`, `limit` = `1..1000`) and drain the due ones now |
 | `GET` | `/runs` | Runs newest first, each with the `risk_level` of its finding (`null` without one); `?target_id=` filters, `?limit=` (1–500, default 100) and `?offset=` page through older runs |
 | `GET` | `/runs/{id}` | A run's status, counts, `risk_level`, and `alerts[]` dispatch audit |

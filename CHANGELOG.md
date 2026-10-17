@@ -11,6 +11,14 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- External STIX 2.1 intake (ADR-011): `python -m orchestrator.ingest_bundle
+  <file> [--work-name …] [--dry-run]` and `POST /bundles` validate a producer's
+  bundle against the pinned JSON Schema in `orchestrator/contracts/`, parse it
+  with pycti's SCOs registered and hand it to the OpenCTI sink. A failed ingest
+  is reported to the producer, not queued: the CLI exits 1 (2 for an unreadable
+  bundle) and the endpoint answers 400, 422, 502 or 503 with a localised
+  reason. The sink's rejection error now names the first rejected objects by id
+  and type. New dependency: `jsonschema`.
 - `GET /runs` takes `limit` (1–500, default 100) and `offset` to page through
   runs older than the most recent 100.
 - `GET /ready`: readiness probe that answers 503 while the database is
@@ -39,6 +47,12 @@ from [SECURITY.md](SECURITY.md).
   Metrics `alert_cases{state}` and `alert_case_time_to_acknowledge_seconds`
   make the time-to-acknowledge KPI measurable. Retention purges cases with
   their run.
+- Dashboard *Alerts* view (`/alerts`): the alert cases the backend opens for
+  every run that meets a rule, filtered by target and state (open by default),
+  sortable, with the reason, risk and run status as cues and Acknowledge /
+  Resolve actions recorded with the operator's name (kept per browser). The
+  run workspace links to the run's case. Closes the Phase 2 triage item of
+  `ui/docs/dod.md`; MTTR joins the KPI scorecard.
 
 - Dashboard resilience and performance pass: the routed views sit inside an
   error boundary keyed by the route, whose fallback offers *Try again* and
@@ -123,6 +137,7 @@ from [SECURITY.md](SECURITY.md).
 
 ### Changed
 
+- Tests only: the auth-exemption test now covers `/ready`.
 - The orchestrator image runs as uid 1000 instead of root (`USER 1000` in
   `Dockerfile`; the Helm chart already ran it that way). The `./daily_reports`
   bind mount must be writable by that uid (`docs/deploy.md`).
