@@ -137,6 +137,7 @@ from [SECURITY.md](SECURITY.md).
 
 ### Changed
 
+- CI now fails on mypy errors in `orchestrator/`.
 - Tests only: the auth-exemption test now covers `/ready`.
 - The orchestrator image runs as uid 1000 instead of root (`USER 1000` in
   `Dockerfile`; the Helm chart already ran it that way). The `./daily_reports`
