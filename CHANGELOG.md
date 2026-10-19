@@ -202,6 +202,13 @@ from [SECURITY.md](SECURITY.md).
 
 ### Removed
 
+- The OpenCode delegation channel: `.github/workflows/opencode.yml`,
+  `opencode.json`, the `/oc` trigger and the local-run fallback. In 625
+  workflow runs since it was added, none executed a task (every run was
+  skipped by its owner guard or waited for an approval that never came), and
+  each PR comment started eight empty check runs. Delegation goes through the
+  Copilot coding agent only; `AGENTS.md`, `CONTRIBUTING.md`, the *Agent task*
+  issue template and `.claude/rules/workflow.md` describe that one channel.
 - Startup detection of databases created before Alembic (app tables present,
   no `alembic_version`), which stamped them at the baseline revision; every
   database now starts from the migrations. The daily report index no longer

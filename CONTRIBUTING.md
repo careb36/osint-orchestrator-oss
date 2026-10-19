@@ -99,21 +99,12 @@ A change is not done until its documentation is complete:
 
 ## Delegating a task to a coding agent
 
-Routine, well-specified work is delegated to a coding agent. Two channels are
-set up; both read `AGENTS.md` before every task, and a maintainer reviews every
-PR they open with the same gates as a human PR.
+Routine, well-specified work is delegated to the GitHub Copilot coding agent.
+It reads `AGENTS.md` (through `.github/copilot-instructions.md`) before every
+task, and a maintainer reviews every PR it opens with the same gates as a
+human PR.
 
-- **GitHub Copilot coding agent:** assign the issue to Copilot. It opens a
-  draft PR on a `copilot/…` branch. Its workflows need a maintainer's approval
-  before CI runs, and the PR is not ready while it is a draft or titled
-  `[WIP]`: at that point it may hold nothing but an empty "Initial plan"
-  commit, and merging it would close the issue with nothing implemented.
-  Follow-up requests go in a PR comment that mentions `@copilot`.
-- **[OpenCode](https://opencode.ai):** runs inside this repository's GitHub
-  Actions runner (`.github/workflows/opencode.yml`) with the model and
-  permissions declared in `opencode.json`; the steps below describe it.
-
-The review checklist both agents and reviewers follow is
+The review checklist the agent and reviewers follow is
 `.github/skills/context-aware-code-review/SKILL.md`.
 
 Claude Code also loads `.claude/rules/` (a general workflow file plus
@@ -123,13 +114,11 @@ rules second.
 
 ### One-time prerequisites (repository owner)
 
-1. Install the GitHub App
-   [`opencode-agent`](https://github.com/apps/opencode-agent) on this
-   repository (or run `opencode github install` from a local clone).
-2. Add the repository secret `DEEPSEEK_API_KEY` (*Settings → Secrets and
-   variables → Actions*). The key lives only there; `opencode.json` refers to
-   it as `{env:DEEPSEEK_API_KEY}`.
-3. `main` is protected by a ruleset that requires the *Lint & Unit Tests*,
+1. The Copilot coding agent is enabled for the repository (*Settings →
+   Copilot → Coding agent*). Its pull requests come from the `Copilot` user and
+   its Actions runs wait for a maintainer's **Approve and run workflows**
+   click, so no agent-written code runs in CI unreviewed.
+2. `main` is protected by a ruleset that requires the *Lint & Unit Tests*,
    *Helm chart*, *Public-release guard* and *PR is complete* checks and forbids
    force pushes, so nothing reaches `main` without a pull request and a green
    CI run. *PR is complete* (`.github/workflows/pr-guard.yml`) fails while a PR
@@ -140,18 +129,19 @@ rules second.
 1. Open an issue with the **Agent task** template. Write it so every numbered
    step and every named test can be checked against the code: the issue *is*
    the acceptance test. Name the files the agent must not touch.
-2. Comment `/oc` on the issue (optionally followed by one line of extra
-   instructions). Only comments whose author is the repository **owner**
-   trigger the workflow; anyone else's `/oc` is ignored.
-3. The agent creates the branch `opencode/<issue>-<slug>`, pushes it and opens
-   a PR that fills the PR template and pastes the quality-gate output. CI runs
-   on it like on any other PR.
-4. Review it as usual (see below). To request a follow-up, submit a review
-   with numbered items and then leave a **comment** on the PR:
-   `/oc Address every numbered item in the review above`. The review itself
-   does not trigger the agent; the comment does.
-5. Keep **one delegated task in flight at a time** so branches do not drift
-   from `main`.
+2. Assign the issue to **Copilot**. It opens a draft PR on a `copilot/…`
+   branch within a minute, first with an empty "Initial plan" commit and a
+   `[WIP]` title, then with the implementation. The PR is not ready while it
+   is a draft or titled `[WIP]`; merging it then would close the issue with
+   nothing implemented.
+3. When the title loses `[WIP]`, approve its workflow runs so CI runs on it
+   like on any other PR.
+4. Review it as usual (see below). To request a follow-up, leave a **comment**
+   on the PR that mentions `@copilot` and lists the numbered items; the agent
+   pushes to the same branch and answers in the thread.
+5. Keep **one delegated task per area in flight at a time** so branches do not
+   drift from `main`; a branch that falls behind gets `main` merged into it
+   before the required checks are re-evaluated.
 
 ### What the reviewer checks
 
@@ -167,18 +157,6 @@ head, before it is merged:
   mirrors, the metrics table in `docs/operations.md` matching
   `orchestrator/metrics.py`, and `.gitignore`, workflows and `pyproject.toml`
   untouched unless the issue asked for it.
-
-### Fallback: running OpenCode locally
-
-If the Actions channel is unavailable, the same task runs from a clone:
-
-```bash
-export DEEPSEEK_API_KEY=<your key>     # never commit it
-opencode run -m deepseek/deepseek-chat -f path/to/task.md \
-  --title "issue-<n>" "Implement the task in the attached file"
-```
-
-Then push the branch and open the PR by hand. The review gate is identical.
 
 ## Public release guard
 

@@ -81,8 +81,8 @@ touches:
 
 ## Git
 
-- Branch from `main`; one logical change per PR; delegated issues use
-  `opencode/<issue-number>-<short-slug>`. Never commit to `main`.
+- Branch from `main`; one logical change per PR; a delegated issue lands on
+  the agent's own `copilot/<short-slug>` branch. Never commit to `main`.
 - Commit messages in English, imperative mood, prefixed by scope when useful
   (`api:`, `ci:`, `ui:`, `normalizer:`, `deps:`), with a body that says why.
 - Bump a pin (git SHA, image tag, Python package) in its own commit and say
@@ -91,6 +91,6 @@ touches:
 - Never rewrite history on a shared branch: no rebase, amend or force-push
   over someone else's commits. Merge `main` into a stale branch instead.
 - Maintainer-reserved unless the issue names them: `.github/workflows/`,
-  `.gitignore`, `AGENTS.md`, `opencode.json`, dependency pins in
-  `pyproject.toml`, existing files under `docs/adr/`. If the task needs a
+  `.gitignore`, `AGENTS.md`, dependency pins in `pyproject.toml`, existing
+  files under `docs/adr/`. If the task needs a
   change there, stop and explain it in the PR.
