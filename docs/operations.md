@@ -427,7 +427,7 @@ Support SOP:
 | A SpiderFoot scan never finishes | Raise the target's `timeout_seconds`; check the module names are real `sfp_*` modules in that image |
 | Run is `partial` with `opencti-sink:` in `error` | The bundle never reached OpenCTI — check `osint_orchestrator_opencti_ingest_total{outcome="failure"}`, `OPENCTI_URL` and `OPENCTI_ADMIN_TOKEN`; the observables are re-reported as new next run |
 | Reports come out in the wrong language | `ORCHESTRATOR_LANGUAGE`, or the target's `language`; an unrecognised value is logged and ignored |
-| A run finishes with no finding / `synthesis_total{status="failed"}` grows | The LLM endpoint is unreachable — compose ships no Ollama service; check `LLM_BASE_URL` or switch `LLM_PROVIDER` |
+| A run finishes with no finding / `synthesis_total{status="failed"}` grows | The LLM endpoint is unreachable. Targets default to `llm: local`, which is Ollama, and compose ships no Ollama service: point `LLM_BASE_URL` at one, or set the target's `llm` to a cloud provider and configure its key. `LLM_PROVIDER` alone does not move a target off Ollama |
 | Synthesis always unavailable | Check startup logs for `LLM model not served by provider` and `osint_orchestrator_llm_model_available{...} == 0`; switch to an id listed by the provider `GET /models` |
 | Browser login loops or `502` on `:8002` with the auth overlay | Keycloak not healthy yet, or `AUTH_PROXY_PORT`/`AUTH_REDIRECT_URL` disagree — both must use the same port (`.env.example` ships 8002) |
 | `osint_orchestrator_scheduled_jobs` is lower than expected | A target is `enabled: false`, or its `cron` is not five fields — both are skipped, the second with an `ERROR` log |

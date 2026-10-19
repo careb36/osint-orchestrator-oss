@@ -44,8 +44,11 @@ Details: [architecture](docs/architecture.md).
 
 ## NVIDIA Nemotron on Nebius Token Factory
 
-`LLM_PROVIDER=nebius` uses the Token Factory OpenAI-compatible endpoint. Two
-model routes are configured independently:
+A target opts into the Token Factory OpenAI-compatible endpoint with
+`llm: nebius` in `targets.yaml` (or with `llm: openai` when
+`LLM_PROVIDER=nebius`). Targets default to `llm: local`, which is Ollama, so no
+data leaves the host unless the target says so. Two model routes are
+configured independently:
 
 | Route | Setting | Model used in our runs | Job | Code |
 | --- | --- | --- | --- | --- |
@@ -53,9 +56,10 @@ model routes are configured independently:
 | reasoning | `LLM_MODEL_REASONING` | `nvidia/nemotron-3-super-120b-a12b` | Risk synthesis for the run | [`synthesizer/__init__.py`](orchestrator/synthesizer/__init__.py) |
 
 Both calls request a JSON-schema response, are retried within a time budget, and
-every returned value is validated before it is stored. At startup the service
-checks that the configured models are served by the provider. Requests, tokens
-and model availability are exported as Prometheus metrics. Provider client:
+every returned value is validated before it is stored. With
+`LLM_PROVIDER=nebius` the service checks at startup that the configured models
+are served by the provider. Requests, tokens and model availability are
+exported as Prometheus metrics. Provider client:
 [`providers/openai_compat.py`](orchestrator/synthesizer/providers/openai_compat.py).
 
 ## Tavily

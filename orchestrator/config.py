@@ -108,9 +108,13 @@ class Settings(BaseSettings):
     targets_file: str = "targets.yaml"
 
     # LLM
-    # ollama | anthropic | openai | nebius | none. "none" switches synthesis off for
-    # every target, including those with `llm: local` — an explicit off is
-    # the operator's decision, not something a per-target field re-enables.
+    # ollama | anthropic | openai | nebius | none. A target's provider is its
+    # `llm` field (default "local", always Ollama), never this setting; see
+    # synthesizer.providers.get_client. This is a global switch: "none" turns
+    # synthesis off for every target, including those with `llm: local` — an
+    # explicit off is the operator's decision, not something a per-target
+    # field re-enables; "nebius" routes `llm: openai` targets to Token Factory;
+    # "openai" / "nebius" select the provider the startup model preflight checks.
     llm_provider: str = "ollama"
     llm_model: str = "llama3.2"  # model for the cloud providers (anthropic | openai | nebius)
     # Optional model split by workload type. Empty means "fall back to LLM_MODEL".

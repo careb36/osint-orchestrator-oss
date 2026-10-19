@@ -87,8 +87,10 @@ targets:
       # ignorarla en vez de ejecutarla con retraso.
       misfire_grace_time_seconds: 3600
 
-    # LLM: usar modelo local para este objetivo (los datos no salen de casa).
-    llm: local    # local | anthropic | openai | nebius — anula el LLM_PROVIDER global
+    # LLM: proveedor de la síntesis de este objetivo. Este campo decide; el
+    # LLM_PROVIDER del .env no lo cambia. local (por defecto) usa Ollama y los
+    # datos no salen de casa; anthropic | openai | nebius necesitan su clave.
+    llm: local
 
     # Idioma de los informes y de la síntesis de este objetivo.
     # es | en. Omítelo para usar ORCHESTRATOR_LANGUAGE del .env.

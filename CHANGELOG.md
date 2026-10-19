@@ -263,6 +263,13 @@ from [SECURITY.md](SECURITY.md).
 
 ### Fixed
 
+- Documentation of LLM provider selection: the per-target `llm` field (default
+  `local`, Ollama) chooses the provider, and `LLM_PROVIDER` is a global switch
+  (`none` disables synthesis, `nebius` routes `llm: openai` targets to Token
+  Factory and selects the startup model check) that never moves a target off
+  Ollama. The READMEs, `docs/configuration.md`, `docs/architecture.md`,
+  `docs/deploy.md`, `docs/operations.md`, `.env.example`,
+  `targets.example.yaml` and the Helm values said or implied otherwise.
 - `http_request_duration_seconds` and `http_requests_total` are recorded when
   the response is sent, not when the ASGI call returns: a manual run's
   collectors ran inside that call as a background task and charged minutes of

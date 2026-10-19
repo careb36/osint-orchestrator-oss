@@ -20,9 +20,11 @@ Error handling: no exception from the LLM ever crashes the calling pipeline.
   - If JSON parsing fails twice:
       returns Finding(risk_level="unknown") with a descriptive summary.
 
-LLM selection:
-  target.llm == "local"  → always OllamaClient (regardless of global setting).
-  settings.llm_provider   → OllamaClient | AnthropicClient | OpenAICompatClient (OpenAI/Nebius).
+LLM selection (see providers.get_client):
+  target.llm             → "local" (the default) is always OllamaClient; "anthropic",
+                            "openai" and "nebius" pick that cloud client when its key is set.
+  settings.llm_provider  → global switches only: "none" disables synthesis for every
+                            target; "nebius" routes `llm: openai` targets to Nebius.
 """
 
 from __future__ import annotations
