@@ -87,7 +87,6 @@ class Settings(BaseSettings):
     # SpiderFoot
     spiderfoot_url: str = "http://localhost:5001"
     spiderfoot_modules: str = "sfp_dnsresolve,sfp_whois,sfp_sslcert"
-    spiderfoot_timeout_seconds: int = 600
 
     # Orchestrator
     # Language for operator-facing text (reports, LLM synthesis, API error
@@ -150,15 +149,6 @@ class Settings(BaseSettings):
     # Upper bound of evidence items qualified per run; 0 disables the step.
     llm_qualify_max_items: int = Field(default=30, ge=0, le=100)
     synthesis_history_runs: int = 5
-    # Set to True to enrich synthesis with OpenCTI context; fails silently if
-    # OpenCTI is unavailable.  Off by default so synthesis works standalone.
-    synthesis_opencti_context: bool = False
-
-    # Optional enrichment keys (passed to openosint via env)
-    shodan_api_key: str = ""
-    virustotal_api_key: str = ""
-    censys_api_id: str = ""
-    censys_api_secret: str = ""
 
     # ─── SocialOSINT collector (Phase 4b) ────────────────────────────────────
     # URL of the running OWASP SocialOSINT web service (docker-compose profile
