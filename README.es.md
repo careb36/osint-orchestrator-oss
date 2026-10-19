@@ -47,9 +47,11 @@ Detalle: [arquitectura](docs/architecture.md) (en inglés).
 
 Un objetivo elige el endpoint compatible con OpenAI de Token Factory con
 `llm: nebius` en `targets.yaml` (o con `llm: openai` cuando
-`LLM_PROVIDER=nebius`). Por defecto los objetivos tienen `llm: local`, que es
-Ollama: ningún dato sale del equipo salvo que el objetivo lo indique. Hay dos
-rutas de modelo que se configuran por separado:
+`LLM_PROVIDER=nebius`). Por defecto los objetivos tienen `llm: local`, que
+envía los prompts del LLM al servidor Ollama de `LLM_BASE_URL` y nunca a un
+proveedor de LLM en la nube; los prompts quedan en tu infraestructura solo si
+ese servidor está en ella. Hay dos rutas de modelo que se configuran por
+separado:
 
 | Ruta | Variable | Modelo usado en nuestras corridas | Tarea | Código |
 | --- | --- | --- | --- | --- |

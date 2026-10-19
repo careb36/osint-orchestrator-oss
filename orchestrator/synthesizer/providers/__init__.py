@@ -15,8 +15,9 @@ Rules
 -----
 The provider is the target's choice. ``Target.llm`` is a closed literal that
 defaults to "local", so ``settings.llm_provider`` never picks a provider for a
-target that did not name one: a target shares data with a cloud provider only
-when it opts in.
+target that did not name one: a target's prompts reach a cloud LLM provider
+only when it opts in. "local" means the Ollama server at LLM_BASE_URL, which
+the operator may host anywhere.
 
 - settings.llm_provider == "none"      → no client at all: synthesis is off for every
                                           target, and a per-target `llm` cannot re-enable it.

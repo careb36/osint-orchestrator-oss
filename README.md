@@ -46,9 +46,10 @@ Details: [architecture](docs/architecture.md).
 
 A target opts into the Token Factory OpenAI-compatible endpoint with
 `llm: nebius` in `targets.yaml` (or with `llm: openai` when
-`LLM_PROVIDER=nebius`). Targets default to `llm: local`, which is Ollama, so no
-data leaves the host unless the target says so. Two model routes are
-configured independently:
+`LLM_PROVIDER=nebius`). Targets default to `llm: local`, which sends the LLM
+prompts to the Ollama server at `LLM_BASE_URL` and never to a cloud LLM
+provider; the prompts stay on your infrastructure only if that server does.
+Two model routes are configured independently:
 
 | Route | Setting | Model used in our runs | Job | Code |
 | --- | --- | --- | --- | --- |

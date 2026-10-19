@@ -87,9 +87,12 @@ targets:
       # ignorarla en vez de ejecutarla con retraso.
       misfire_grace_time_seconds: 3600
 
-    # LLM: proveedor de la síntesis de este objetivo. Este campo decide; el
-    # LLM_PROVIDER del .env no lo cambia. local (por defecto) usa Ollama y los
-    # datos no salen de casa; anthropic | openai | nebius necesitan su clave.
+    # LLM: proveedor de la síntesis de este objetivo. Este campo decide.
+    # local (por defecto) envía los prompts al Ollama de LLM_BASE_URL, nunca a
+    # un proveedor en la nube; anthropic | openai | nebius necesitan su clave.
+    # Dos excepciones globales del .env: LLM_PROVIDER=none apaga la síntesis
+    # también para local, y LLM_PROVIDER=nebius manda los objetivos con
+    # llm: openai a Nebius, que entonces necesitan NEBIUS_API_KEY.
     llm: local
 
     # Idioma de los informes y de la síntesis de este objetivo.

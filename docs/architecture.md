@@ -51,8 +51,10 @@ One run, in order (`orchestrator/pipeline.py`):
 ## LLM routing
 
 The provider is chosen per target by the `llm` field of `targets.yaml`
-(`synthesizer/providers/__init__.py`). `local`, the default, is always Ollama,
-so a target shares data with a cloud provider only when it opts in.
+(`synthesizer/providers/__init__.py`). `local`, the default, is always the
+Ollama server at `LLM_BASE_URL`, so a target's LLM prompts reach a cloud LLM
+provider only when the target opts in. They stay on the operator's
+infrastructure only if that Ollama server does.
 `LLM_PROVIDER` is a global switch, not a default: `none` disables synthesis
 everywhere, `nebius` routes `llm: openai` targets to Token Factory, and
 `openai` or `nebius` selects the provider the startup model check queries.

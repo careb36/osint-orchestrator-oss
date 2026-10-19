@@ -49,10 +49,12 @@ Defaults shown are the ones shipped in `.env.example` for Docker.
 ### LLM
 
 The provider a target talks to is decided per target, by the `llm` field in
-`targets.yaml` (see the target fields below). `local`, the default, is Ollama
-and never sends data to a cloud provider; `anthropic`, `openai` and `nebius`
-need their key from this table. `LLM_PROVIDER` does not change a target's
-provider. It is a global switch with three effects: `none` turns synthesis off
+`targets.yaml` (see the target fields below). `local`, the default, sends the
+LLM prompts to the Ollama server at `LLM_BASE_URL` and never to a cloud LLM
+provider; the prompts stay on your infrastructure only if that server does.
+`anthropic`, `openai` and `nebius` need their key from this table.
+`LLM_PROVIDER` never makes a target use a different provider family than its
+`llm` names. It is a global switch with three effects: `none` turns synthesis off
 for every target, `nebius` routes `llm: openai` targets to Token Factory, and
 `openai` or `nebius` selects the provider whose model list the startup check
 queries.
@@ -157,7 +159,7 @@ targets:
 | `authorization` | *required* | Who approved this target and when |
 | `purpose` | *required* | Why it is monitored |
 | `enabled` | `true` | `false` skips the cron job; a manual run returns `400` |
-| `llm` | `local` | Provider for this target's synthesis and evidence qualification. `local` is Ollama and nothing leaves the host; `anthropic` \| `openai` \| `nebius` need their API key. `LLM_PROVIDER` never changes it: `nebius` turns `openai` into Nebius, `none` disables synthesis for every target |
+| `llm` | `local` | Provider for this target's synthesis and evidence qualification. `local` sends the prompts to the Ollama server at `LLM_BASE_URL`, never to a cloud LLM provider; `anthropic` \| `openai` \| `nebius` need their API key. Two global exceptions: `LLM_PROVIDER=none` disables synthesis even for `local`, and `LLM_PROVIDER=nebius` sends `openai` targets to Nebius (they then need `NEBIUS_API_KEY`) |
 | `language` | *(inherit)* | `es` \| `en` — overrides `ORCHESTRATOR_LANGUAGE` |
 | `report_dir` | `daily_reports` | Root directory for this target's artifacts |
 
