@@ -137,6 +137,10 @@ from [SECURITY.md](SECURITY.md).
 
 ### Changed
 
+- Compose starts only SpiderFoot and the orchestrator by default, with the sink
+  disabled in `.env.example`. Existing installs with `OPENCTI_ENABLED=true`
+  must now add `--profile opencti` (or set `COMPOSE_PROFILES=opencti` in `.env`)
+  to start the OpenCTI stack.
 - CI now fails on mypy errors in `orchestrator/`.
 - Tests only: the auth-exemption test now covers `/ready`.
 - The orchestrator image runs as uid 1000 instead of root (`USER 1000` in

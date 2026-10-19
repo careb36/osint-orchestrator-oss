@@ -37,7 +37,7 @@ Defaults shown are the ones shipped in `.env.example` for Docker.
 | --- | --- | --- |
 | `OPENCTI_URL` | `http://opencti:8080` | OpenCTI URL used by the ingest client. |
 | `OPENCTI_ADMIN_TOKEN` | *(empty)* | Must match the token OpenCTI was bootstrapped with, or ingest fails. |
-| `OPENCTI_ENABLED` | `true` | `false` runs without OpenCTI ingest and outbox; reports, findings, delta and alerts keep working. For installs without OpenCTI only: runs made while disabled are never backfilled ([ADR-008](adr/ADR-008-optional-opencti-sink.md)). |
+| `OPENCTI_ENABLED` | `false` | Sink-off Compose install (the code default is `true` when the variable is absent). To enable the bundled OpenCTI stack, set `true` and use `--profile opencti` (or `COMPOSE_PROFILES=opencti` in `.env`). `false` runs without OpenCTI ingest and outbox; reports, findings, delta and alerts keep working. For installs without OpenCTI only: runs made while disabled are never backfilled ([ADR-008](adr/ADR-008-optional-opencti-sink.md)). |
 | `OPENCTI_SSL_VERIFY` | `true` | Set `false` only for local/self-signed TLS in dev. |
 | `OPENCTI_INGEST_RETRIES` | `3` | Number of retries after a *transient* OpenCTI error. An invalid token is never retried. |
 | `OPENCTI_INGEST_BACKOFF_SECONDS` | `2.0` | Base wait before an ingest retry (doubled each retry, ±25 % jitter, 30 s cap). |
