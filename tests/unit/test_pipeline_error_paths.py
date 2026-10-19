@@ -28,6 +28,7 @@ from orchestrator.config import settings
 from orchestrator.models import (
     AlertDelivery,
     AlertDeliveryStatus,
+    AlertsConfig,
     CollectorName,
     CollectorResult,
     EvidenceItem,
@@ -496,7 +497,9 @@ async def test_report_failure_keeps_the_status_and_records_the_error(
     monkeypatch.setattr(pipeline_module, "synthesize", _skip_synthesize)
     monkeypatch.setattr(pipeline_module, "generate_report", _broken_report)
 
-    target = _target(report_dir=str(tmp_path))
+    # Alerts off: notifier settings inherited from the environment must not
+    # send anything, and a delivery error would change run.error.
+    target = _target(report_dir=str(tmp_path), alerts=AlertsConfig(enabled=False))
     run_id = await _create_run(db)
     await run_target_pipeline(target, run_id)
 
