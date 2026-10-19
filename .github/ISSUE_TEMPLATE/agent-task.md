@@ -1,6 +1,6 @@
 ---
 name: Agent task
-about: A self-contained task to delegate to the coding agent (comment /oc to start it)
+about: A self-contained task to delegate to the coding agent (assign it to Copilot to start it)
 title: ""
 labels: agent-task
 assignees: ""
@@ -9,7 +9,7 @@ assignees: ""
 <!--
 Write the issue so that a reviewer can check every line against the code.
 The agent reads AGENTS.md first; do not repeat its rules here, only what is
-specific to this task. Comment `/oc` on the issue once it is complete.
+specific to this task. Assign the issue to Copilot once it is complete.
 -->
 
 ## Problem

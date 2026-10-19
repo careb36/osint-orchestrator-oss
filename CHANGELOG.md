@@ -202,6 +202,13 @@ from [SECURITY.md](SECURITY.md).
 
 ### Removed
 
+- The OpenCode delegation channel: `.github/workflows/opencode.yml`,
+  `opencode.json`, the `/oc` trigger and the local-run fallback. In 625
+  workflow runs since it was added, none executed a task (every run was
+  skipped by its owner guard or waited for an approval that never came), and
+  each PR comment started eight empty check runs. Delegation goes through the
+  Copilot coding agent only; `AGENTS.md`, `CONTRIBUTING.md`, the *Agent task*
+  issue template and `.claude/rules/workflow.md` describe that one channel.
 - Dead settings nothing read: `SPIDERFOOT_TIMEOUT_SECONDS` (the per-target
   `collectors.spiderfoot.timeout_seconds` replaced it), `SYNTHESIS_OPENCTI_CONTEXT`,
   and the `SHODAN_API_KEY`, `VIRUSTOTAL_API_KEY`, `CENSYS_API_ID` and
