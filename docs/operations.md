@@ -279,7 +279,7 @@ run id.
 | `alert_case_time_to_acknowledge_seconds` | — | Histogram: seconds from a case opening to its acknowledgement |
 | `evidence_chain_verify_total` | `target_id`, `outcome` | Evidence-chain verifications by outcome (`ok`, `broken`, `error`) |
 | `evidence_qualified_total` | `target_id`, `category` | Qualified evidence rows by category (`adverse_media`, `sanctions`, `litigation`, `regulatory_action`, `corporate_profile`, `unrelated`) |
-| `scheduled_jobs` | — | Cron jobs registered in the scheduler |
+| `scheduled_jobs` | — | Target cron jobs registered in the scheduler (the retention and retry workers are not counted) |
 | `build_info` | `version` | Build metadata |
 
 ```promql

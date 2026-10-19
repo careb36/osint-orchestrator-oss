@@ -137,6 +137,15 @@ from [SECURITY.md](SECURITY.md).
 
 ### Changed
 
+- `targets.yaml` is validated strictly: an unknown key anywhere in a target
+  (`enabeld:`, `schedual:`, `modlues:`) makes that target invalid and reported
+  instead of silently taking the default, a `misfire_grace_time_seconds` below
+  1 is rejected (APScheduler would have aborted the whole registration), and a
+  second block with an already used `id` is skipped and reported; the first
+  block wins, as the API already resolved it.
+- `osint_orchestrator_scheduled_jobs` counts target jobs only; it no longer
+  jumps by three on the first reload once the retention and retry workers
+  are registered.
 - OpenCTI stack moved from `6.8.11` to the long-term line `7.260811.0-lts.1`
   (platform, worker, `connector-import-file-stix`, `connector-opencti`,
   `connector-misp`), with `pycti` pinned to the matching release
@@ -254,6 +263,16 @@ from [SECURITY.md](SECURITY.md).
 
 ### Fixed
 
+- `http_request_duration_seconds` and `http_requests_total` are recorded when
+  the response is sent, not when the ASGI call returns: a manual run's
+  collectors ran inside that call as a background task and charged minutes of
+  latency to a 202 served in milliseconds.
+- `GET /runs/{id}/report` reads the file instead of checking then reading, so
+  a report purged by retention between the two, or a path that is a
+  directory, is a 404 rather than a 500.
+- The `opencti` and `bundles` tags (`POST /opencti/outbox/replay`,
+  `POST /bundles`) are described in the OpenAPI schema; a test now checks
+  that every tag in use has a description.
 - Installs declare `sqlalchemy[asyncio]`: recent SQLAlchemy releases stopped
   pulling in `greenlet`, so a fresh `pip install` (CI, the Docker image) could
   not import the async engine and every test and container start failed.
