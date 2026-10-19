@@ -116,6 +116,12 @@ as the audit trail of why the collection happened. The file is re-read on each
 API and scheduler call; after editing `schedule.cron` or `enabled`, apply it
 with `POST /scheduler/reload`.
 
+Validation is strict: a key the schema does not know (a misspelt `enabeld:` or
+`schedual:`, at any level) makes that target invalid, and so does a second
+block reusing an `id` (the first block is kept). Invalid targets are skipped,
+logged with their id, and listed by `POST /scheduler/reload`; the rest of the
+file still loads.
+
 ```yaml
 targets:
   - id: my-domain

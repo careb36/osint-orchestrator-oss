@@ -180,7 +180,7 @@ evidence_qualified_total = Counter(
 
 scheduled_jobs = Gauge(
     f"{PREFIX}_scheduled_jobs",
-    "Cron jobs currently registered in the scheduler",
+    "Target cron jobs currently registered in the scheduler (worker jobs excluded)",
 )
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
