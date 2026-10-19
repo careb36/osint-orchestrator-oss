@@ -67,7 +67,6 @@ Defaults shown are the ones shipped in `.env.example` for Docker.
 | `LLM_QUALIFY_ENABLED` | `true` | Enables the fast-route evidence-qualification step before synthesis. |
 | `LLM_QUALIFY_MAX_ITEMS` | `30` | Max evidence items qualified per run (0–100). Set `0` to disable qualification. |
 | `SYNTHESIS_HISTORY_RUNS` | `5` | Prior runs included as synthesis context. |
-| `SYNTHESIS_OPENCTI_CONTEXT` | `false` | If `true`, enrich synthesis with OpenCTI context. |
 
 ### Collectors
 
@@ -75,11 +74,6 @@ Defaults shown are the ones shipped in `.env.example` for Docker.
 | --- | --- | --- |
 | `SPIDERFOOT_URL` | `http://spiderfoot:5001` | SpiderFoot service URL on the internal network. |
 | `SPIDERFOOT_MODULES` | `sfp_dnsresolve,sfp_whois,sfp_sslcert` | Fallback when a target lists no modules. |
-| `SPIDERFOOT_TIMEOUT_SECONDS` | `600` | Timeout for one SpiderFoot collection run. |
-| `SHODAN_API_KEY` | *(empty)* | Optional key passed to OpenOSINT enrichment modules. |
-| `VIRUSTOTAL_API_KEY` | *(empty)* | Optional key passed to OpenOSINT enrichment modules. |
-| `CENSYS_API_ID` | *(empty)* | Optional key passed to OpenOSINT enrichment modules. |
-| `CENSYS_API_SECRET` | *(empty)* | Optional key passed to OpenOSINT enrichment modules. |
 | `SOCIALOSINT_URL` | `http://socialosint:8000` | SocialOSINT service URL. |
 | `SOCIALOSINT_TIMEOUT_SECONDS` | `300` | Total wall-clock bound for a full SocialOSINT run. |
 | `AMASS_ENGINE_URL` | `http://amass:4000` | Amass engine sidecar URL (compose profile `amass`). |
