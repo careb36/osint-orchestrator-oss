@@ -160,10 +160,6 @@ secrets:
     OPENAI_API_KEY: ""
     NEBIUS_API_KEY: ""
     TAVILY_API_KEY: ""
-    SHODAN_API_KEY: ""
-    VIRUSTOTAL_API_KEY: ""
-    CENSYS_API_ID: ""
-    CENSYS_API_SECRET: ""
 
 # ─── Targets (targets.yaml) ──────────────────────────────────────────────────
 # Either an existing ConfigMap with a `targets.yaml` key, or the target list
