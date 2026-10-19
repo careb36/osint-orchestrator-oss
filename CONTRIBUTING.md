@@ -24,8 +24,6 @@ win — and a PR fixing the disagreement is welcome.
 
 ```bash
 # Python 3.11+; git is required (openosint is a pinned git dependency).
-# pycti loads libmagic at import time: install it first
-# (macOS: brew install libmagic; Debian/Ubuntu: apt install libmagic1).
 pip install -e ".[dev]"
 # Optional: the cloud LLM SDKs (openai/nebius/anthropic synthesis)
 pip install -e ".[dev,llm]"

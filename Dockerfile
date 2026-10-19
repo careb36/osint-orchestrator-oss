@@ -22,9 +22,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # git: the openosint dependency is a pinned git reference, and pip
     # needs a git client to resolve it. python:3.11-slim ships without one.
     git \
-    # libmagic1: pycti 6.x imports python-magic, which loads libmagic at import
-    # time; without it the OpenCTI sink cannot be imported.
-    libmagic1 \
     && rm -rf /var/lib/apt/lists/*
 
 # README.md and LICENSE are referenced from pyproject.toml (readme / license.file);

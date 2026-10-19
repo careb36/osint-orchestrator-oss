@@ -36,9 +36,16 @@ def test_image_installs_the_llm_extra() -> None:
     assert re.search(r'pip install [^\n]*"\.\[llm\]"', DOCKERFILE)
 
 
-def test_image_installs_libmagic_for_pycti() -> None:
-    # pycti 6.x imports python-magic, which loads libmagic at import time.
-    assert re.search(r"(?m)^\s*libmagic1\b", DOCKERFILE)
+def _pycti_release_for(platform_tag: str) -> str:
+    """The pycti release that ships with an ``opencti/platform`` tag.
+
+    Rolling releases share the tag verbatim (``6.8.11``); an LTS tag
+    ``7.260811.0-lts.1`` is published on PyPI as ``7.260811.0.1``.
+    """
+    match = re.fullmatch(r"(\d+\.\d+\.\d+)(?:-lts\.(\d+))?", platform_tag)
+    assert match, f"unexpected platform tag {platform_tag!r}"
+    base, lts = match.groups()
+    return f"{base}.{lts}" if lts else base
 
 
 def test_pycti_pin_matches_the_opencti_platform_tag() -> None:
@@ -46,7 +53,15 @@ def test_pycti_pin_matches_the_opencti_platform_tag() -> None:
     platform_tag = compose["services"]["opencti"]["image"].rsplit(":", 1)[1]
     pins = [req for req in PYPROJECT["project"]["dependencies"] if req.lower().startswith("pycti")]
 
-    assert pins == [f"pycti=={platform_tag}"]
+    assert pins == [f"pycti=={_pycti_release_for(platform_tag)}"]
+
+
+@pytest.mark.parametrize(
+    ("tag", "release"),
+    [("6.8.11", "6.8.11"), ("7.260811.0", "7.260811.0"), ("7.260811.0-lts.1", "7.260811.0.1")],
+)
+def test_pycti_release_mapping(tag: str, release: str) -> None:
+    assert _pycti_release_for(tag) == release
 
 
 @pytest.mark.parametrize("module", ["openai", "anthropic"])

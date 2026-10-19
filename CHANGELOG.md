@@ -137,6 +137,15 @@ from [SECURITY.md](SECURITY.md).
 
 ### Changed
 
+- OpenCTI stack moved from `6.8.11` to the long-term line `7.260811.0-lts.1`
+  (platform, worker, `connector-import-file-stix`, `connector-opencti`,
+  `connector-misp`), with `pycti` pinned to the matching release
+  `7.260811.0.1` (an LTS tag `X-lts.N` ships on PyPI as `X.N`; the pin test
+  knows the mapping). The platform now needs `OPENCTI_ENCRYPTION_KEY` in
+  `.env` (`openssl rand -base64 32`, mandatory since OpenCTI 7.260224.0);
+  `compose up` stops when it is blank. pycti 7 no longer imports
+  python-magic, so the image drops `libmagic1`. Upgrade steps for a `6.8.11`
+  deployment are in `docs/deploy.md`.
 - CI now fails on mypy errors in `orchestrator/`.
 - Tests only: the auth-exemption test now covers `/ready`.
 - The orchestrator image runs as uid 1000 instead of root (`USER 1000` in
@@ -321,6 +330,14 @@ from [SECURITY.md](SECURITY.md).
   range resolved to pycti 7.x, whose `x_opencti_modified_at` input the 6.8
   platform rejects, so every STIX Note (Tavily pages) failed to ingest. The
   image now installs `libmagic1`, which pycti 6.x needs at import time.
+
+### Security
+
+- The `6.8.11` OpenCTI images carried published advisories: CVE-2026-35210
+  (authorization bypass), CVE-2026-35211 (GraphQL exposure), CVE-2026-35212
+  (XSS), GHSA-ffm6-vvph-g5f5 (SSRF in data ingestion) and GHSA-q537-qhj4-wcjx
+  (privilege escalation through the GraphQL API). `7.260811.0-lts.1` is past
+  every fix version.
 
 ## 2026-09-14
 
