@@ -81,7 +81,9 @@ describe('operator smoke flow', () => {
     // Triage: the run's open case is acknowledged from the Alerts view.
     await user.click(within(nav).getByRole('link', { name: /alerts/i }));
     expect(await screen.findByRole('heading', { name: /^alerts$/i })).toBeInTheDocument();
-    await user.type(screen.getByRole('textbox', { name: /your name/i }), 'analyst');
+    // The view renders its loading layout under the same heading first; the
+    // name field only exists once the alert cases have loaded, so wait for it.
+    await user.type(await screen.findByRole('textbox', { name: /your name/i }), 'analyst');
     await user.click(within(await screen.findByRole('table')).getByRole('button', { name: /acknowledge/i }));
     await waitFor(() => expect(screen.queryByText('#7')).not.toBeInTheDocument());
 
