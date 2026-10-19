@@ -209,6 +209,18 @@ from [SECURITY.md](SECURITY.md).
   each PR comment started eight empty check runs. Delegation goes through the
   Copilot coding agent only; `AGENTS.md`, `CONTRIBUTING.md`, the *Agent task*
   issue template and `.claude/rules/workflow.md` describe that one channel.
+- Dead settings nothing read: `SPIDERFOOT_TIMEOUT_SECONDS` (the per-target
+  `collectors.spiderfoot.timeout_seconds` replaced it), `SYNTHESIS_OPENCTI_CONTEXT`,
+  and the `SHODAN_API_KEY`, `VIRUSTOTAL_API_KEY`, `CENSYS_API_ID` and
+  `CENSYS_API_SECRET` placeholders (the OpenOSINT collector never passed them
+  on). Gone from `config.py`, `.env.example`, `docs/configuration.md` and the
+  Helm `secrets.values`; a value still set in an existing `.env` is ignored, as
+  it already was.
+- `ui/PRODUCT_BRIEF.md` (the Phase 1 brief, superseded by `ui/docs/scope.md`)
+  and `ui/UX_CHECKLIST.md` (a fully ticked checklist; `ui/docs/dod.md` is the
+  live record). The dashboard's unused `@typescript-eslint/eslint-plugin` and
+  `@typescript-eslint/parser` dev dependencies (`typescript-eslint` already
+  bundles both) and the orphan `handoff.openAlerts` message.
 - Startup detection of databases created before Alembic (app tables present,
   no `alembic_version`), which stamped them at the baseline revision; every
   database now starts from the migrations. The daily report index no longer
