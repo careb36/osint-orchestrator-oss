@@ -5,14 +5,15 @@ in [configuration.md](configuration.md).
 
 ## Full stack
 
-Requirements: Docker Engine 24+ with Compose v2, 16 GB of RAM (OpenCTI and
+Requirements: Docker Engine 24+ with Compose v2.20+, 16 GB of RAM (OpenCTI and
 Elasticsearch take most of it; 32 GB is comfortable), 4 cores, 50 GB of disk,
 and `vm.max_map_count=262144` on the host (`sudo sysctl -w vm.max_map_count=262144`).
 
 ```bash
 cp .env.example .env                    # set the passwords, tokens and API keys it lists
 cp targets.example.yaml targets.yaml    # only targets you are authorised to assess
-docker compose up -d --build
+# Set OPENCTI_ENABLED=true in .env for the full stack.
+docker compose --profile opencti up -d --build
 ```
 
 | Service | Address |
@@ -40,10 +41,12 @@ Each one is off by default and enabled per target in `targets.yaml`.
 | Tavily web research | `TAVILY_API_KEY` in `.env` | No extra container. Searches the quoted `search_terms` (default: the domain) across third-party sources |
 | OWASP Amass | `cp amass/datasources.example.yaml amass/datasources.yaml && docker compose --profile amass up -d amass` | Subdomain enumeration. Data-source keys stay in the engine container. `active` and `brute` touch the target: enable them only when the authorisation covers active probing |
 | OWASP SocialOSINT | `docker compose --profile socialosint up -d socialosint` | Needs its own OpenAI-compatible model with vision (`SOCIALOSINT_LLM_*`) and platform credentials; a platform without credentials is skipped. Its analysis is stored as an unverified Note. Platform developer terms apply to what you store |
-| MISP | `docker compose -f docker-compose.yml -f docker-compose.misp.yml --profile misp up -d` | Synchronised through the official OpenCTI connector. First start takes 5–10 minutes; create the API key in MISP (*Administration → List Auth Keys*), set `MISP_KEY` and restart `connector-misp` |
+| MISP | `docker compose -f docker-compose.yml -f docker-compose.misp.yml --profile misp --profile opencti up -d` | Requires both profiles and `OPENCTI_ENABLED=true`. Synchronised through the official OpenCTI connector. First start takes 5–10 minutes; create the API key in MISP (*Administration → List Auth Keys*), set `MISP_KEY` and restart `connector-misp` |
 | OIDC login | `docker compose -f docker-compose.yml -f docker-compose.auth.yml --profile auth up -d` | Keycloak (`:8085`) and oauth2-proxy (`:8002`) in front of the console. No account is shipped: create one in the `orchestrator` realm. API keys keep working ([ADR-006](adr/ADR-006-oidc-proxy.md)) |
 
-Without OpenCTI: set `OPENCTI_ENABLED=false`. Reports, findings, the delta and
+Without OpenCTI: keep `OPENCTI_ENABLED=false` (the `.env.example` default) and
+use `docker compose up -d --build` without the `opencti` profile or
+`COMPOSE_PROFILES=opencti`. Reports, findings, the delta and
 alerts keep working; nothing is pushed to a knowledge graph, and those runs are
 never backfilled later ([ADR-008](adr/ADR-008-optional-opencti-sink.md)).
 
@@ -375,7 +378,8 @@ A release is a `vX.Y.Z` tag on `main`: the image workflow publishes
 `ghcr.io/careb36/osint-orchestrator-oss:X.Y.Z` and `:latest`, and the release
 workflow creates the GitHub Release from that version's `CHANGELOG.md`
 section. Before tagging, confirm all of the following against a deployment of
-the release candidate (`docker compose up -d --build` from the commit):
+the release candidate (`docker compose --profile opencti up -d --build` from
+the commit, with `OPENCTI_ENABLED=true`):
 
 - [ ] CI is green on the commit (lint, unit tests, dashboard, Helm chart,
       public-release guard, image build with the vulnerability scan)
@@ -412,7 +416,7 @@ Support SOP:
 
 | Symptom | Cause and fix |
 | --- | --- |
-| Elasticsearch exits seconds after `docker compose up` | `vm.max_map_count` below 262144 on the host |
+| Elasticsearch exits seconds after `docker compose --profile opencti up` | `vm.max_map_count` below 262144 on the host |
 | `curl :8080/health` refused for the first minutes | OpenCTI and Elasticsearch take 2–3 min; follow `docker compose logs -f opencti` |
 | Containers killed by the OOM killer | Host below 16 GB, or `ELASTIC_MEMORY_SIZE` too high for it |
 | `401` on every call | `ORCHESTRATOR_API_KEY` is set but the header is missing or wrong; `/health` and `/metrics` never need one |

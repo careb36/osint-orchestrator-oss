@@ -74,13 +74,20 @@ Nota, es calificada por Nemotron y queda registrada en
 ## Inicio rápido
 
 El stack completo (OpenCTI, SpiderFoot, corridas programadas, alertas) necesita
-Docker con Compose v2 y 16 GB de RAM:
+Docker con Compose v2.20+ y 16 GB de RAM:
 
 ```bash
 cp .env.example .env                    # contraseñas, tokens y API keys que lista
 cp targets.example.yaml targets.yaml    # solo objetivos que esté autorizado a evaluar
-docker compose up -d --build
+# Set OPENCTI_ENABLED=true in .env for the full stack.
+docker compose --profile opencti up -d --build
 ```
+
+Para una instalación ligera, mantenga `OPENCTI_ENABLED=false` (el valor por
+defecto de `.env.example`) y ejecute `docker compose up -d --build`: solo se
+inician SpiderFoot y el orquestador. Las instalaciones existentes con el sink
+activo deben añadir `--profile opencti` o definir `COMPOSE_PROFILES=opencti`
+en `.env`.
 
 Después, ver [operación](docs/operations.md), [configuración](docs/configuration.md)
 y, para un servidor, [despliegue](docs/deploy.md) (en inglés).

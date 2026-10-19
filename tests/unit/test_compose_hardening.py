@@ -25,6 +25,41 @@ def _services(path: Path) -> dict[str, dict]:
     return yaml.safe_load(path.read_text(encoding="utf-8")).get("services", {})
 
 
+@pytest.mark.parametrize(
+    "name",
+    [
+        "opencti",
+        "worker",
+        "connector-import-file-stix",
+        "connector-opencti",
+        "elasticsearch",
+        "redis",
+        "rabbitmq",
+        "minio",
+    ],
+)
+def test_opencti_stack_is_behind_the_opencti_profile(name: str) -> None:
+    services = _services(REPO_ROOT / "docker-compose.yml")
+    assert "opencti" in services[name].get("profiles", [])
+
+
+def test_orchestrator_does_not_require_the_opencti_stack() -> None:
+    services = _services(REPO_ROOT / "docker-compose.yml")
+    dependencies = services["orchestrator"]["depends_on"]
+    assert "redis" not in dependencies
+    for name, dependency in dependencies.items():
+        if "opencti" in services[name].get("profiles", []):
+            assert dependency.get("required") is False
+    assert dependencies["opencti"] == {"condition": "service_healthy", "required": False}
+    assert dependencies["spiderfoot"] == {"condition": "service_healthy"}
+
+
+@pytest.mark.parametrize("name", ["orchestrator", "spiderfoot"])
+def test_core_services_have_no_profile(name: str) -> None:
+    services = _services(REPO_ROOT / "docker-compose.yml")
+    assert "profiles" not in services[name]
+
+
 @pytest.mark.parametrize("compose", COMPOSE_FILES, ids=[p.name for p in COMPOSE_FILES])
 def test_every_published_port_binds_the_loopback_interface(compose: Path) -> None:
     exposed = [

@@ -146,6 +146,10 @@ from [SECURITY.md](SECURITY.md).
   `compose up` stops when it is blank. pycti 7 no longer imports
   python-magic, so the image drops `libmagic1`. Upgrade steps for a `6.8.11`
   deployment are in `docs/deploy.md`.
+- Compose starts only SpiderFoot and the orchestrator by default, with the sink
+  disabled in `.env.example`. Existing installs with `OPENCTI_ENABLED=true`
+  must now add `--profile opencti` (or set `COMPOSE_PROFILES=opencti` in `.env`)
+  to start the OpenCTI stack.
 - CI now fails on mypy errors in `orchestrator/`.
 - Tests only: the auth-exemption test now covers `/ready`.
 - The orchestrator image runs as uid 1000 instead of root (`USER 1000` in
@@ -211,6 +215,25 @@ from [SECURITY.md](SECURITY.md).
 
 ### Removed
 
+- The OpenCode delegation channel: `.github/workflows/opencode.yml`,
+  `opencode.json`, the `/oc` trigger and the local-run fallback. In 625
+  workflow runs since it was added, none executed a task (every run was
+  skipped by its owner guard or waited for an approval that never came), and
+  each PR comment started eight empty check runs. Delegation goes through the
+  Copilot coding agent only; `AGENTS.md`, `CONTRIBUTING.md`, the *Agent task*
+  issue template and `.claude/rules/workflow.md` describe that one channel.
+- Dead settings nothing read: `SPIDERFOOT_TIMEOUT_SECONDS` (the per-target
+  `collectors.spiderfoot.timeout_seconds` replaced it), `SYNTHESIS_OPENCTI_CONTEXT`,
+  and the `SHODAN_API_KEY`, `VIRUSTOTAL_API_KEY`, `CENSYS_API_ID` and
+  `CENSYS_API_SECRET` placeholders (the OpenOSINT collector never passed them
+  on). Gone from `config.py`, `.env.example`, `docs/configuration.md` and the
+  Helm `secrets.values`; a value still set in an existing `.env` is ignored, as
+  it already was.
+- `ui/PRODUCT_BRIEF.md` (the Phase 1 brief, superseded by `ui/docs/scope.md`)
+  and `ui/UX_CHECKLIST.md` (a fully ticked checklist; `ui/docs/dod.md` is the
+  live record). The dashboard's unused `@typescript-eslint/eslint-plugin` and
+  `@typescript-eslint/parser` dev dependencies (`typescript-eslint` already
+  bundles both) and the orphan `handoff.openAlerts` message.
 - Startup detection of databases created before Alembic (app tables present,
   no `alembic_version`), which stamped them at the baseline revision; every
   database now starts from the migrations. The daily report index no longer

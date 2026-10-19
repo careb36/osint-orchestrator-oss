@@ -1,9 +1,10 @@
 # Agent instructions for osint-orchestrator
 
-This file is read by every coding agent that works on the repository: OpenCode
-(`AGENTS.md` is its native rules file), GitHub Copilot (via the stub in
-`.github/copilot-instructions.md`) and Claude. The rules are the same for all
-of them and for human contributors; `CONTRIBUTING.md` is the long form.
+This file is read by every coding agent that works on the repository: GitHub
+Copilot (via the stub in `.github/copilot-instructions.md`) and Claude Code
+(directly, with `.claude/rules/` restating it per file type). The rules are the
+same for all of them and for human contributors; `CONTRIBUTING.md` is the long
+form.
 
 ## What this project is
 
@@ -52,19 +53,19 @@ changed a conditional template, copy that step too.
 
 ## Working as the delegated agent
 
-When a maintainer delegates an issue to you (a `/oc` comment on an issue that
-uses the *Agent task* template), the contract is:
+When a maintainer delegates an issue to you (assigns an issue written with
+the *Agent task* template to the agent), the contract is:
 
-- **One issue, one branch, one PR.** Branch from `main` as
-  `opencode/<issue-number>-<short-slug>`. Never commit to `main`.
+- **One issue, one branch, one PR.** Branch from `main`; Copilot names the
+  branch `copilot/<short-slug>` itself. Never commit to `main`.
 - **Do exactly what the issue says**, in the order it says it. Every numbered
   item under *What to do* and every test under *Tests* is an acceptance
   criterion that the reviewer checks against the code, not against the PR
   text. If an item cannot be met, say so in the PR and leave the test red;
   never weaken, skip or delete a test to get green.
 - **Files you must not touch unless the issue names them:**
-  `.github/workflows/`, `.gitignore`, `AGENTS.md`, `opencode.json`,
-  dependency pins in `pyproject.toml`, and any existing file under `docs/adr/`.
+  `.github/workflows/`, `.gitignore`, `AGENTS.md`, dependency pins in
+  `pyproject.toml`, and any existing file under `docs/adr/`.
 - **New metric** → declare it in `orchestrator/metrics.py` **and** add one
   row to the metrics table of `docs/operations.md` with exactly the labels
   declared in code.
@@ -78,10 +79,8 @@ uses the *Agent task* template), the contract is:
 - **Fill `.github/pull_request_template.md`** and paste the real output of the
   commands in *Before you open or update a PR*. If you could not run one, say
   which and why.
-- **No network access, no new dependencies, no session sharing.** The tests
-  are offline by design; `opencode.json` denies `webfetch` and disables
-  sharing, and the workflow runs with `share: false`. Do not work around any
-  of that.
+- **No network access beyond installing the pinned dependencies, and no new
+  dependencies.** The tests are offline by design. Do not work around that.
 - **Reviews:** when the reviewer requests changes with numbered items, address
   every item on the same branch, reply under each thread with what changed,
   and do not open a second PR.

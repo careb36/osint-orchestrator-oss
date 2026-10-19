@@ -71,13 +71,19 @@ observable and a Note, is qualified by Nemotron, and is recorded in
 ## Quickstart
 
 The full stack (OpenCTI, SpiderFoot, scheduled runs, alerts) needs Docker with
-Compose v2 and 16 GB of RAM:
+Compose v2.20+ and 16 GB of RAM:
 
 ```bash
 cp .env.example .env                    # passwords, tokens and API keys it lists
 cp targets.example.yaml targets.yaml    # only targets you are authorised to assess
-docker compose up -d --build
+# Set OPENCTI_ENABLED=true in .env for the full stack.
+docker compose --profile opencti up -d --build
 ```
+
+For a lightweight install, keep `OPENCTI_ENABLED=false` (the `.env.example`
+default) and run `docker compose up -d --build`: only SpiderFoot and the
+orchestrator start. Existing sink-on installs must add `--profile opencti`
+or set `COMPOSE_PROFILES=opencti` in `.env`.
 
 Then see [operations](docs/operations.md), [configuration](docs/configuration.md)
 and, for a server, [deploy](docs/deploy.md).

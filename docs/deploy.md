@@ -9,12 +9,13 @@ There are two supported shapes:
 
 | Shape | When | Guide |
 | --- | --- | --- |
-| Docker Compose, full stack | One server; OpenCTI, SpiderFoot and the orchestrator together | This page |
+| Docker Compose | One server; SpiderFoot and the orchestrator, optionally with OpenCTI | This page |
 | Kubernetes, Helm chart | Existing cluster with OpenCTI and SpiderFoot deployed separately | [`deploy/helm/osint-orchestrator`](../deploy/helm/osint-orchestrator/README.md) |
 
 ## Server requirements
 
-Docker Engine 24+ with Compose v2, 16 GB of RAM (OpenCTI and Elasticsearch
+Docker Engine 24+ with Compose v2.20+ (`depends_on.required` support).
+With the optional `opencti` profile: 16 GB of RAM (OpenCTI and Elasticsearch
 take most of it; 32 GB is comfortable), 4 cores, 50 GB of disk and
 `vm.max_map_count=262144` on the host.
 
@@ -38,6 +39,10 @@ production deployment cannot leave at their default:
 | `ALERT_WEBHOOK_SECRET`, SMTP credentials | Only if alerts are delivered. |
 | `TAVILY_API_KEY`, `NEBIUS_API_KEY` (or the key of the provider chosen in `LLM_PROVIDER`) | Web research and synthesis. |
 
+Compose validates required variables even in inactive profiles: fill the
+OpenCTI credentials and `OPENCTI_ENCRYPTION_KEY`, and the MinIO and RabbitMQ
+passwords, even for a sink-off install.
+
 `targets.yaml` is the audit trail: `authorization` and `purpose` are mandatory
 per target and are written into every report. List only entities you are
 authorised in writing to assess.
@@ -45,8 +50,24 @@ authorised in writing to assess.
 ## Start and verify
 
 ```bash
-docker compose up -d --build
-docker compose ps                     # every service healthy (OpenCTI takes 2-3 minutes)
+docker compose build orchestrator spiderfoot
+docker compose up -d                 # sink off: OPENCTI_ENABLED=false, the .env.example default
+```
+
+For the OpenCTI knowledge graph, set `OPENCTI_ENABLED=true` in `.env` and use:
+
+```bash
+docker compose --profile opencti up -d
+```
+
+Existing sink-on installs must also add this profile on upgrades, or set
+`COMPOSE_PROFILES=opencti` in `.env` to enable it for every Compose command.
+With the profile active, the orchestrator waits for OpenCTI to become healthy;
+without it, only SpiderFoot and the orchestrator start
+([ADR-008](adr/ADR-008-optional-opencti-sink.md)).
+
+```bash
+docker compose ps                     # every enabled service healthy (OpenCTI takes 2-3 minutes)
 curl -s http://127.0.0.1:8000/health  # {"status": "ok", ...}; "opencti": "disabled" with OPENCTI_ENABLED=false
 curl -si http://127.0.0.1:8000/ready  # HTTP 200; 503 while the database or the scheduler is down
 ```
@@ -63,16 +84,12 @@ migration step exists.
 
 The OpenCTI images are pinned to the long-term line `7.260811.0-lts.1`. To
 upgrade a deployment that ran `6.8.11`: back up the four OpenCTI volumes, add
-`OPENCTI_ENCRYPTION_KEY` to `.env`, then `docker compose pull && docker compose
-up -d`. OpenCTI migrates its data on first start; existing API tokens move to
-the hashed token store and can no longer be displayed afterwards, so keep
-`OPENCTI_ADMIN_TOKEN` in `.env`. The platform's own list is its
+`OPENCTI_ENCRYPTION_KEY` to `.env`, then `docker compose --profile opencti pull
+&& docker compose --profile opencti up -d`. OpenCTI migrates its data on first
+start; existing API tokens move to the hashed token store and can no longer be
+displayed afterwards, so keep `OPENCTI_ADMIN_TOKEN` in `.env`. The platform's
+own list is its
 [breaking-changes page](https://docs.opencti.io/latest/deployment/breaking-changes/).
-
-The compose file always starts OpenCTI: the orchestrator service waits for it
-to be healthy. `OPENCTI_ENABLED=false` ([ADR-008](adr/ADR-008-optional-opencti-sink.md))
-stops the ingest, not the containers; a stack without OpenCTI is a Helm or a
-hand-written compose deployment, not this file.
 
 The orchestrator container runs as uid 1000. The `./daily_reports` bind mount
 must be writable by that uid before the first start, or every run fails at the
@@ -117,6 +134,9 @@ git pull
 docker compose build orchestrator
 docker compose up -d orchestrator
 ```
+
+For sink-on installs, add `--profile opencti` to the `up` command unless
+`COMPOSE_PROFILES=opencti` is set in `.env`.
 
 The image builds the dashboard and applies the database migrations itself.
 Read the [changelog](../CHANGELOG.md) for removed settings before upgrading;

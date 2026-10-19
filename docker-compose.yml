@@ -3,11 +3,10 @@
 # OSINT Orchestrator stack: OpenCTI, SpiderFoot and the orchestrator
 #
 # Services:
-#   Core (always on): opencti, worker, connector-import-file-stix,
-#                     connector-opencti, elasticsearch, redis, rabbitmq, minio,
-#                     spiderfoot, orchestrator
+#   Core (always on): spiderfoot, orchestrator
 #   Optional profiles:
-#     -f docker-compose.misp.yml --profile misp
+#     --profile opencti   → OpenCTI knowledge graph; set OPENCTI_ENABLED=true too
+#     -f docker-compose.misp.yml --profile misp --profile opencti
 #                         → MISP + MariaDB + Redis for MISP + connector-misp
 #     --profile socialosint → OWASP SocialOSINT agent (CLI/JSON mode)
 #     --profile amass     → OWASP Amass v5 engine (subdomain enumeration)
@@ -19,7 +18,7 @@
 #   cp .env.example .env && vi .env     # fill in tokens & passwords
 #   cp targets.example.yaml targets.yaml && vi targets.yaml
 #
-# Hardware requirements (documented from OpenCTI-Platform/docker):
+# Hardware requirements with --profile opencti (from OpenCTI-Platform/docker):
 #   • Elasticsearch heap: ELASTIC_MEMORY_SIZE (default 4 GB)
 #   • OpenCTI platform Node.js heap: 8 GB (NODE_OPTIONS=--max-old-space-size=8096)
 #   • Recommended host RAM: ≥ 16 GB (OpenCTI stack alone needs ~12-14 GB)
@@ -40,6 +39,7 @@ services:
 
   redis:
     image: redis:8.0.6
+    profiles: ["opencti"]
     restart: unless-stopped
     volumes:
       - redis-data:/data
@@ -51,6 +51,7 @@ services:
 
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.14.3
+    profiles: ["opencti"]
     restart: unless-stopped
     environment:
       discovery.type: single-node
@@ -74,6 +75,7 @@ services:
 
   minio:
     image: quay.io/minio/minio:RELEASE.2024-05-28T17-19-04Z
+    profiles: ["opencti"]
     restart: unless-stopped
     environment:
       MINIO_ROOT_USER: "${MINIO_ROOT_USER:-opencti}"
@@ -89,6 +91,7 @@ services:
 
   rabbitmq:
     image: rabbitmq:3.13.7-management
+    profiles: ["opencti"]
     restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: "${RABBITMQ_DEFAULT_USER:-orchestrator}"
@@ -106,6 +109,7 @@ services:
 
   opencti:
     image: opencti/platform:7.260811.0-lts.1
+    profiles: ["opencti"]
     restart: unless-stopped
     depends_on:
       elasticsearch:
@@ -156,6 +160,7 @@ services:
 
   worker:
     image: opencti/worker:7.260811.0-lts.1
+    profiles: ["opencti"]
     restart: unless-stopped
     depends_on:
       opencti:
@@ -170,6 +175,7 @@ services:
 
   connector-import-file-stix:
     image: opencti/connector-import-file-stix:7.260811.0-lts.1
+    profiles: ["opencti"]
     restart: unless-stopped
     depends_on:
       opencti:
@@ -184,6 +190,7 @@ services:
 
   connector-opencti:
     image: opencti/connector-opencti:7.260811.0-lts.1
+    profiles: ["opencti"]
     restart: unless-stopped
     depends_on:
       opencti:
@@ -233,9 +240,8 @@ services:
     depends_on:
       opencti:
         condition: service_healthy
+        required: false
       spiderfoot:
-        condition: service_healthy
-      redis:
         condition: service_healthy
     env_file: .env
     environment:
