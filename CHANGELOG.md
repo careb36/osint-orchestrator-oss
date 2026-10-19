@@ -267,9 +267,13 @@ from [SECURITY.md](SECURITY.md).
   `local`, Ollama) chooses the provider, and `LLM_PROVIDER` is a global switch
   (`none` disables synthesis, `nebius` routes `llm: openai` targets to Token
   Factory and selects the startup model check) that never moves a target off
-  Ollama. The READMEs, `docs/configuration.md`, `docs/architecture.md`,
-  `docs/deploy.md`, `docs/operations.md`, `.env.example`,
-  `targets.example.yaml` and the Helm values said or implied otherwise.
+  Ollama. The READMEs, `SECURITY.md`, `docs/configuration.md`,
+  `docs/architecture.md`, `docs/deploy.md`, `docs/operations.md`,
+  `.env.example`, `targets.example.yaml`, the Helm chart README and values,
+  and the comment on the `llm` extra in `pyproject.toml` said or implied
+  otherwise. `llm: local` is described as the Ollama server at `LLM_BASE_URL`,
+  not as "nothing leaves the host", and the READMEs say that the startup model
+  check needs `LLM_PROVIDER=nebius` (or `openai`) and its key.
 - `http_request_duration_seconds` and `http_requests_total` are recorded when
   the response is sent, not when the ASGI call returns: a manual run's
   collectors ran inside that call as a background task and charged minutes of

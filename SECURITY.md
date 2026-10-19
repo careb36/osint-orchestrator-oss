@@ -88,10 +88,13 @@ Before any deployment beyond a laptop:
   in particular restricts storing and redistributing user data. The collector
   is opt-in for this reason, and its LLM analysis is stored in OpenCTI
   labelled *not verified*.
-- LLM calls with `LLM_PROVIDER=ollama` keep data on-premises; cloud providers
-  (`nebius`, `openai`, `anthropic`) receive the run's observables and the web
-  evidence being qualified — make that an explicit, documented decision in
-  your jurisdiction.
+- Where the LLM prompts go is decided per target by its `llm` field, not by
+  `LLM_PROVIDER`. A target with `llm: local` (the default) sends them to the
+  Ollama server at `LLM_BASE_URL`; they stay on-premises only if that server
+  does. A target with `llm: nebius`, `openai` or `anthropic` sends the run's
+  observables and the web evidence being qualified to that cloud provider,
+  whatever `LLM_PROVIDER` says. Make each cloud opt-in an explicit, documented
+  decision in your jurisdiction.
 - Tavily receives the search terms configured for a target (entity names or
   the domain).
 - Model output (qualification and risk synthesis) is decision support for an

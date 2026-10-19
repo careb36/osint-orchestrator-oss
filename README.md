@@ -57,10 +57,12 @@ Two model routes are configured independently:
 | reasoning | `LLM_MODEL_REASONING` | `nvidia/nemotron-3-super-120b-a12b` | Risk synthesis for the run | [`synthesizer/__init__.py`](orchestrator/synthesizer/__init__.py) |
 
 Both calls request a JSON-schema response, are retried within a time budget, and
-every returned value is validated before it is stored. With
-`LLM_PROVIDER=nebius` the service checks at startup that the configured models
-are served by the provider. Requests, tokens and model availability are
-exported as Prometheus metrics. Provider client:
+every returned value is validated before it is stored. The startup check that
+the configured models are served follows the global setting, not the target's
+`llm`: it runs only with `LLM_PROVIDER=nebius` and `NEBIUS_API_KEY` set, so a
+deployment that opts in with `llm: nebius` alone gets no startup check.
+Requests, tokens and model availability are exported as Prometheus metrics.
+Provider client:
 [`providers/openai_compat.py`](orchestrator/synthesizer/providers/openai_compat.py).
 
 ## Tavily
