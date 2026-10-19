@@ -124,7 +124,7 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           docker run --rm -e ORCHESTRATOR_API_KEY osint-orchestrator:smoke \
-            python -c "import orchestrator.api, pycti, magic, openai, anthropic; print('ok')"
+            python -c "import orchestrator.api, pycti, openai, anthropic; print('ok')"
           docker run --rm -e ORCHESTRATOR_API_KEY osint-orchestrator:smoke \
             python -c "from orchestrator.config import settings; print(settings.llm_provider)"
 

@@ -29,10 +29,11 @@ dependencies = [
     # External STIX producers' intake contract (ADR-011): POST /bundles
     # validates the bundle against orchestrator/contracts/stix-bundle.schema.json.
     "jsonschema>=4.18",
-    # OpenCTI client. Must match the opencti/platform tag in docker-compose.yml:
-    # an unpinned pycti resolves to the latest release, whose GraphQL inputs the
-    # older platform rejects (e.g. x_opencti_modified_at on NoteAddInput).
-    "pycti==6.8.11",
+    # OpenCTI client. Must match the opencti/platform tag in docker-compose.yml
+    # (an LTS tag `X-lts.N` is pycti `X.N` on PyPI): an unpinned pycti resolves
+    # to the latest release, whose GraphQL inputs an older platform rejects
+    # (e.g. x_opencti_modified_at on NoteAddInput).
+    "pycti==7.260811.0.1",
     # HTTP collector calls
     "httpx>=0.27.0",
     # OSINT collectors.

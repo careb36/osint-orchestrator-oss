@@ -35,11 +35,13 @@ production deployment cannot leave at their default:
 | `ORCHESTRATOR_API_KEY` | Empty leaves the API open to anyone who can reach it (ADR-005). |
 | `ORCHESTRATOR_SECRET_KEY` | Signs the evidence manifests (ADR-007); the default key makes every signature forgeable. |
 | `OPENCTI_ADMIN_TOKEN`, the OpenCTI, MinIO and RabbitMQ passwords | Shared between the OpenCTI services and the orchestrator. |
+| `OPENCTI_ENCRYPTION_KEY` | Mandatory since OpenCTI 7.260224.0: the platform encrypts its secrets with it and does not start without one (`openssl rand -base64 32`). Back it up with the OpenCTI volumes. |
 | `ALERT_WEBHOOK_SECRET`, SMTP credentials | Only if alerts are delivered. |
 | `TAVILY_API_KEY`, `NEBIUS_API_KEY` (or the key of the provider chosen in `LLM_PROVIDER`) | Web research and synthesis. |
 
 Compose validates required variables even in inactive profiles: fill the
-OpenCTI, MinIO and RabbitMQ credentials even for a sink-off install.
+OpenCTI credentials and `OPENCTI_ENCRYPTION_KEY`, and the MinIO and RabbitMQ
+passwords, even for a sink-off install.
 
 `targets.yaml` is the audit trail: `authorization` and `purpose` are mandatory
 per target and are written into every report. List only entities you are
@@ -80,6 +82,15 @@ reverse proxy as the API. Database migrations run at startup; a fresh install
 reaches the latest schema and an upgrade applies what is missing, so no manual
 migration step exists.
 
+The OpenCTI images are pinned to the long-term line `7.260811.0-lts.1`. To
+upgrade a deployment that ran `6.8.11`: back up the four OpenCTI volumes, add
+`OPENCTI_ENCRYPTION_KEY` to `.env`, then `docker compose --profile opencti pull
+&& docker compose --profile opencti up -d`. OpenCTI migrates its data on first
+start; existing API tokens move to the hashed token store and can no longer be
+displayed afterwards, so keep `OPENCTI_ADMIN_TOKEN` in `.env`. The platform's
+own list is its
+[breaking-changes page](https://docs.opencti.io/latest/deployment/breaking-changes/).
+
 The orchestrator container runs as uid 1000. The `./daily_reports` bind mount
 must be writable by that uid before the first start, or every run fails at the
 report step:
@@ -110,7 +121,7 @@ Never publish port 8000 directly. Two options:
 | --- | --- | --- |
 | Runs, findings, queues (SQLite) | volume `orchestrator-db` (`/app/data/orchestrator.db`) | Copy the file while the orchestrator is stopped, or use `sqlite3 .backup` |
 | Reports, STIX bundles, signed manifests | `./daily_reports` on the host | File-level backup; the manifest chain detects any later change |
-| OpenCTI knowledge graph | volumes `elasticsearch-data`, `minio-data`, `redis-data`, `rabbitmq-data` | Follow the OpenCTI backup guidance |
+| OpenCTI knowledge graph | volumes `elasticsearch-data`, `minio-data`, `redis-data`, `rabbitmq-data` | Follow the OpenCTI backup guidance, and keep `OPENCTI_ENCRYPTION_KEY` with the backup |
 | Collector state | `spiderfoot-data`, `amass-data` | Optional; rebuilt by later runs |
 
 `ORCHESTRATOR_RETENTION_DAYS` (default 90) purges old runs and report

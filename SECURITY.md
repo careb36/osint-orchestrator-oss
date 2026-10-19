@@ -59,9 +59,9 @@ Before any deployment beyond a laptop:
 
 - [ ] `ORCHESTRATOR_API_KEY` set (an empty key leaves the API **open**; a
       warning is logged at startup).
-- [ ] `OPENCTI_ADMIN_PASSWORD`, `OPENCTI_ADMIN_TOKEN`, `MINIO_ROOT_PASSWORD`,
-      `RABBITMQ_DEFAULT_PASS` and `KEYCLOAK_ADMIN_PASSWORD` set to generated
-      values (`.env.example` ships them blank).
+- [ ] `OPENCTI_ADMIN_PASSWORD`, `OPENCTI_ADMIN_TOKEN`, `OPENCTI_ENCRYPTION_KEY`,
+      `MINIO_ROOT_PASSWORD`, `RABBITMQ_DEFAULT_PASS` and `KEYCLOAK_ADMIN_PASSWORD`
+      set to generated values (`.env.example` ships them blank).
 - [ ] `ORCHESTRATOR_SECRET_KEY` generated (`openssl rand -hex 32`) and backed
       up: it signs the evidence manifests, and a lost key means earlier runs
       can no longer be verified. An empty or default key logs a warning.

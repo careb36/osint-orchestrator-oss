@@ -108,7 +108,7 @@ services:
   # ── OpenCTI Platform ─────────────────────────────────────────────────────────
 
   opencti:
-    image: opencti/platform:6.8.11
+    image: opencti/platform:7.260811.0-lts.1
     profiles: ["opencti"]
     restart: unless-stopped
     depends_on:
@@ -129,6 +129,10 @@ services:
       # the platform with empty credentials.
       APP__ADMIN__PASSWORD: "${OPENCTI_ADMIN_PASSWORD:?}"
       APP__ADMIN__TOKEN: "${OPENCTI_ADMIN_TOKEN:?}"
+      # Mandatory since OpenCTI 7.260224.0: the key the platform encrypts its
+      # secrets with. Generate it with `openssl rand -base64 32` and keep it
+      # with the volume backups: data encrypted with a lost key is unreadable.
+      APP__ENCRYPTION_KEY: "${OPENCTI_ENCRYPTION_KEY:?set OPENCTI_ENCRYPTION_KEY in .env}"
       APP__APP_LOGS__LOGS_LEVEL: "error"
       REDIS__HOSTNAME: redis
       REDIS__PORT: 6379
@@ -155,7 +159,7 @@ services:
       start_period: 120s
 
   worker:
-    image: opencti/worker:6.8.11
+    image: opencti/worker:7.260811.0-lts.1
     profiles: ["opencti"]
     restart: unless-stopped
     depends_on:
@@ -170,7 +174,7 @@ services:
   # ── Built-in OpenCTI connectors ───────────────────────────────────────────
 
   connector-import-file-stix:
-    image: opencti/connector-import-file-stix:6.8.11
+    image: opencti/connector-import-file-stix:7.260811.0-lts.1
     profiles: ["opencti"]
     restart: unless-stopped
     depends_on:
@@ -185,7 +189,7 @@ services:
       CONNECTOR_LOG_LEVEL: "error"
 
   connector-opencti:
-    image: opencti/connector-opencti:6.8.11
+    image: opencti/connector-opencti:7.260811.0-lts.1
     profiles: ["opencti"]
     restart: unless-stopped
     depends_on:
