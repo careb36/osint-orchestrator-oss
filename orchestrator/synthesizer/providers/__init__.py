@@ -13,15 +13,19 @@ Factory
 
 Rules
 -----
+The provider is the target's choice. ``Target.llm`` is a closed literal that
+defaults to "local", so ``settings.llm_provider`` never picks a provider for a
+target that did not name one: a target's prompts reach a cloud LLM provider
+only when it opts in. "local" means the Ollama server at LLM_BASE_URL, which
+the operator may host anywhere.
+
 - settings.llm_provider == "none"      → no client at all: synthesis is off for every
                                           target, and a per-target `llm` cannot re-enable it.
-- target.llm == "local"                → always OllamaClient, regardless of global setting.
+- target.llm == "local" (the default)  → always OllamaClient, regardless of global setting.
 - target.llm == "anthropic"             → Anthropic provider.
 - target.llm == "openai"                → OpenAI-compatible family; if LLM_PROVIDER=nebius,
                                           routes to Nebius, else to OpenAI.
 - target.llm == "nebius"                → Nebius OpenAI-compatible provider.
-- otherwise settings.llm_provider decides: "anthropic" / "openai" / "nebius"
-                                          (require an API key) or Ollama as the default.
 - Returns None and logs a warning if the chosen remote provider has no API key.
 """
 
@@ -88,6 +92,8 @@ def get_client(target: Target) -> LLMClient | None:
     elif target.llm == "nebius":
         provider = "nebius"
     else:
+        # Unreachable: Target.llm is a closed literal and every value is
+        # handled above. The global setting is a switch, not a default.
         provider = settings.llm_provider
     if provider == "anthropic":
         if not settings.anthropic_api_key:

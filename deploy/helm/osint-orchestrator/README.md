@@ -90,7 +90,7 @@ actually change:
 | `secrets.existingSecret` | `""` | Secret carrying `OPENCTI_ADMIN_TOKEN`, `ORCHESTRATOR_API_KEY`, `NEBIUS_API_KEY`, `TAVILY_API_KEY`, ... |
 | `config.openctiEnabled` | `true` | `false` runs without the knowledge graph (ADR-008) |
 | `config.openctiUrl` | `http://opencti:8080` | In-cluster OpenCTI URL |
-| `config.llm.provider` | `ollama` | `ollama`, `anthropic`, `openai`, `nebius` or `none`; cloud providers take their key from `secrets.values` |
+| `config.llm.provider` | `ollama` | `LLM_PROVIDER`: a global switch, not the provider of a target. Each target picks its provider with `llm` in `targets.targets` (default `local`, the Ollama at `config.llm.baseUrl`). `none` turns synthesis off for every target; `nebius` sends `llm: openai` targets to Token Factory and, like `openai`, enables the startup model check. Cloud providers take their key from `secrets.values` |
 | `config.llm.modelReasoning` / `modelFast` | `""` | The two model routes of the cloud providers (required for `nebius`) |
 | `config.tavily.*` | `basic` / 5 / 3 / 120 | Search depth, results per query, calls per run, timeout |
 | `config.retention.days` / `cron` | 90 / `30 3 * * *` | Nightly purge of old runs and reports (0 disables) |

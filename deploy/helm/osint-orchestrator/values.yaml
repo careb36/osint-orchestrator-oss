@@ -103,8 +103,12 @@ config:
   logLevel: INFO
   metricsEnabled: true
   llm:
-    # ollama | anthropic | openai | nebius | none. Cloud providers need their
-    # key under secrets.values (NEBIUS_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY).
+    # LLM_PROVIDER: ollama | anthropic | openai | nebius | none. A target's
+    # provider is its `llm` field in targets.yaml (default local, Ollama);
+    # this value is a global switch: none turns synthesis off, nebius sends
+    # `llm: openai` targets to Token Factory and openai / nebius enables the
+    # startup model check. Cloud providers need their key under secrets.values
+    # (NEBIUS_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY).
     provider: ollama
     model: llama3.2
     baseUrl: http://ollama:11434
