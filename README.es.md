@@ -62,8 +62,9 @@ Las dos llamadas piden una respuesta con esquema JSON, se reintentan dentro de
 un presupuesto de tiempo, y cada valor devuelto se valida antes de guardarse.
 La comprobación al arrancar de que el proveedor sirve los modelos configurados
 depende del ajuste global, no del `llm` del objetivo: solo se ejecuta con
-`LLM_PROVIDER=nebius` y `NEBIUS_API_KEY` definidos, de modo que un despliegue
-que solo pone `llm: nebius` en el objetivo no tiene esa comprobación. Las
+`LLM_PROVIDER=nebius` u `openai` y la clave de ese proveedor definida, de modo
+que un despliegue que solo pone `llm: nebius` en el objetivo no tiene esa
+comprobación. Las
 peticiones, los tokens y la disponibilidad de los modelos se exportan como
 métricas Prometheus. Cliente del proveedor:
 [`providers/openai_compat.py`](orchestrator/synthesizer/providers/openai_compat.py).

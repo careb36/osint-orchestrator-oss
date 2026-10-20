@@ -59,8 +59,9 @@ Two model routes are configured independently:
 Both calls request a JSON-schema response, are retried within a time budget, and
 every returned value is validated before it is stored. The startup check that
 the configured models are served follows the global setting, not the target's
-`llm`: it runs only with `LLM_PROVIDER=nebius` and `NEBIUS_API_KEY` set, so a
-deployment that opts in with `llm: nebius` alone gets no startup check.
+`llm`: it runs only with `LLM_PROVIDER=nebius` or `openai` and that provider's
+key set, so a deployment that opts in with `llm: nebius` alone gets no startup
+check.
 Requests, tokens and model availability are exported as Prometheus metrics.
 Provider client:
 [`providers/openai_compat.py`](orchestrator/synthesizer/providers/openai_compat.py).
