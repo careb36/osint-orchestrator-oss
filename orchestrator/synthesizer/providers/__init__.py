@@ -27,12 +27,14 @@ the operator may host anywhere.
                                           routes to Nebius, else to OpenAI.
 - target.llm == "nebius"                → Nebius OpenAI-compatible provider.
 - Returns None and logs a warning if the chosen remote provider has no API key.
+- The branches are exhaustive over ``Target.llm``; ``assert_never`` makes mypy
+  reject a new value that ``get_client`` does not handle.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, assert_never, runtime_checkable
 
 from orchestrator.config import NEBIUS_DEFAULT_BASE_URL, settings
 from orchestrator.models import Target
@@ -70,32 +72,25 @@ def get_client(target: Target) -> LLMClient | None:
     """
     Return the LLM client to use for *target*.
 
-    Returns None (with a warning) when the configured provider cannot be used
-    because no API key is present.  Never raises.
+    The provider is ``target.llm``. ``settings.llm_provider`` only switches
+    synthesis off (``none``) or sends ``llm: openai`` targets to the Nebius
+    preset (``nebius``); it is never a fallback provider. Returns None (with a
+    warning) when the chosen cloud provider has no API key. Never raises for a
+    validated Target: the closing ``assert_never`` is only reachable with a
+    value that bypassed validation, and then it fails closed instead of
+    sending the prompts anywhere.
     """
     if settings.llm_provider == "none":
         return None
 
-    if target.llm == "local":
+    llm = target.llm
+    if llm == "local":
         # Hard rule: local targets always use Ollama.
         from orchestrator.synthesizer.providers.ollama import OllamaClient
 
         return OllamaClient()
 
-    # Per-target override first (Target.llm is validated), then the global
-    # setting. `llm: openai` means "OpenAI-compatible API family", so when the
-    # global provider is set to nebius we route that target to the Nebius preset.
-    if target.llm == "anthropic":
-        provider = "anthropic"
-    elif target.llm == "openai":
-        provider = "nebius" if settings.llm_provider == "nebius" else "openai"
-    elif target.llm == "nebius":
-        provider = "nebius"
-    else:
-        # Unreachable: Target.llm is a closed literal and every value is
-        # handled above. The global setting is a switch, not a default.
-        provider = settings.llm_provider
-    if provider == "anthropic":
+    if llm == "anthropic":
         if not settings.anthropic_api_key:
             logger.warning(
                 "LLM provider 'anthropic' requires ANTHROPIC_API_KEY — synthesis skipped"
@@ -105,7 +100,9 @@ def get_client(target: Target) -> LLMClient | None:
 
         return AnthropicClient()
 
-    if provider == "openai":
+    # `llm: openai` means "OpenAI-compatible API family", so under
+    # LLM_PROVIDER=nebius that target goes to the Nebius preset below.
+    if llm == "openai" and settings.llm_provider != "nebius":
         if not settings.openai_api_key:
             logger.warning("LLM provider 'openai' requires OPENAI_API_KEY — synthesis skipped")
             return None
@@ -113,7 +110,7 @@ def get_client(target: Target) -> LLMClient | None:
 
         return OpenAICompatClient()
 
-    if provider == "nebius":
+    if llm == "nebius" or llm == "openai":
         if not settings.nebius_api_key:
             logger.warning("LLM provider 'nebius' requires NEBIUS_API_KEY — synthesis skipped")
             return None
@@ -126,7 +123,4 @@ def get_client(target: Target) -> LLMClient | None:
             base_url=settings.nebius_base_url.strip() or NEBIUS_DEFAULT_BASE_URL,
         )
 
-    # Default: Ollama
-    from orchestrator.synthesizer.providers.ollama import OllamaClient
-
-    return OllamaClient()
+    assert_never(llm)
