@@ -11,6 +11,15 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- investigation-assistant worker (ADR-011, phase 3): `docker-compose.engine.yml`
+  adds a one-shot `investigation-engine` service, built from the operator's
+  clone of the producer with its own `Dockerfile`, that exports one case
+  (`INVESTIGATION_CASE`, default `demo_simulado`) and posts its STIX bundle to
+  `POST /bundles` once the orchestrator is healthy. The case corpus is mounted
+  read-only and worked on in a tmpfs; the worker's key comes from
+  `INVESTIGAR_ORCHESTRATOR_API_KEY` and must be one of the
+  `ORCHESTRATOR_API_KEY` values. One command starts orchestrator, OpenCTI and
+  the worker; see docs/operations.md.
 - External STIX 2.1 intake (ADR-011): `python -m orchestrator.ingest_bundle
   <file> [--work-name …] [--dry-run]` and `POST /bundles` validate a producer's
   bundle against the pinned JSON Schema in `orchestrator/contracts/`, parse it
