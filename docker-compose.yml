@@ -8,6 +8,9 @@
 #     --profile opencti   → OpenCTI knowledge graph; set OPENCTI_ENABLED=true too
 #     -f docker-compose.misp.yml --profile misp --profile opencti
 #                         → MISP + MariaDB + Redis for MISP + connector-misp
+#     -f docker-compose.engine.yml --profile engine --profile opencti
+#                         → investigation-assistant worker: exports one case
+#                           and posts its STIX bundle to POST /bundles (ADR-011)
 #     --profile socialosint → OWASP SocialOSINT agent (CLI/JSON mode)
 #     --profile amass     → OWASP Amass v5 engine (subdomain enumeration)
 #     -f docker-compose.auth.yml --profile auth

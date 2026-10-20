@@ -1,0 +1,67 @@
+# docker-compose.engine.yml
+#
+# Optional investigation-assistant worker (ADR-011): a one-shot container that
+# exports one case of the investigation-assistant engine to a STIX 2.1 bundle
+# and posts it to this orchestrator's POST /bundles, which ingests it into
+# OpenCTI. Each service keeps its own image: the worker is built from the
+# producer's own repository and Dockerfile, nothing of it is copied here.
+#
+# Kept out of docker-compose.yml because Compose interpolates every service of
+# the files it loads, profile or not: the required variables below would
+# otherwise block `docker compose up` for every install without the worker.
+#
+# Required in .env (Compose stops with "required variable ... is missing a
+# value" until they are set):
+#   INVESTIGATION_ASSISTANT_DIR      path to a clone of the investigation-assistant repo
+#   INVESTIGAR_ORCHESTRATOR_API_KEY  the worker's API key; it must also be one of
+#                                    the comma-separated ORCHESTRATOR_API_KEY values
+# Optional:
+#   INVESTIGATION_CASE               case slug under <clone>/cases (default demo_simulado)
+#
+# Usage: one command. The worker waits for a healthy orchestrator, which waits
+# for OpenCTI, then exits; `docker compose logs investigation-engine` shows the
+# result.
+#   docker compose -f docker-compose.yml -f docker-compose.engine.yml \
+#     --profile opencti --profile engine up -d --build
+#
+# See docs/operations.md (Optional services, investigation-assistant worker).
+
+services:
+  investigation-engine:
+    build:
+      # The producer's Dockerfile, from the operator's clone, with only the
+      # STIX extra: the worker exports and posts, it runs no tests, LLM or
+      # transcription. The tag differs from the one the producer's own compose
+      # builds with every extra, so neither overwrites the other.
+      context: "${INVESTIGATION_ASSISTANT_DIR:?}"
+      args:
+        EXTRAS: stix
+    image: investigation-assistant:engine-worker
+    profiles: ["engine"]
+    # One-shot: export, post, exit. A non-zero exit (export refused, 401, 422,
+    # 5xx) is the failure signal, so it is never restarted.
+    restart: "no"
+    depends_on:
+      orchestrator:
+        condition: service_healthy
+    environment:
+      # Read by the producer's ingest client from the environment only: never
+      # baked into the image, never on the command line.
+      INVESTIGAR_ORCHESTRATOR_API_KEY: "${INVESTIGAR_ORCHESTRATOR_API_KEY:?}"
+      INVESTIGATION_CASE: "${INVESTIGATION_CASE:-demo_simulado}"
+    volumes:
+      # Read-only: the worker never writes to the case corpus on the host.
+      - "${INVESTIGATION_ASSISTANT_DIR:?}/cases:/cases:ro"
+    tmpfs:
+      # Working copy of the one case being exported (pipeline outputs and the
+      # bundle), owned by the image's non-root user and discarded with the
+      # container: the bundle's destination is OpenCTI.
+      - /data/cases:uid=1000,gid=1000,mode=0700
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        set -eu;
+        cp -R "/cases/$$INVESTIGATION_CASE" /data/cases/;
+        investigar run --case "$$INVESTIGATION_CASE" --cases-dir /data/cases;
+        exec investigar export-stix --case "$$INVESTIGATION_CASE" --cases-dir /data/cases
+        --ingest http://orchestrator:8000
