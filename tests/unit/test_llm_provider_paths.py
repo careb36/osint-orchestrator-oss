@@ -244,3 +244,42 @@ async def test_preflight_http_failure_only_warns(
         )
     record = next(r for r in caplog.records if "preflight failed" in r.message)
     assert record.provider == "openai"
+
+
+# ── Routing table ─────────────────────────────────────────────────────────────
+
+_GLOBALS = ("ollama", "anthropic", "openai", "nebius", "none")
+_EXPECTED = {
+    # (target.llm, LLM_PROVIDER) -> provider name, or None for no client
+    **{(llm, "none"): None for llm in ("local", "anthropic", "openai", "nebius")},
+    **{("local", g): "ollama" for g in _GLOBALS if g != "none"},
+    **{("anthropic", g): "anthropic" for g in _GLOBALS if g != "none"},
+    **{("openai", g): ("nebius" if g == "nebius" else "openai") for g in _GLOBALS if g != "none"},
+    **{("nebius", g): "nebius" for g in _GLOBALS if g != "none"},
+}
+
+
+@pytest.mark.parametrize(("llm", "global_provider"), sorted(_EXPECTED), ids=lambda v: str(v))
+def test_every_target_llm_and_global_provider_pair_routes_as_documented(
+    monkeypatch: pytest.MonkeyPatch, llm: str, global_provider: str
+) -> None:
+    """The global setting never picks a provider: it only turns synthesis off
+    (``none``) or sends ``llm: openai`` to the Nebius preset (``nebius``)."""
+    monkeypatch.setattr(settings, "llm_provider", global_provider)
+    for key in ("anthropic_api_key", "openai_api_key", "nebius_api_key"):
+        monkeypatch.setattr(settings, key, "test-key")
+
+    client = get_client(_target(llm))
+
+    expected = _EXPECTED[(llm, global_provider)]
+    assert (client.provider if client is not None else None) == expected
+
+
+def test_an_llm_value_that_bypassed_validation_fails_closed() -> None:
+    """Target.llm is validated, so this cannot come from targets.yaml. If it
+    ever happens, no client is built: the prompts are not sent anywhere."""
+    target = Target.model_construct(
+        id="t1", fqdn="example.com", authorization="self-owned", purpose="test", llm="other"
+    )
+    with pytest.raises(AssertionError):
+        get_client(target)
