@@ -66,6 +66,22 @@ Requests, tokens and model availability are exported as Prometheus metrics.
 Provider client:
 [`providers/openai_compat.py`](orchestrator/synthesizer/providers/openai_compat.py).
 
+### Run it on Token Factory
+
+Four lines in `.env`, and `llm: nebius` on each target in `targets.yaml`:
+
+```bash
+LLM_PROVIDER=nebius
+NEBIUS_API_KEY=<your Token Factory key>
+LLM_MODEL_FAST=nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B
+LLM_MODEL_REASONING=nvidia/nemotron-3-super-120b-a12b
+```
+
+`LLM_PROVIDER=nebius` also turns on the startup check that both models are
+served and sends `llm: openai` targets to Token Factory. Without the two
+`LLM_MODEL_*` lines both routes fall back to `LLM_MODEL`, whose default,
+`llama3.2`, names an Ollama model, not a Token Factory one.
+
 ## Tavily
 
 The Tavily collector ([`collectors/tavily.py`](orchestrator/collectors/tavily.py))
