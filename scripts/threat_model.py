@@ -79,9 +79,10 @@ tm.assumptions = [
     "ORCHESTRATOR_API_KEY is set. require_api_key is a no-op with an empty key (open mode, "
     "documented in ADR-005 and ADR-006); that mode is out of this model's scope.",
     "The shipped docker-compose.auth.yml terminates no TLS: oauth2-proxy listens on plain HTTP "
-    "on loopback and hardcodes OAUTH2_PROXY_COOKIE_SECURE=false. A TLS terminator in front of it "
-    "is a "
-    "production hardening step, modelled as absent.",
+    "on loopback and hardcodes OAUTH2_PROXY_COOKIE_SECURE=false, and the browser logs in at "
+    "Keycloak's own HTTP endpoint (KC_HOSTNAME http://localhost:8085, OIDC_BROWSER_LOGIN_URL). "
+    "A TLS terminator in front of both, with KC_HOSTNAME and the login URL on the https:// "
+    "name, is a production hardening step, modelled as absent.",
     "Alert channels are modelled with their defaults: SMTP with STARTTLS "
     "(ALERT_SMTP_STARTTLS=true) and the webhook over an https:// URL of the operator's with "
     "the optional HMAC signature (ALERT_WEBHOOK_SECRET) unset. ALERT_WEBHOOK_URL accepts any "
@@ -211,6 +212,13 @@ webhook_url_token = Data(
     credentialsLife=Lifetime.LONG,
     classification=Classification.SECRET,
 )
+misp_db_password = Data(
+    name="MISP database password",
+    description="MISP_MYSQL_PASSWORD, shared by misp and misp-db (docker-compose.misp.yml); Redis runs without one.",
+    isCredentials=True,
+    credentialsLife=Lifetime.MANUAL,
+    classification=Classification.SECRET,
+)
 operator_session = Data(
     name="oauth2-proxy session cookie",
     description="OIDC session of the operator behind the optional proxy.",
@@ -254,6 +262,11 @@ social_profiles = Data(
     isPII=True,
     isStored=True,
     isDestEncryptedAtRest=False,
+)
+metrics_exposition = Data(
+    name="Prometheus exposition",
+    description="Target ids, run status, durations and observable counts as metric labels and values (metrics.py).",
+    classification=Classification.RESTRICTED,
 )
 
 # ── Actors & external entities ──────────────────────────────────────────────
@@ -351,6 +364,16 @@ keycloak.controls = Controls(
     authenticationScheme="realm users; bootstrap admin on first boot",
     usesMFA=False,
 )
+
+keycloak_db = Datastore("Keycloak data volume (keycloak-data)")
+keycloak_db.inBoundary = edge
+keycloak_db.description = (
+    "start-dev with the embedded database under /opt/keycloak/data: realm users and their "
+    "password hashes, the oauth2-proxy client secret, sessions and events. Dev mode by "
+    "Keycloak's own account; a production Keycloak needs an external database."
+)
+keycloak_db.isSQL = True
+keycloak_db.controls = Controls(isEncryptedAtRest=False)
 
 # ── Orchestrator (compose network) ──────────────────────────────────────────
 orchestrator = Process("Orchestrator API (FastAPI + APScheduler)")
@@ -500,6 +523,15 @@ misp.controls = Controls(
     isEncrypted=True, authenticatesSource=True, authenticationScheme="MISP API key"
 )
 
+misp_store = Datastore("MISP backing stores (MariaDB, Redis)")
+misp_store.inBoundary = compose
+misp_store.description = (
+    "misp-db (mariadb) on misp-db-data, misp-redis (redis, no password) on misp-redis-data and "
+    "misp-data for attachments: events, attributes and MISP's own users and keys."
+)
+misp_store.isSQL = True
+misp_store.controls = Controls(isEncryptedAtRest=False)
+
 # ── OpenCTI platform ────────────────────────────────────────────────────────
 opencti = Server("OpenCTI platform")
 opencti.inBoundary = opencti_b
@@ -542,6 +574,8 @@ CLASSES: dict[str, list] = {
         opencti,
         opencti_store,
         connector_misp,
+        keycloak_db,
+        misp_store,
     ],
     "store": [sqlite, targets_yaml, reports, amass_db, socialosint_cache, spiderfoot_db],
     "actor": [operator, anonymous, stix_producer, public_web, social_platforms],
@@ -572,6 +606,8 @@ _LIMITS: dict[Classification, list] = {
         opencti,
         opencti_store,
         connector_misp,
+        keycloak_db,
+        misp_store,
         amass,  # provider keys mounted from datasources.yaml
         socialosint,  # platform tokens in its environment
     ],
@@ -629,6 +665,22 @@ flow(
     controls=Controls(isEncrypted=False, authenticatesSource=True),
 )
 flow(
+    keycloak,
+    keycloak_db,
+    "Persist realm users, client secret and sessions",
+    protocol="file",
+    data=[keycloak_password, oidc_client_secret, oidc_tokens],
+    controls=Controls(isEncrypted=False),
+)
+flow(
+    keycloak_db,
+    keycloak,
+    "Read realm, users and sessions",
+    protocol="file",
+    data=[keycloak_password, oidc_client_secret, oidc_tokens],
+    controls=Controls(isEncrypted=False),
+)
+flow(
     proxy,
     keycloak,
     "Token redeem / userinfo",
@@ -661,6 +713,7 @@ flow(
     "GET /health, /metrics",
     protocol="HTTP",
     tlsVersion=TLSVersion.NONE,
+    data=[metrics_exposition],  # served without an API key: scrapers are not API clients
     controls=Controls(isEncrypted=False, authenticatesSource=False, hasAccessControl=False),
 )
 flow(
@@ -937,6 +990,24 @@ flow(
     controls=Controls(isEncrypted=False, authenticatesDestination=False),
 )
 flow(
+    misp,
+    misp_store,
+    "MISP database (MySQL, compose-internal)",
+    protocol="MySQL",
+    tlsVersion=TLSVersion.NONE,
+    data=[misp_db_password, evidence],
+    controls=Controls(isEncrypted=False, authenticatesDestination=False),
+)
+flow(
+    misp,
+    misp_store,
+    "MISP cache and queues (Redis, no password)",
+    protocol="RESP",
+    tlsVersion=TLSVersion.NONE,
+    data=[evidence],
+    controls=Controls(isEncrypted=False, authenticatesDestination=False),
+)
+flow(
     connector_misp,
     misp,
     "connector-misp polls MISP events",
@@ -1171,7 +1242,9 @@ TRIAGE: dict[str, dict[str, Response]] = {
             "boundary in clear on :8000 and on the shipped OIDC overlay, which terminates no "
             "TLS (ADR-005). The "
             "disclosure to the sources queried is inherent to OSINT and bounded by the per-target "
-            "authorisation. Hardening: a TLS terminator in front of :8000/:8002." + _DISCOVERY,
+            "authorisation. Hardening: a TLS terminator in front of :8000, :8002 and Keycloak's "
+            "browser endpoint (:8085), with KC_HOSTNAME and OIDC_BROWSER_LOGIN_URL on the "
+            "https:// name." + _DISCOVERY,
         ),
     },
     "INP02": {  # Overflow Buffers
@@ -1234,8 +1307,8 @@ TRIAGE: dict[str, dict[str, Response]] = {
             "key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the "
             "loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose "
             "bridge from the sink and from connector-misp. They are never logged (parameterized "
-            "logging, explicit extra fields). Hardening: TLS terminator in front of :8000/:8002 "
-            "and TLS to OpenCTI.",
+            "logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 "
+            "and Keycloak's browser endpoint, and TLS to OpenCTI.",
         ),
     },
     "API01": {  # Exploit Test APIs
@@ -1253,7 +1326,9 @@ TRIAGE: dict[str, dict[str, Response]] = {
             "The shipped OIDC overlay runs oauth2-proxy on plain HTTP on loopback and hardcodes "
             "OAUTH2_PROXY_COOKIE_SECURE=false (no variable reads it): the session cookie is exposed "
             "to anything on the host, which ADR-005 trusts. Production: a TLS terminator in front "
-            "of the proxy and a Compose override that sets OAUTH2_PROXY_COOKIE_SECURE to true.",
+            "of the proxy and of Keycloak's browser endpoint (KC_HOSTNAME and "
+            "OIDC_BROWSER_LOGIN_URL on the https:// name) and a Compose override that sets "
+            "OAUTH2_PROXY_COOKIE_SECURE to true.",
         ),
     },
     "CR03": {  # Dictionary-based Password Attack
@@ -1288,7 +1363,8 @@ TRIAGE: dict[str, dict[str, Response]] = {
         ),
         "vendor": (
             "transferred",
-            "OpenCTI's own audit trail lives in its backing stores and is the platform's.",
+            "The platform's own audit trail (OpenCTI, Keycloak events, MISP logs) lives in its "
+            "backing stores and is the platform's.",
         ),
     },
     "DR01": {  # Unprotected Sensitive Data
@@ -1578,6 +1654,14 @@ _SOCIALOSINT_LLM = (
     "report misleads the analyst who reads the note.",
 )
 OVERRIDES: dict[tuple[str, str], Response] = {
+    ("GET /health, /metrics", "DS06"): (
+        "accepted",
+        "GET /metrics answers without an API key by design (scrapers are not API clients; "
+        "ORCHESTRATOR_METRICS_ENABLED defaults to true): target ids, run status, durations and "
+        "observable counts go to whoever reaches :8000, which ADR-005 limits to the trusted "
+        "host. Hardening: ORCHESTRATOR_METRICS_ENABLED=false, or a scraper-only network policy "
+        "or an authenticating TLS terminator in front of /metrics.",
+    ),
     ("SpiderFoot scan database (spiderfoot-data volume)", "DE04"): (
         "accepted",
         "Outside the manifest chain: scan rows and logs are plain SQLite the sidecar rewrites. "

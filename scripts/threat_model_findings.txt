@@ -47,7 +47,9 @@ AC01	store	SpiderFoot scan database (spiderfoot-data volume)
 AC01	store	daily_reports (sealed runs)
 AC01	store	targets.yaml
 AC01	vendor	Keycloak
+AC01	vendor	Keycloak data volume (keycloak-data)
 AC01	vendor	MISP
+AC01	vendor	MISP backing stores (MariaDB, Redis)
 AC01	vendor	OpenCTI backing stores
 AC01	vendor	OpenCTI platform
 AC01	vendor	SMTP relay (alert e-mail)
@@ -71,11 +73,14 @@ AC05	flow	Enumeration submit (oam_enum)
 AC05	flow	GET /health, /metrics
 AC05	flow	HTTPS source lookups (OpenOSINT)
 AC05	flow	Local model inference
+AC05	flow	MISP cache and queues (Redis, no password)
+AC05	flow	MISP database (MySQL, compose-internal)
 AC05	flow	MinIO objects
 AC05	flow	Operator login (Keycloak authorization endpoint, shipped overlay)
 AC05	flow	Operator session (OIDC, shipped overlay)
 AC05	flow	POST /bundles (STIX intake)
 AC05	flow	Passive data-source queries (datasources.yaml keys)
+AC05	flow	Persist realm users, client secret and sessions
 AC05	flow	Platform collection (operator's API tokens)
 AC05	flow	Platform collection jobs
 AC05	flow	Proxied console/API calls
@@ -84,6 +89,7 @@ AC05	flow	Qualification & synthesis prompts (local HTTP API)
 AC05	flow	RabbitMQ queues
 AC05	flow	Read cached profiles for later sessions
 AC05	flow	Read discovered names (oam_subs, shared volume)
+AC05	flow	Read realm, users and sessions
 AC05	flow	Read scan results for the API
 AC05	flow	Read target inventory
 AC05	flow	Redis cache (no authentication)
@@ -186,15 +192,18 @@ AC23	flow	Alert e-mail (SMTP, STARTTLS by default)
 AC23	flow	Alert webhook (ALERT_WEBHOOK_URL)
 AC23	flow	Direct loopback API/console (no overlay)
 AC23	flow	Due-diligence queries
+AC23	flow	MISP database (MySQL, compose-internal)
 AC23	flow	MinIO objects
 AC23	flow	Operator login (Keycloak authorization endpoint, shipped overlay)
 AC23	flow	Operator session (OIDC, shipped overlay)
 AC23	flow	POST /bundles (STIX intake)
 AC23	flow	Passive data-source queries (datasources.yaml keys)
+AC23	flow	Persist realm users, client secret and sessions
 AC23	flow	Platform collection (operator's API tokens)
 AC23	flow	Proxied console/API calls
 AC23	flow	Qualification & synthesis prompts (cloud)
 AC23	flow	RabbitMQ queues
+AC23	flow	Read realm, users and sessions
 AC23	flow	STIX ingest (pycti, outbox retries)
 AC23	flow	SocialOSINT text and vision prompts (own endpoint and key)
 AC23	flow	Token redeem / userinfo
@@ -230,7 +239,9 @@ CR05	store	SpiderFoot scan database (spiderfoot-data volume)
 CR05	store	daily_reports (sealed runs)
 CR05	store	targets.yaml
 CR05	vendor	Keycloak
+CR05	vendor	Keycloak data volume (keycloak-data)
 CR05	vendor	MISP
+CR05	vendor	MISP backing stores (MariaDB, Redis)
 CR05	vendor	OpenCTI backing stores
 CR05	vendor	OpenCTI platform
 CR05	vendor	SMTP relay (alert e-mail)
@@ -250,11 +261,14 @@ CR06	flow	Enumeration submit (oam_enum)
 CR06	flow	GET /health, /metrics
 CR06	flow	HTTPS source lookups (OpenOSINT)
 CR06	flow	Local model inference
+CR06	flow	MISP cache and queues (Redis, no password)
+CR06	flow	MISP database (MySQL, compose-internal)
 CR06	flow	MinIO objects
 CR06	flow	Operator login (Keycloak authorization endpoint, shipped overlay)
 CR06	flow	Operator session (OIDC, shipped overlay)
 CR06	flow	POST /bundles (STIX intake)
 CR06	flow	Passive data-source queries (datasources.yaml keys)
+CR06	flow	Persist realm users, client secret and sessions
 CR06	flow	Platform collection (operator's API tokens)
 CR06	flow	Platform collection jobs
 CR06	flow	Proxied console/API calls
@@ -263,6 +277,7 @@ CR06	flow	Qualification & synthesis prompts (local HTTP API)
 CR06	flow	RabbitMQ queues
 CR06	flow	Read cached profiles for later sessions
 CR06	flow	Read discovered names (oam_subs, shared volume)
+CR06	flow	Read realm, users and sessions
 CR06	flow	Read scan results for the API
 CR06	flow	Read target inventory
 CR06	flow	Redis cache (no authentication)
@@ -287,16 +302,20 @@ CR08	flow	Engine writes asset.db
 CR08	flow	Enumeration submit (oam_enum)
 CR08	flow	GET /health, /metrics
 CR08	flow	Local model inference
+CR08	flow	MISP cache and queues (Redis, no password)
+CR08	flow	MISP database (MySQL, compose-internal)
 CR08	flow	MinIO objects
 CR08	flow	Operator login (Keycloak authorization endpoint, shipped overlay)
 CR08	flow	Operator session (OIDC, shipped overlay)
 CR08	flow	POST /bundles (STIX intake)
+CR08	flow	Persist realm users, client secret and sessions
 CR08	flow	Platform collection jobs
 CR08	flow	Proxied console/API calls
 CR08	flow	Qualification & synthesis prompts (local HTTP API)
 CR08	flow	RabbitMQ queues
 CR08	flow	Read cached profiles for later sessions
 CR08	flow	Read discovered names (oam_subs, shared volume)
+CR08	flow	Read realm, users and sessions
 CR08	flow	Read scan results for the API
 CR08	flow	Read target inventory
 CR08	flow	Redis cache (no authentication)
@@ -322,11 +341,14 @@ DE01	flow	Enumeration submit (oam_enum)
 DE01	flow	GET /health, /metrics
 DE01	flow	HTTPS source lookups (OpenOSINT)
 DE01	flow	Local model inference
+DE01	flow	MISP cache and queues (Redis, no password)
+DE01	flow	MISP database (MySQL, compose-internal)
 DE01	flow	MinIO objects
 DE01	flow	Operator login (Keycloak authorization endpoint, shipped overlay)
 DE01	flow	Operator session (OIDC, shipped overlay)
 DE01	flow	POST /bundles (STIX intake)
 DE01	flow	Passive data-source queries (datasources.yaml keys)
+DE01	flow	Persist realm users, client secret and sessions
 DE01	flow	Platform collection (operator's API tokens)
 DE01	flow	Platform collection jobs
 DE01	flow	Proxied console/API calls
@@ -335,6 +357,7 @@ DE01	flow	Qualification & synthesis prompts (local HTTP API)
 DE01	flow	RabbitMQ queues
 DE01	flow	Read cached profiles for later sessions
 DE01	flow	Read discovered names (oam_subs, shared volume)
+DE01	flow	Read realm, users and sessions
 DE01	flow	Read scan results for the API
 DE01	flow	Read target inventory
 DE01	flow	Redis cache (no authentication)
@@ -374,11 +397,14 @@ DE03	flow	Enumeration submit (oam_enum)
 DE03	flow	GET /health, /metrics
 DE03	flow	HTTPS source lookups (OpenOSINT)
 DE03	flow	Local model inference
+DE03	flow	MISP cache and queues (Redis, no password)
+DE03	flow	MISP database (MySQL, compose-internal)
 DE03	flow	MinIO objects
 DE03	flow	Operator login (Keycloak authorization endpoint, shipped overlay)
 DE03	flow	Operator session (OIDC, shipped overlay)
 DE03	flow	POST /bundles (STIX intake)
 DE03	flow	Passive data-source queries (datasources.yaml keys)
+DE03	flow	Persist realm users, client secret and sessions
 DE03	flow	Platform collection (operator's API tokens)
 DE03	flow	Platform collection jobs
 DE03	flow	Proxied console/API calls
@@ -387,6 +413,7 @@ DE03	flow	Qualification & synthesis prompts (local HTTP API)
 DE03	flow	RabbitMQ queues
 DE03	flow	Read cached profiles for later sessions
 DE03	flow	Read discovered names (oam_subs, shared volume)
+DE03	flow	Read realm, users and sessions
 DE03	flow	Read scan results for the API
 DE03	flow	Read target inventory
 DE03	flow	Redis cache (no authentication)
@@ -406,6 +433,8 @@ DE04	store	SocialOSINT cache volume
 DE04	store	SpiderFoot scan database (spiderfoot-data volume)
 DE04	store	daily_reports (sealed runs)
 DE04	store	targets.yaml
+DE04	vendor	Keycloak data volume (keycloak-data)
+DE04	vendor	MISP backing stores (MariaDB, Redis)
 DE04	vendor	OpenCTI backing stores
 DO01	orchestrator	APScheduler cron jobs
 DO01	orchestrator	Orchestrator API (FastAPI + APScheduler)
@@ -433,7 +462,9 @@ DO02	store	SpiderFoot scan database (spiderfoot-data volume)
 DO02	store	daily_reports (sealed runs)
 DO02	store	targets.yaml
 DO02	vendor	Keycloak
+DO02	vendor	Keycloak data volume (keycloak-data)
 DO02	vendor	MISP
+DO02	vendor	MISP backing stores (MariaDB, Redis)
 DO02	vendor	OpenCTI backing stores
 DO02	vendor	OpenCTI platform
 DO02	vendor	SMTP relay (alert e-mail)
@@ -445,13 +476,17 @@ DR01	flow	DNS and WHOIS pivots (OpenOSINT)
 DR01	flow	DNS resolution and active probes (zone transfers, certificate grabs when enabled)
 DR01	flow	DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois)
 DR01	flow	Direct loopback API/console (no overlay)
+DR01	flow	GET /health, /metrics
+DR01	flow	MISP database (MySQL, compose-internal)
 DR01	flow	MinIO objects
 DR01	flow	Operator login (Keycloak authorization endpoint, shipped overlay)
 DR01	flow	Operator session (OIDC, shipped overlay)
 DR01	flow	POST /bundles (STIX intake)
+DR01	flow	Persist realm users, client secret and sessions
 DR01	flow	Proxied console/API calls
 DR01	flow	RabbitMQ queues
 DR01	flow	Read cached profiles for later sessions
+DR01	flow	Read realm, users and sessions
 DR01	flow	STIX ingest (pycti, outbox retries)
 DR01	flow	Token redeem / userinfo
 DR01	flow	connector-misp writes to OpenCTI
@@ -486,6 +521,7 @@ DS06	flow	DNS and WHOIS pivots (OpenOSINT)
 DS06	flow	DNS resolution and active probes (zone transfers, certificate grabs when enabled)
 DS06	flow	DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois)
 DS06	flow	Direct loopback API/console (no overlay)
+DS06	flow	GET /health, /metrics
 DS06	flow	HTTPS source lookups (OpenOSINT)
 DS06	flow	Operator login (Keycloak authorization endpoint, shipped overlay)
 DS06	flow	Operator session (OIDC, shipped overlay)
