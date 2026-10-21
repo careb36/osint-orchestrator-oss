@@ -20,8 +20,10 @@ false`` in ``targets.example.yaml``: the scheduler never runs it and
 "Start run" refuses it, so the sample never costs an API call.
 
 Exit codes: 0 replayed; 1 a precondition failed (OpenCTI ingest on, the
-target missing from targets.yaml, a run of the target still pending) or a
-recording is invalid.
+target missing from targets.yaml, a run of the target still pending), a
+recording is invalid, or a replayed run ended without its report or its
+manifest (the pipeline keeps such a run, with the failure in ``Run.error``;
+the showcase does not call it a success).
 
     python -m orchestrator.showcase [--seed-dir <directory of run-*.json>]
     docker compose exec orchestrator python -m orchestrator.showcase
@@ -34,6 +36,7 @@ import asyncio
 import importlib.resources
 import json
 import logging
+import re
 import sys
 from pathlib import Path
 from typing import Any, Literal
@@ -42,7 +45,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from orchestrator.collectors.base import BaseCollector
 from orchestrator.config import settings
-from orchestrator.database import create_db_and_tables
+from orchestrator.database import create_db_and_tables, get_session
 from orchestrator.i18n import resolve_language
 from orchestrator.logging_config import configure_logging
 from orchestrator.models import (
@@ -53,6 +56,8 @@ from orchestrator.models import (
     EvidenceRelevance,
     Observable,
     Relationship,
+    Run,
+    RunStatus,
     Target,
 )
 from orchestrator.pipeline import run_target_pipeline
@@ -227,9 +232,41 @@ class ShowcaseLLMClient:
 # ─── Replay ──────────────────────────────────────────────────────────────────
 
 
+_RUN_NUMBER = re.compile(r"\Arun-(\d+)\.json\Z")
+
+
 def recordings_in(seed_dir: Path) -> list[Path]:
-    """The recordings of *seed_dir* in replay order (``run-1.json``, ``run-2.json``, …)."""
-    return sorted(seed_dir.glob("run-*.json"), key=lambda path: path.name)
+    """The recordings of *seed_dir* in replay order: ``run-1``, ``run-2``, …, ``run-10``.
+
+    Numbered by their suffix, not by name, so ``run-10.json`` follows
+    ``run-9.json``; a file that is not ``run-<n>.json`` sorts last, by name.
+    """
+
+    def order(path: Path) -> tuple[int, str]:
+        match = _RUN_NUMBER.match(path.name)
+        return (int(match.group(1)) if match else sys.maxsize, path.name)
+
+    return sorted(seed_dir.glob("run-*.json"), key=order)
+
+
+async def artefacts_missing(run_id: int) -> str | None:
+    """Why the replayed run is not what the showcase promises, or None.
+
+    The pipeline keeps a run SUCCESS when the report or the manifest could not
+    be written (the failure is in ``Run.error``); the showcase exists for
+    those artefacts, so it checks the persisted row before claiming success.
+    """
+    async with get_session() as session:
+        run = await session.get(Run, run_id)
+    if run is None:
+        return "the run row is gone"
+    if run.status != RunStatus.SUCCESS:
+        return f"status {run.status.value}: {run.error or 'no error recorded'}"
+    if not run.report_path:
+        return f"no report written: {run.error or 'no error recorded'}"
+    if not run.manifest_sha256:
+        return f"run left unsealed: {run.error or 'no error recorded'}"
+    return None
 
 
 async def replay(recording: Recording, target: Target) -> int | None:
@@ -287,6 +324,17 @@ async def replay_all(seed_dir: Path, *, targets_file: str) -> int:
                 path.name,
                 target.id,
                 extra={"target_id": target.id},
+            )
+            return 1
+        problem = await artefacts_missing(run_id)
+        if problem is not None:
+            logger.error(
+                "Showcase stopped at %s: run %d of target %s has no usable artefacts (%s)",
+                path.name,
+                run_id,
+                target.id,
+                problem,
+                extra={"target_id": target.id, "run_id": run_id},
             )
             return 1
         logger.info(

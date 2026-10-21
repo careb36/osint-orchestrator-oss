@@ -128,13 +128,15 @@ async def _qualification_client(
     """The client that qualifies this run's evidence, or None when the step is off.
 
     *client* stands in for the target's provider (the showcase replay); the
-    operator's switches still apply to it.
+    operator's switches still apply to it, LLM_PROVIDER=none included.
     """
     if not settings.llm_qualify_enabled:
         return None
     if settings.llm_qualify_max_items <= 0:
         return None
     if not evidence_items:
+        return None
+    if settings.llm_provider == "none":
         return None
     if client is None:
         client = get_client(target)

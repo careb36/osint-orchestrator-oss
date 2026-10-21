@@ -77,11 +77,13 @@ def db(monkeypatch: pytest.MonkeyPatch):
         qualify_module,
         synthesizer_module,
         alert_cases_module,
+        showcase_module,
     ):
         monkeypatch.setattr(module, "get_session", _session)
     monkeypatch.setattr(settings, "opencti_enabled", False)
     monkeypatch.setattr(settings, "orchestrator_secret_key", KEY)
     monkeypatch.setattr(settings, "orchestrator_language", "en")
+    monkeypatch.setattr(settings, "llm_provider", "ollama")
     return _session, engine
 
 
@@ -309,3 +311,72 @@ async def test_replay_all_runs_every_recording(
     assert await replay_all(SEED_DIR, targets_file=str(targets_file)) == 0
     async with session_ctx() as session:
         assert len((await session.exec(select(Run))).all()) == 2
+
+
+def test_recordings_replay_in_numeric_order(tmp_path: Path) -> None:
+    for name in ("run-10.json", "run-2.json", "run-1.json", "run-extra.json"):
+        (tmp_path / name).write_text("{}", encoding="utf-8")
+    assert [p.name for p in recordings_in(tmp_path)] == [
+        "run-1.json",
+        "run-2.json",
+        "run-10.json",
+        "run-extra.json",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_injected_client_respects_llm_provider_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """LLM_PROVIDER=none switches qualification off for an injected client as well."""
+    target = _showcase_target(Path("daily_reports"))
+    recording = load_recording(SEED_DIR / "run-1.json")
+    client = ShowcaseLLMClient(recording, language="en")
+    items = [item for block in recording.collectors for item in block.evidence]
+    monkeypatch.setattr(settings, "llm_qualify_enabled", True)
+    monkeypatch.setattr(settings, "llm_provider", "ollama")
+    assert await pipeline_module._qualification_client(target, items, client=client) is client
+    monkeypatch.setattr(settings, "llm_provider", "none")
+    assert await pipeline_module._qualification_client(target, items, client=client) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("broken", "expected"),
+    [("generate_report", "no report written"), ("write_manifest_file", "run left unsealed")],
+)
+async def test_replay_all_fails_when_artefacts_are_not_written(
+    db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, broken: str, expected: str
+) -> None:
+    """The pipeline keeps a run SUCCESS without its report or manifest; the showcase does not."""
+    session_ctx, engine = db
+    await _create_all(engine)
+
+    async def _no_migrations() -> None:
+        return None
+
+    def _fail(*_args, **_kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(showcase_module, "create_db_and_tables", _no_migrations)
+    monkeypatch.setattr(pipeline_module, broken, _fail)
+    targets_file = tmp_path / "targets.yaml"
+    block = _showcase_target(tmp_path / "reports").model_dump(mode="json")
+    targets_file.write_text(json.dumps({"targets": [block]}), encoding="utf-8")
+    caplog_messages: list[str] = []
+    monkeypatch.setattr(
+        showcase_module.logger,
+        "error",
+        lambda msg, *args, **kwargs: caplog_messages.append(msg % args),
+    )
+
+    assert await replay_all(SEED_DIR, targets_file=str(targets_file)) == 1
+    assert caplog_messages and expected in caplog_messages[-1]
+    async with session_ctx() as session:
+        runs = (await session.exec(select(Run))).all()
+        assert len(runs) == 1 and runs[0].status == RunStatus.SUCCESS
+        if broken == "generate_report":
+            assert "disk full" in (runs[0].error or "")
+        else:
+            # A manifest failure leaves the run unsealed and logged, not annotated.
+            assert runs[0].report_path and runs[0].manifest_sha256 is None
