@@ -103,7 +103,9 @@ function SystemStatusChip() {
           ? t('system.offline')
           : t('system.checking');
   return (
-    <span className={`system-chip ${tone}`.trim()}>
+    // A polite live region: the poll may change the label while the operator
+    // works elsewhere, and a screen reader should hear it without losing focus.
+    <span className={`system-chip ${tone}`.trim()} role="status" aria-live="polite" aria-atomic="true">
       <span className="system-dot" aria-hidden="true" />
       {label}
     </span>
