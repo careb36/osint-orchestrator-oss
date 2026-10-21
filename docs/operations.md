@@ -438,7 +438,11 @@ oauth2-proxy, OpenCTI and its MISP connector, the alert webhook and SMTP
 relay), the data stores and every flow with its protocol, TLS version and the
 credentials it carries. Each component asserts only the controls its own code
 or image ships: the orchestrator's validation, CSP or non-root user never
-count for a sidecar or a vendor service.
+count for a sidecar or a vendor service. Each endpoint declares the protocol
+it serves and the highest classification it is entrusted with, and each flow
+what its transport may carry, so pytm's data-leak rules fire only on the
+transfers the model means to flag: the target name reaching a public source,
+credentials crossing the host boundary in clear.
 
 pytm is a modelling tool, not a runtime dependency: it lives in a throwaway
 virtualenv, pinned, and never in `pyproject.toml`.

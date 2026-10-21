@@ -42,6 +42,7 @@ AC01	sidecar	SocialOSINT sidecar
 AC01	sidecar	SpiderFoot
 AC01	store	Amass asset database (shared volume)
 AC01	store	SQLite run store
+AC01	store	SocialOSINT cache volume
 AC01	store	daily_reports (sealed runs)
 AC01	store	targets.yaml
 AC01	vendor	Keycloak
@@ -56,6 +57,7 @@ AC02	store	Amass asset database (shared volume)
 AC02	vendor	OpenCTI backing stores
 AC05	flow	Alert e-mail (SMTP, STARTTLS by default)
 AC05	flow	Alert webhook (ALERT_WEBHOOK_URL)
+AC05	flow	Cache collected profiles and posts (/app/data)
 AC05	flow	Cron dispatch (in-process)
 AC05	flow	DNS and WHOIS pivots (OpenOSINT)
 AC05	flow	DNS resolution and active probes (zone transfers, certificate grabs when enabled)
@@ -79,6 +81,7 @@ AC05	flow	Proxied console/API calls
 AC05	flow	Qualification & synthesis prompts (cloud)
 AC05	flow	Qualification & synthesis prompts (local HTTP API)
 AC05	flow	RabbitMQ queues
+AC05	flow	Read cached profiles for later sessions
 AC05	flow	Read discovered names (oam_subs, shared volume)
 AC05	flow	Read target inventory
 AC05	flow	Redis cache (no authentication)
@@ -201,6 +204,8 @@ CR01	vendor	Keycloak
 CR01	vendor	OpenCTI platform
 CR02	flow	Operator session (OIDC, shipped overlay)
 CR02	flow	Proxied console/API calls
+CR02	vendor	Keycloak
+CR02	vendor	OpenCTI platform
 CR03	sidecar	Amass v5 engine
 CR03	sidecar	Ollama HTTP API
 CR03	sidecar	SocialOSINT sidecar
@@ -217,6 +222,7 @@ CR05	sidecar	SocialOSINT sidecar
 CR05	sidecar	SpiderFoot
 CR05	store	Amass asset database (shared volume)
 CR05	store	SQLite run store
+CR05	store	SocialOSINT cache volume
 CR05	store	daily_reports (sealed runs)
 CR05	store	targets.yaml
 CR05	vendor	Keycloak
@@ -227,6 +233,7 @@ CR05	vendor	SMTP relay (alert e-mail)
 CR05	vendor	Tavily search API
 CR06	flow	Alert e-mail (SMTP, STARTTLS by default)
 CR06	flow	Alert webhook (ALERT_WEBHOOK_URL)
+CR06	flow	Cache collected profiles and posts (/app/data)
 CR06	flow	Cron dispatch (in-process)
 CR06	flow	DNS and WHOIS pivots (OpenOSINT)
 CR06	flow	DNS resolution and active probes (zone transfers, certificate grabs when enabled)
@@ -250,6 +257,7 @@ CR06	flow	Proxied console/API calls
 CR06	flow	Qualification & synthesis prompts (cloud)
 CR06	flow	Qualification & synthesis prompts (local HTTP API)
 CR06	flow	RabbitMQ queues
+CR06	flow	Read cached profiles for later sessions
 CR06	flow	Read discovered names (oam_subs, shared volume)
 CR06	flow	Read target inventory
 CR06	flow	Redis cache (no authentication)
@@ -262,6 +270,7 @@ CR06	flow	TLS certificate and HTTPS fetches (sfp_sslcert)
 CR06	flow	Token redeem / userinfo
 CR06	flow	connector-misp polls MISP events
 CR06	flow	connector-misp writes to OpenCTI
+CR08	flow	Cache collected profiles and posts (/app/data)
 CR08	flow	Cron dispatch (in-process)
 CR08	flow	DNS and WHOIS pivots (OpenOSINT)
 CR08	flow	DNS resolution and active probes (zone transfers, certificate grabs when enabled)
@@ -280,6 +289,7 @@ CR08	flow	Platform collection jobs
 CR08	flow	Proxied console/API calls
 CR08	flow	Qualification & synthesis prompts (local HTTP API)
 CR08	flow	RabbitMQ queues
+CR08	flow	Read cached profiles for later sessions
 CR08	flow	Read discovered names (oam_subs, shared volume)
 CR08	flow	Read target inventory
 CR08	flow	Redis cache (no authentication)
@@ -291,6 +301,7 @@ CR08	flow	Token redeem / userinfo
 CR08	flow	connector-misp writes to OpenCTI
 DE01	flow	Alert e-mail (SMTP, STARTTLS by default)
 DE01	flow	Alert webhook (ALERT_WEBHOOK_URL)
+DE01	flow	Cache collected profiles and posts (/app/data)
 DE01	flow	Cron dispatch (in-process)
 DE01	flow	DNS and WHOIS pivots (OpenOSINT)
 DE01	flow	DNS resolution and active probes (zone transfers, certificate grabs when enabled)
@@ -314,6 +325,7 @@ DE01	flow	Proxied console/API calls
 DE01	flow	Qualification & synthesis prompts (cloud)
 DE01	flow	Qualification & synthesis prompts (local HTTP API)
 DE01	flow	RabbitMQ queues
+DE01	flow	Read cached profiles for later sessions
 DE01	flow	Read discovered names (oam_subs, shared volume)
 DE01	flow	Read target inventory
 DE01	flow	Redis cache (no authentication)
@@ -339,6 +351,7 @@ DE02	vendor	connector-misp
 DE02	vendor	oauth2-proxy
 DE03	flow	Alert e-mail (SMTP, STARTTLS by default)
 DE03	flow	Alert webhook (ALERT_WEBHOOK_URL)
+DE03	flow	Cache collected profiles and posts (/app/data)
 DE03	flow	Cron dispatch (in-process)
 DE03	flow	DNS and WHOIS pivots (OpenOSINT)
 DE03	flow	DNS resolution and active probes (zone transfers, certificate grabs when enabled)
@@ -362,6 +375,7 @@ DE03	flow	Proxied console/API calls
 DE03	flow	Qualification & synthesis prompts (cloud)
 DE03	flow	Qualification & synthesis prompts (local HTTP API)
 DE03	flow	RabbitMQ queues
+DE03	flow	Read cached profiles for later sessions
 DE03	flow	Read discovered names (oam_subs, shared volume)
 DE03	flow	Read target inventory
 DE03	flow	Redis cache (no authentication)
@@ -376,6 +390,7 @@ DE03	flow	connector-misp polls MISP events
 DE03	flow	connector-misp writes to OpenCTI
 DE04	store	Amass asset database (shared volume)
 DE04	store	SQLite run store
+DE04	store	SocialOSINT cache volume
 DE04	store	daily_reports (sealed runs)
 DE04	store	targets.yaml
 DE04	vendor	OpenCTI backing stores
@@ -400,6 +415,7 @@ DO02	sidecar	SocialOSINT sidecar
 DO02	sidecar	SpiderFoot
 DO02	store	Amass asset database (shared volume)
 DO02	store	SQLite run store
+DO02	store	SocialOSINT cache volume
 DO02	store	daily_reports (sealed runs)
 DO02	store	targets.yaml
 DO02	vendor	Keycloak
@@ -410,27 +426,19 @@ DO02	vendor	SMTP relay (alert e-mail)
 DO02	vendor	Tavily search API
 DO02	vendor	connector-misp
 DO02	vendor	oauth2-proxy
+DR01	flow	Cache collected profiles and posts (/app/data)
 DR01	flow	DNS and WHOIS pivots (OpenOSINT)
 DR01	flow	DNS resolution and active probes (zone transfers, certificate grabs when enabled)
 DR01	flow	DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois)
 DR01	flow	Direct loopback API/console (no overlay)
-DR01	flow	Elasticsearch indices
-DR01	flow	Engine writes asset.db
-DR01	flow	Local model inference
 DR01	flow	MinIO objects
 DR01	flow	Operator login (Keycloak authorization endpoint, shipped overlay)
 DR01	flow	Operator session (OIDC, shipped overlay)
 DR01	flow	POST /bundles (STIX intake)
-DR01	flow	Platform collection jobs
 DR01	flow	Proxied console/API calls
-DR01	flow	Qualification & synthesis prompts (local HTTP API)
 DR01	flow	RabbitMQ queues
-DR01	flow	Read discovered names (oam_subs, shared volume)
-DR01	flow	Redis cache (no authentication)
-DR01	flow	Run/state SQL
+DR01	flow	Read cached profiles for later sessions
 DR01	flow	STIX ingest (pycti, outbox retries)
-DR01	flow	Scan control & results
-DR01	flow	Seal run artefacts + manifest
 DR01	flow	Token redeem / userinfo
 DR01	flow	connector-misp writes to OpenCTI
 DS01	sidecar	Amass v5 engine
@@ -460,39 +468,16 @@ DS04	vendor	MISP
 DS04	vendor	OpenCTI platform
 DS04	vendor	SMTP relay (alert e-mail)
 DS04	vendor	Tavily search API
-DS06	flow	Alert e-mail (SMTP, STARTTLS by default)
-DS06	flow	Alert webhook (ALERT_WEBHOOK_URL)
 DS06	flow	DNS and WHOIS pivots (OpenOSINT)
 DS06	flow	DNS resolution and active probes (zone transfers, certificate grabs when enabled)
 DS06	flow	DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois)
 DS06	flow	Direct loopback API/console (no overlay)
-DS06	flow	Due-diligence queries
-DS06	flow	Elasticsearch indices
-DS06	flow	Engine writes asset.db
 DS06	flow	HTTPS source lookups (OpenOSINT)
-DS06	flow	Local model inference
-DS06	flow	MinIO objects
 DS06	flow	Operator login (Keycloak authorization endpoint, shipped overlay)
 DS06	flow	Operator session (OIDC, shipped overlay)
 DS06	flow	POST /bundles (STIX intake)
 DS06	flow	Passive data-source queries (datasources.yaml keys)
-DS06	flow	Platform collection (operator's API tokens)
-DS06	flow	Platform collection jobs
-DS06	flow	Proxied console/API calls
-DS06	flow	Qualification & synthesis prompts (cloud)
-DS06	flow	Qualification & synthesis prompts (local HTTP API)
-DS06	flow	RabbitMQ queues
-DS06	flow	Read discovered names (oam_subs, shared volume)
-DS06	flow	Redis cache (no authentication)
-DS06	flow	Run/state SQL
-DS06	flow	STIX ingest (pycti, outbox retries)
-DS06	flow	Scan control & results
-DS06	flow	Seal run artefacts + manifest
-DS06	flow	SocialOSINT text and vision prompts (own endpoint and key)
 DS06	flow	TLS certificate and HTTPS fetches (sfp_sslcert)
-DS06	flow	Token redeem / userinfo
-DS06	flow	connector-misp polls MISP events
-DS06	flow	connector-misp writes to OpenCTI
 HA01	sidecar	Amass v5 engine
 HA01	sidecar	Ollama HTTP API
 HA01	sidecar	SocialOSINT sidecar
@@ -524,6 +509,12 @@ INP03	vendor	MISP
 INP03	vendor	OpenCTI platform
 INP03	vendor	SMTP relay (alert e-mail)
 INP03	vendor	Tavily search API
+INP04	sidecar	Amass v5 engine
+INP04	sidecar	Ollama HTTP API
+INP04	sidecar	SocialOSINT sidecar
+INP04	sidecar	SpiderFoot
+INP04	vendor	Keycloak
+INP04	vendor	OpenCTI platform
 INP05	sidecar	Amass v5 engine
 INP05	sidecar	Ollama HTTP API
 INP05	sidecar	SocialOSINT sidecar
@@ -588,6 +579,7 @@ INP14	vendor	SMTP relay (alert e-mail)
 INP14	vendor	Tavily search API
 INP14	vendor	connector-misp
 INP14	vendor	oauth2-proxy
+INP15	vendor	SMTP relay (alert e-mail)
 INP16	sidecar	Amass v5 engine
 INP16	sidecar	Ollama HTTP API
 INP16	sidecar	SocialOSINT sidecar

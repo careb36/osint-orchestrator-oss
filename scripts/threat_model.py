@@ -91,6 +91,10 @@ tm.assumptions = [
     "ORCHESTRATOR_SECRET_KEY is a private, randomly generated value. The default "
     "insecure-dev-key only earns a startup warning (auth.py); with it, or with an empty key, "
     "anyone can forge a manifest, and the integrity claims of this model do not hold.",
+    "LLM_BASE_URL points at the Ollama service of the shipped compose (same host, compose "
+    "network). OllamaClient posts to whatever URL is configured (providers/ollama.py), so a "
+    "remote LLM_BASE_URL turns `llm: local` into the cloud-provider case of this model; a "
+    "remote Ollama is not modelled separately.",
 ]
 
 # ── Boundaries ──────────────────────────────────────────────────────────────
@@ -241,6 +245,14 @@ alert_payload = Data(
     description="Target, run status, risk level, synthesis summary and, when enabled, the new observables.",
     classification=Classification.RESTRICTED,
 )
+social_profiles = Data(
+    name="Collected social profiles and posts",
+    description="Profiles, posts and images SocialOSINT gathers about named people; plaintext JSON in its cache.",
+    classification=Classification.SENSITIVE,
+    isPII=True,
+    isStored=True,
+    isDestEncryptedAtRest=False,
+)
 
 # ── Actors & external entities ──────────────────────────────────────────────
 operator = Actor("Operator browser")
@@ -266,6 +278,7 @@ webhook_receiver.description = (
 
 socialosint_llm = LLM("SocialOSINT's LLM endpoint")
 socialosint_llm.inBoundary = internet
+socialosint_llm.protocol = "HTTPS"
 socialosint_llm.isThirdParty = True
 socialosint_llm.processesPersonalData = True  # profiles, posts and images of named people
 socialosint_llm.description = (
@@ -282,12 +295,14 @@ social_platforms.description = "Twitter, Reddit, GitHub, Bluesky, Mastodon: Soci
 
 tavily = Server("Tavily search API")
 tavily.inBoundary = internet
+tavily.protocol = "HTTPS"
 tavily.controls = Controls(
     isEncrypted=True, authenticatesSource=True, authenticationScheme="TAVILY_API_KEY"
 )
 
 cloud_llm = LLM("Cloud LLM provider")
 cloud_llm.inBoundary = internet
+cloud_llm.protocol = "HTTPS"
 cloud_llm.isThirdParty = True
 cloud_llm.processesPersonalData = True  # observables in the prompt: e-mail, phone, person names
 cloud_llm.controls = Controls(
@@ -296,6 +311,7 @@ cloud_llm.controls = Controls(
 
 smtp_relay = Server("SMTP relay (alert e-mail)")
 smtp_relay.inBoundary = internet
+smtp_relay.protocol = "SMTP"
 smtp_relay.description = (
     "ALERT_SMTP_HOST. STARTTLS with certificate verification by default; "
     "ALERT_SMTP_STARTTLS=false sends mail and SMTP AUTH in clear."
@@ -307,6 +323,7 @@ smtp_relay.controls = Controls(
 # ── OIDC edge (optional overlay) ────────────────────────────────────────────
 proxy = Process("oauth2-proxy")
 proxy.inBoundary = edge
+proxy.protocol = "HTTP"
 proxy.description = (
     "Published on 127.0.0.1:8002 as plain HTTP (OAUTH2_PROXY_HTTP_ADDRESS); no TLS listener."
 )
@@ -322,6 +339,7 @@ proxy.controls = Controls(
 
 keycloak = Server("Keycloak")
 keycloak.inBoundary = edge
+keycloak.protocol = "HTTP"
 keycloak.usesSessionTokens = True
 keycloak.controls = Controls(
     isEncrypted=False,  # HTTP inside the compose network
@@ -334,6 +352,7 @@ keycloak.controls = Controls(
 # ── Orchestrator (compose network) ──────────────────────────────────────────
 orchestrator = Process("Orchestrator API (FastAPI + APScheduler)")
 orchestrator.inBoundary = compose
+orchestrator.protocol = "HTTP"
 orchestrator.implementsAPI = True
 orchestrator.usesEnvironmentVariables = True
 orchestrator.handlesResources = True
@@ -407,6 +426,7 @@ amass_db.controls = Controls(isEncryptedAtRest=False)
 
 spiderfoot = Server("SpiderFoot")
 spiderfoot.inBoundary = compose
+spiderfoot.protocol = "HTTP"
 spiderfoot.description = (
     "Built from a pinned commit; web UI and API without authentication, loopback only."
 )
@@ -416,6 +436,7 @@ spiderfoot.controls = Controls(
 
 amass = Server("Amass v5 engine")
 amass.inBoundary = compose
+amass.protocol = "HTTP"
 amass.description = (
     "owaspamass/amass:v5.1.1 engine; HTTP API on the compose network without authentication. "
     "The image's own user is not asserted here."
@@ -426,13 +447,24 @@ amass.controls = Controls(
 
 socialosint = Server("SocialOSINT sidecar")
 socialosint.inBoundary = compose
+socialosint.protocol = "HTTP"
 socialosint.description = "Dockerfile.socialosint sets no USER: the sidecar runs as root."
 socialosint.controls = Controls(
     isHardened=False, isEncrypted=False, authenticatesSource=False, hasAccessControl=False
 )
 
+socialosint_cache = Datastore("SocialOSINT cache volume")
+socialosint_cache.inBoundary = compose
+socialosint_cache.description = (
+    "socialosint-data mounted at /app/data: the upstream CacheManager keeps collected "
+    "profiles and posts as plaintext JSON. Deleting a session removes the session file, not "
+    "the cache, and the orchestrator's retention purge never reaches this volume."
+)
+socialosint_cache.controls = Controls(isEncryptedAtRest=False)
+
 ollama_api = Server("Ollama HTTP API")
 ollama_api.inBoundary = compose
+ollama_api.protocol = "HTTP"
 ollama_api.description = (
     "ollama/ollama image: HTTP API without authentication on the compose network; "
     "the model behind it is the LLM element."
@@ -444,11 +476,12 @@ ollama_api.controls = Controls(
 ollama = LLM("Ollama (local models)")
 ollama.inBoundary = compose
 ollama.isThirdParty = False
-ollama.processesPersonalData = True  # same prompts, kept on the host
+ollama.processesPersonalData = True  # same prompts; local only under the LLM_BASE_URL assumption
 ollama.controls = Controls(isEncrypted=False, authenticatesSource=False)
 
 misp = Server("MISP")
 misp.inBoundary = compose
+misp.protocol = "HTTPS"
 misp.description = "misp-docker with its self-signed certificate; polled by connector-misp."
 misp.controls = Controls(
     isEncrypted=True, authenticatesSource=True, authenticationScheme="MISP API key"
@@ -457,6 +490,7 @@ misp.controls = Controls(
 # ── OpenCTI platform ────────────────────────────────────────────────────────
 opencti = Server("OpenCTI platform")
 opencti.inBoundary = opencti_b
+opencti.protocol = "HTTP"
 opencti.usesSessionTokens = True
 opencti.controls = Controls(
     hasAccessControl=True,
@@ -496,13 +530,65 @@ CLASSES: dict[str, list] = {
         opencti_store,
         connector_misp,
     ],
-    "store": [sqlite, targets_yaml, reports, amass_db],
+    "store": [sqlite, targets_yaml, reports, amass_db, socialosint_cache],
     "actor": [operator, anonymous, stix_producer, public_web, social_platforms],
 }
 CLASS_OF = {el.name: cls for cls, els in CLASSES.items() for el in els}
 
+# ── Handling limits (what the data-leak rules DS06 and DR01 compare against) ─
+# pytm compares each asset's classification with the limit of the flow's source, its sink
+# and the flow itself; left at the UNKNOWN default, every classified asset "leaks" on every
+# hop. The limits say what each endpoint is entrusted with: SECRET where a service receives
+# its own credentials, the classification a store is meant to hold, and PUBLIC for the open
+# web and anonymous callers, so the target name reaching an OSINT source stays a finding.
+_LIMITS: dict[Classification, list] = {
+    Classification.SECRET: [
+        orchestrator,
+        scheduler,
+        operator,
+        stix_producer,
+        proxy,
+        keycloak,
+        tavily,
+        cloud_llm,
+        socialosint_llm,
+        social_platforms,
+        smtp_relay,
+        webhook_receiver,
+        misp,
+        opencti,
+        opencti_store,
+        connector_misp,
+        amass,  # provider keys mounted from datasources.yaml
+        socialosint,  # platform tokens in its environment
+    ],
+    Classification.SENSITIVE: [socialosint_cache],
+    Classification.RESTRICTED: [
+        sqlite,
+        targets_yaml,
+        reports,
+        amass_db,
+        spiderfoot,
+        ollama_api,
+        ollama,
+    ],
+    Classification.PUBLIC: [anonymous, public_web],
+}
+for _limit, _elements in _LIMITS.items():
+    for _element in _elements:
+        _element.maxClassification = _limit
+
 
 def flow(source, sink, name: str, **kwargs) -> Dataflow:
+    # A channel may carry what its transport protects: anything on the trusted host
+    # (ADR-005) or under TLS; only PUBLIC data in clear across the internet boundary.
+    if "maxClassification" not in kwargs:
+        controls = kwargs.get("controls")
+        encrypted = controls is not None and bool(controls.isEncrypted)
+        leaves_host = internet in (source.inBoundary, sink.inBoundary)
+        kwargs["maxClassification"] = (
+            Classification.PUBLIC if leaves_host and not encrypted else Classification.SECRET
+        )
     return Dataflow(source, sink, name, **kwargs)
 
 
@@ -647,7 +733,7 @@ flow(
     "SocialOSINT text and vision prompts (own endpoint and key)",
     protocol="HTTPS",
     tlsVersion=TLSVersion.TLSv12,
-    data=[socialosint_llm_key, evidence],
+    data=[socialosint_llm_key, social_profiles],
     controls=Controls(isEncrypted=True, authenticatesDestination=True),
 )
 flow(
@@ -656,8 +742,24 @@ flow(
     "Platform collection (operator's API tokens)",
     protocol="HTTPS",
     tlsVersion=TLSVersion.TLSv12,
-    data=[platform_credentials, evidence],
+    data=[platform_credentials, social_profiles],
     controls=Controls(isEncrypted=True, authenticatesDestination=True),
+)
+flow(
+    socialosint,
+    socialosint_cache,
+    "Cache collected profiles and posts (/app/data)",
+    protocol="file",
+    data=[social_profiles],
+    controls=Controls(isEncrypted=False),
+)
+flow(
+    socialosint_cache,
+    socialosint,
+    "Read cached profiles for later sessions",
+    protocol="file",
+    data=[social_profiles],
+    controls=Controls(isEncrypted=False),
 )
 flow(
     orchestrator,
@@ -931,6 +1033,7 @@ _INPUT_FAMILY = (
     "DS04",
     "HA01",
     "INP03",
+    "INP04",
     "INP05",
     "INP07",
     "INP08",
@@ -989,11 +1092,26 @@ TRIAGE: dict[str, dict[str, Response]] = {
     "AC17": {"sidecar": _NO_SESSIONS, "vendor": _VENDOR_SESSIONS},  # Session Hijacking
     "AC18": {"vendor": _VENDOR_SESSIONS},  # Session Hijacking - ClientSide
     "CR02": {  # Cross Site Tracing
+        "vendor": (
+            "transferred",
+            "TRACE handling at Keycloak and OpenCTI is the vendor image's; both sit on the "
+            "compose network or loopback (ADR-005) and nothing the orchestrator serves issues "
+            "TRACE. Hardening: a TLS terminator in front of them that drops TRACE.",
+        ),
         "flow": (
             "accepted",
             "FastAPI answers TRACE with 405 and the console ships no inline script that could "
             "read reflected headers; the plaintext proxied hop itself is the DS06 decision "
             "(shipped overlay without TLS). Hardening: TLS terminator that drops TRACE.",
+        ),
+    },
+    "INP15": {  # IMAP/SMTP Command Injection
+        "vendor": (
+            "transferred",
+            "SMTP command handling is the relay's. The orchestrator talks to it through smtplib "
+            "with the configured host, port and credentials, and the message is a MIMEText whose "
+            "headers the email package encodes; collected text only ever lands in the body as "
+            "message data, never in an SMTP command.",
         ),
     },
     "AC21": {  # Cross Site Request Forgery
@@ -1013,13 +1131,17 @@ TRIAGE: dict[str, dict[str, Response]] = {
     "DS06": {  # Data Leak
         "flow": (
             "accepted",
-            "Flows that leave the host use TLS 1.2+ (Tavily, cloud LLM, public web, MISP poll, "
-            "SMTP with STARTTLS, webhook over HTTPS). Host-internal hops are plaintext by "
-            "decision ADR-005: loopback console/API, the compose bridge to sidecars, Ollama, "
-            "OpenCTI, Keycloak, SQLite and files; the shipped OIDC overlay terminates no TLS, so "
-            "the operator session is a host-local plaintext hop too. Hardening for shared "
-            "infrastructure: a TLS terminator in front of :8000/:8002, TLS between services, "
-            "disk encryption." + _DISCOVERY,
+            "Handling limits are declared per endpoint (SECRET where a service receives its own "
+            "credentials, PUBLIC for the open web and anonymous callers) and per flow (SECRET on "
+            "the trusted host or under TLS, PUBLIC in clear across the internet boundary), so "
+            "what fires here is deliberate: every lookup tells the public source which name is "
+            "being researched (search queries and discovery traffic, plaintext DNS/WHOIS "
+            "included; Amass's provider keys go to the providers that issued them, over TLS), "
+            "and the operator's API key, OIDC session and Keycloak password cross the host "
+            "boundary in clear on :8000 and on the shipped OIDC overlay, which terminates no "
+            "TLS (ADR-005). The "
+            "disclosure to the sources queried is inherent to OSINT and bounded by the per-target "
+            "authorisation. Hardening: a TLS terminator in front of :8000/:8002." + _DISCOVERY,
         ),
     },
     "INP02": {  # Overflow Buffers
@@ -1143,8 +1265,10 @@ TRIAGE: dict[str, dict[str, Response]] = {
         "flow": (
             "accepted",
             "Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass "
-            "asset database, OpenCTI stores) and host-internal hops carry it in clear (DS06). "
-            "Hardening: encrypted volumes or disk encryption, TLS between services." + _DISCOVERY,
+            "asset database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry "
+            "it in clear; credentials and personal data travel only to the service they belong "
+            "to, under TLS when they leave the host. Hardening: encrypted volumes or disk "
+            "encryption, TLS between services." + _DISCOVERY,
         ),
     },
     "INP22": {"*": _XML},  # XML Attribute Blowup
@@ -1167,7 +1291,9 @@ TRIAGE: dict[str, dict[str, Response]] = {
             "the orchestrator sends the observables it collected (domains, URLs, e-mail "
             "addresses, phone numbers, person names) and SocialOSINT sends profiles, posts and "
             "images to its own endpoint. Both go only to the provider the operator configured, "
-            "over TLS; `llm: local` keeps the orchestrator's prompts on the host. Hardening: a "
+            "over TLS; `llm: local` keeps the orchestrator's prompts on the host only while "
+            "LLM_BASE_URL points at the local Ollama (assumption above: the client posts "
+            "wherever it is configured), so verify that endpoint before relying on it. Hardening: a "
             "provider under a data-processing agreement with retention and training opted out, "
             "or local models for sensitive workloads.",
         ),
@@ -1247,7 +1373,8 @@ TRIAGE: dict[str, dict[str, Response]] = {
         "store": (
             "accepted",
             "One process owns each volume (uid 1000 for the orchestrator's stores, the engine for "
-            "asset.db); there is no finer privilege to abuse. Hardening: volume permissions and "
+            "asset.db, the SocialOSINT sidecar for its cache); there is no finer privilege to "
+            "abuse. Hardening: volume permissions and "
             "read-only mounts where possible.",
         ),
     },
@@ -1419,6 +1546,21 @@ _SOCIALOSINT_LLM = (
     "report misleads the analyst who reads the note.",
 )
 OVERRIDES: dict[tuple[str, str], Response] = {
+    ("SocialOSINT cache volume", "DE04"): (
+        "accepted",
+        "The cache is outside the manifest chain: profiles and posts under /app/data are plain "
+        "files the sidecar rewrites at will, with no signature or audit log, and the "
+        "orchestrator only ever reads the sidecar's report, so an edit there is invisible to "
+        "it. Hardening: an ephemeral or read-only volume and file permissions.",
+    ),
+    ("SocialOSINT cache volume", "DO02"): (
+        "accepted",
+        "No retention reaches this volume: the sidecar's CacheManager keeps profiles and posts "
+        "under /app/data until the operator removes the volume or prunes it, and deleting a "
+        "session removes only the session file. The orchestrator keeps nothing of it beyond the "
+        "unverified note. Hardening: an ephemeral (tmpfs) volume or a purge job for /app/data, "
+        "sized to the retention the operator owes the people in those profiles.",
+    ),
     ("SocialOSINT's LLM endpoint", "LLM01"): _SOCIALOSINT_LLM,
     ("SocialOSINT's LLM endpoint", "LLM07"): _SOCIALOSINT_LLM,
     ("SQLite run store", "DE04"): (
