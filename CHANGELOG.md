@@ -11,6 +11,12 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- The showcase from a fresh clone: `daily_reports/` ships in the repository
+  (a `.gitkeep`), so Docker no longer creates the bind mount root-owned on
+  the first `docker compose up` and the container (uid 1000) can write the
+  reports; both READMEs say what to do when the host user is not uid 1000.
+  The image workflow's pull-request smoke now runs `python -m
+  orchestrator.showcase` inside the built image and expects two sealed runs.
 - README (both languages): the quickstart has three tiers, from no keys to the
   full stack: the showcase run, a real Tavily → Nemotron run with
   `NEBIUS_API_KEY` and `TAVILY_API_KEY` on the `showcase-example` block

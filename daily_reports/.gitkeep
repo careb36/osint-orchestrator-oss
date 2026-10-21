@@ -1,0 +1,2 @@
+# Keeps the reports directory in the clone so Docker does not create the bind
+# mount root-owned on first start; the container writes here as uid 1000.
