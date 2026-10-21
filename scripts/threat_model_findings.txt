@@ -10,6 +10,7 @@ AA01	vendor	OpenCTI platform
 AA01	vendor	OpenCTI worker
 AA01	vendor	Redis (MISP)
 AA01	vendor	Redis (OpenCTI)
+AA01	vendor	SMTP relay (alert e-mail)
 AA01	vendor	connector-import-file-stix
 AA01	vendor	connector-misp
 AA01	vendor	connector-opencti
@@ -26,6 +27,7 @@ AA02	vendor	OpenCTI platform
 AA02	vendor	OpenCTI worker
 AA02	vendor	Redis (MISP)
 AA02	vendor	Redis (OpenCTI)
+AA02	vendor	SMTP relay (alert e-mail)
 AA02	vendor	connector-import-file-stix
 AA02	vendor	connector-misp
 AA02	vendor	connector-opencti

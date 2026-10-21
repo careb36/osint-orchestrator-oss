@@ -366,10 +366,13 @@ smtp_relay.inBoundary = internet
 smtp_relay.protocol = "SMTP"
 smtp_relay.description = (
     "ALERT_SMTP_HOST. STARTTLS with certificate verification by default; "
-    "ALERT_SMTP_STARTTLS=false sends mail and SMTP AUTH in clear."
+    "ALERT_SMTP_STARTTLS=false sends mail and SMTP AUTH in clear. SMTP AUTH happens only "
+    "when ALERT_SMTP_USER is set; the default submits unauthenticated."
 )
 smtp_relay.controls = Controls(
-    isEncrypted=True, authenticatesSource=True, authenticationScheme="SMTP AUTH (optional)"
+    isEncrypted=True,
+    authenticatesSource=False,  # smtp.login() runs only with ALERT_SMTP_USER (alerts/__init__.py)
+    authenticationScheme="SMTP AUTH only with ALERT_SMTP_USER",
 )
 
 # ── OIDC edge (optional overlay) ────────────────────────────────────────────
@@ -1783,8 +1786,16 @@ TRIAGE: dict[str, dict[str, Response]] = {
     "DE03": {  # Sniffing Attacks
         "flow": (
             "accepted",
-            "Same boundary argument as DE01: sniffing a host-internal hop requires host "
-            "compromise, which is out of the modelled scope." + _DISCOVERY,
+            "The rule fires on the absence of a VPN, which no hop uses; what protects each hop "
+            "differs. Internet hops carry credentials and evidence under TLS 1.2+ with "
+            "certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the "
+            "social platforms, GitHub's datasets, the webhook over https://, SMTP with "
+            "STARTTLS), so sniffing them needs a broken TLS, not a position on the path. "
+            "Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a "
+            "position on the host, out of the modelled scope. The exception on record: "
+            "connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate "
+            "verification, so a position on the compose network could impersonate MISP "
+            "(hardening: a trusted certificate and MISP_SSL_VERIFY=true)." + _DISCOVERY,
         ),
     },
     "DO02": {  # Excessive Allocation
@@ -1899,9 +1910,14 @@ OVERRIDES: dict[tuple[str, str], Response] = {
         "nothing back from them. Hardening: pin CONFIG_SECTORS_FILE_URL and "
         "CONFIG_GEOGRAPHY_FILE_URL to a commit, or mirror the files.",
     ),
-    ("Elasticsearch", "AA01"): _UNAUTHENTICATED_BACKING,
-    ("Redis (OpenCTI)", "AA01"): _UNAUTHENTICATED_BACKING,
-    ("Redis (MISP)", "AA01"): _UNAUTHENTICATED_BACKING,
+    ("Alert webhook (ALERT_WEBHOOK_URL)", "AC05"): (
+        "accepted",
+        "With ALERT_WEBHOOK_SECRET unset (the modelled default) the receiver gets no "
+        "orchestrator signature, so a custom endpoint without caller authentication cannot "
+        "tell a forged alert from a real one; hosted Slack, Teams and Discord URLs authenticate "
+        "the sender through the URL's own token instead. Hardening: set ALERT_WEBHOOK_SECRET "
+        "and verify the HMAC-SHA256 signature at the receiver.",
+    ),
     ("GET /health, /metrics", "DS06"): (
         "accepted",
         "GET /metrics answers without an API key by design (scrapers are not API clients; "
@@ -1950,6 +1966,20 @@ OVERRIDES: dict[tuple[str, str], Response] = {
         "goes undetected. Hardening: database file permissions, backups and disk encryption.",
     ),
 }
+# Authentication is disabled by this repository's compose files, not by the vendor: every
+# authentication, access-control and misuse threat on these services is the deployment's.
+for _element in ("Elasticsearch", "Redis (OpenCTI)", "Redis (MISP)"):
+    for _threat in ("AA01", "AA02", "AC01", "AC07", "AC09"):
+        OVERRIDES[(_element, _threat)] = _UNAUTHENTICATED_BACKING
+_SMTP_NO_AUTH: Response = (
+    "accepted",
+    "The orchestrator submits without SMTP AUTH unless ALERT_SMTP_USER is set (the modelled "
+    "default): who may submit is then the relay's policy (a network restriction or mandatory "
+    "AUTH on a submission relay), and STARTTLS with certificate verification authenticates "
+    "the relay, not the sender. Hardening: ALERT_SMTP_USER and ALERT_SMTP_PASSWORD.",
+)
+for _threat in ("AA01", "AA02", "AC01", "AC07", "AC09"):
+    OVERRIDES[("SMTP relay (alert e-mail)", _threat)] = _SMTP_NO_AUTH
 
 
 def element_class(finding) -> str:
