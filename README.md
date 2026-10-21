@@ -118,6 +118,10 @@ evidence with search and filters, and a Start-run action; it asks for
 `ORCHESTRATOR_API_KEY` on first load. Source in [`ui/`](ui/README.md); the
 images build it, so nothing else is needed.
 
+![Overview: key figures and targets ordered by attention](docs/img/dashboard-overview-en.png)
+
+![Run workspace: each piece of evidence with its category, relevance, confidence and rationale](docs/img/dashboard-run-evidence-en.png)
+
 ## Built during the hackathon
 
 The commit `Baseline: pre-hackathon snapshot` marks what existed before: the
