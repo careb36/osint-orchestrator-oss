@@ -320,6 +320,11 @@ code {
   left: 16px;
 }
 
+.skip-link:hover {
+  color: var(--void);
+  text-decoration: none;
+}
+
 /* ── Page headers & sections ─────────────────────────────────────────── */
 
 .page {
@@ -936,7 +941,7 @@ code {
   height: 32px;
   padding: 0 10px;
   border-radius: var(--r-base);
-  border: 1px solid var(--hairline-strong);
+  border: 1px solid var(--muted-2); /* 3.75:1 on --panel: a visible field boundary */
   background: var(--void);
   color: var(--text);
   font-size: 13px;
@@ -953,7 +958,7 @@ code {
 .filters input[type='search']:hover,
 .filters input[type='text']:hover,
 .key-form input[type='password']:hover {
-  border-color: rgba(56, 189, 248, 0.4);
+  border-color: var(--muted);
 }
 
 .filters select:focus,
