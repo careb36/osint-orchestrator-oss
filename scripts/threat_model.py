@@ -245,6 +245,16 @@ reference_datasets = Data(
     description="sectors.json and geography.json fetched by connector-opencti from the datasets repository's master branch; ingested as identities, locations and markings.",
     classification=Classification.PUBLIC,
 )
+model_replies = Data(
+    name="Model replies",
+    description="JSON replies of the fast and reasoning routes (qualification, synthesis): untrusted until schema-validated, then consumed as data.",
+    classification=Classification.RESTRICTED,
+)
+target_inventory = Data(
+    name="Target inventory",
+    description="targets.yaml: entity names, authorisation and purpose per target, schedules, collector and LLM choices; read at startup and on reload (targets.py).",
+    classification=Classification.RESTRICTED,
+)
 operator_session = Data(
     name="oauth2-proxy session cookie",
     description="OIDC session of the operator behind the optional proxy.",
@@ -826,7 +836,10 @@ flow(
     protocol="HTTP",
     tlsVersion=TLSVersion.NONE,
     usesSessionTokens=True,
-    data=[operator_session, api_key],  # ADR-006: the key still authenticates the client
+    # ADR-006: the key still authenticates the client; the overlay also forwards the
+    # Authorization header and access token (OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER,
+    # OAUTH2_PROXY_PASS_ACCESS_TOKEN).
+    data=[operator_session, api_key, oidc_tokens],
     controls=Controls(isEncrypted=False, authenticatesSource=True),
 )
 flow(
@@ -1095,6 +1108,119 @@ flow(
     controls=Controls(isEncrypted=True, authenticatesDestination=True),
 )
 
+# Responses: the results, replies, reports and evidence that travel back.
+flow(
+    spiderfoot,
+    orchestrator,
+    "Scan results (JSON events, HTTP)",
+    protocol="HTTP",
+    tlsVersion=TLSVersion.NONE,
+    isResponse=True,
+    data=[evidence],
+    controls=Controls(isEncrypted=False, authenticatesSource=False),
+)
+flow(
+    socialosint,
+    orchestrator,
+    "Analysis report (Markdown, HTTP)",
+    protocol="HTTP",
+    tlsVersion=TLSVersion.NONE,
+    isResponse=True,
+    data=[social_profiles],
+    controls=Controls(isEncrypted=False, authenticatesSource=False),
+)
+flow(
+    tavily,
+    orchestrator,
+    "Search results (HTTPS)",
+    protocol="HTTPS",
+    tlsVersion=TLSVersion.TLSv12,
+    isResponse=True,
+    data=[evidence],
+    controls=Controls(isEncrypted=True),
+)
+flow(
+    cloud_llm,
+    orchestrator,
+    "Model replies (JSON, HTTPS)",
+    protocol="HTTPS",
+    tlsVersion=TLSVersion.TLSv12,
+    isResponse=True,
+    data=[model_replies],
+    controls=Controls(isEncrypted=True),
+)
+flow(
+    ollama_api,
+    orchestrator,
+    "Model replies (JSON, local HTTP)",
+    protocol="HTTP",
+    tlsVersion=TLSVersion.NONE,
+    isResponse=True,
+    data=[model_replies],
+    controls=Controls(isEncrypted=False),
+)
+flow(
+    socialosint_llm,
+    socialosint,
+    "Text and vision analysis (Markdown, HTTPS)",
+    protocol="HTTPS",
+    tlsVersion=TLSVersion.TLSv12,
+    isResponse=True,
+    data=[social_profiles],
+    controls=Controls(isEncrypted=True),
+)
+flow(
+    misp,
+    connector_misp,
+    "Polled events (HTTPS, certificate unverified)",
+    protocol="HTTPS",
+    tlsVersion=TLSVersion.TLSv12,
+    isResponse=True,
+    data=[evidence],
+    controls=Controls(isEncrypted=True, authenticatesSource=False),
+)
+flow(
+    keycloak,
+    proxy,
+    "Tokens and userinfo (HTTP)",
+    protocol="HTTP",
+    tlsVersion=TLSVersion.NONE,
+    isResponse=True,
+    data=[oidc_tokens],
+    controls=Controls(isEncrypted=False),
+)
+flow(
+    orchestrator,
+    operator,
+    "Reports, findings and evidence (direct loopback)",
+    protocol="HTTP",
+    tlsVersion=TLSVersion.NONE,
+    isResponse=True,
+    data=[run_artefacts, evidence],
+    controls=Controls(isEncrypted=False),
+)
+flow(
+    orchestrator,
+    proxy,
+    "Proxied responses (reports, findings, evidence)",
+    protocol="HTTP",
+    tlsVersion=TLSVersion.NONE,
+    isResponse=True,
+    data=[run_artefacts, evidence],
+    controls=Controls(isEncrypted=False),
+)
+flow(
+    proxy,
+    operator,
+    "Proxied responses to the browser (shipped overlay)",
+    protocol="HTTP",
+    tlsVersion=TLSVersion.NONE,
+    isResponse=True,
+    usesSessionTokens=True,
+    data=[run_artefacts, evidence, operator_session],
+    controls=Controls(isEncrypted=False),
+)
+
 # Stores
 flow(
     orchestrator,
@@ -1113,10 +1239,11 @@ flow(
     controls=Controls(isEncrypted=False, providesIntegrity=True),
 )
 flow(
-    orchestrator,
     targets_yaml,
+    orchestrator,
     "Read target inventory",
     protocol="file",
+    data=[target_inventory],
     controls=Controls(isEncrypted=False),
 )
 
@@ -1490,7 +1617,8 @@ TRIAGE: dict[str, dict[str, Response]] = {
             "included; Amass's provider keys go to the providers that issued them, over TLS), "
             "and the operator's API key, OIDC session, Keycloak password and OpenCTI admin "
             "password and UI session cross the host boundary in clear on :8000, :8080 and the "
-            "shipped OIDC overlay, which terminates no TLS (ADR-005). The "
+            "shipped OIDC overlay, which terminates no TLS (ADR-005), and the reports, findings "
+            "and evidence come back to the operator the same way. The "
             "disclosure to the sources queried is inherent to OSINT and bounded by the per-target "
             "authorisation. Hardening: a TLS terminator in front of :8000, :8002, OpenCTI's UI "
             "(:8080, APP__BASE_URL on the https:// name) and Keycloak's browser endpoint "
