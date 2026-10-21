@@ -219,6 +219,25 @@ misp_db_password = Data(
     credentialsLife=Lifetime.MANUAL,
     classification=Classification.SECRET,
 )
+opencti_admin_password = Data(
+    name="OpenCTI admin credentials",
+    description="APP__ADMIN__EMAIL and APP__ADMIN__PASSWORD typed into the OpenCTI web UI on loopback :8080.",
+    isCredentials=True,
+    credentialsLife=Lifetime.MANUAL,
+    classification=Classification.SECRET,
+)
+opencti_ui_session = Data(
+    name="OpenCTI UI session",
+    description="Session cookie of the OpenCTI web UI.",
+    isCredentials=True,
+    credentialsLife=Lifetime.SHORT,
+    classification=Classification.SECRET,
+)
+reference_datasets = Data(
+    name="OpenCTI reference datasets",
+    description="sectors.json and geography.json fetched by connector-opencti from the datasets repository's master branch; ingested as identities, locations and markings.",
+    classification=Classification.PUBLIC,
+)
 operator_session = Data(
     name="oauth2-proxy session cookie",
     description="OIDC session of the operator behind the optional proxy.",
@@ -283,6 +302,12 @@ stix_producer.description = "Third-party tooling posting bundles to POST /bundle
 
 public_web = ExternalEntity("Public web / OSINT sources")
 public_web.inBoundary = internet
+
+datasets_repo = ExternalEntity("OpenCTI datasets repository (GitHub)")
+datasets_repo.inBoundary = internet
+datasets_repo.description = (
+    "raw.githubusercontent.com/OpenCTI-Platform/datasets, master branch: a mutable reference."
+)
 
 webhook_receiver = ExternalEntity("Alert webhook receiver")
 webhook_receiver.inBoundary = internet
@@ -622,6 +647,16 @@ connector_misp.description = (
 )
 connector_misp.controls = Controls()  # vendor image; nothing asserted
 
+connector_opencti = Process("connector-opencti")
+connector_opencti.inBoundary = opencti_b
+connector_opencti.description = (
+    "OpenCTI datasets connector (pinned image): every 7 days it downloads sectors.json and "
+    "geography.json from the datasets repository's master branch over HTTPS and ingests them "
+    "into OpenCTI over HTTP with OPENCTI_ADMIN_TOKEN (scope marking-definition, identity, "
+    "location)."
+)
+connector_opencti.controls = Controls()  # vendor image; nothing asserted
+
 # ── Element classes (the triage is written per class, see TRIAGE) ───────────
 CLASSES: dict[str, list] = {
     "orchestrator": [orchestrator, scheduler],
@@ -638,6 +673,7 @@ CLASSES: dict[str, list] = {
         opencti,
         opencti_store,
         connector_misp,
+        connector_opencti,
         keycloak_db,
         misp_store,
         elasticsearch,
@@ -648,7 +684,7 @@ CLASSES: dict[str, list] = {
         misp_redis,
     ],
     "store": [sqlite, targets_yaml, reports, amass_db, socialosint_cache, spiderfoot_db],
-    "actor": [operator, anonymous, stix_producer, public_web, social_platforms],
+    "actor": [operator, anonymous, stix_producer, public_web, datasets_repo, social_platforms],
 }
 CLASS_OF = {el.name: cls for cls, els in CLASSES.items() for el in els}
 
@@ -676,6 +712,7 @@ _LIMITS: dict[Classification, list] = {
         opencti,
         opencti_store,
         connector_misp,
+        connector_opencti,
         keycloak_db,
         misp_store,
         elasticsearch,
@@ -698,7 +735,7 @@ _LIMITS: dict[Classification, list] = {
         ollama_api,
         ollama,
     ],
-    Classification.PUBLIC: [anonymous, public_web],
+    Classification.PUBLIC: [anonymous, public_web, datasets_repo],
 }
 for _limit, _elements in _LIMITS.items():
     for _element in _elements:
@@ -772,6 +809,16 @@ flow(
     protocol="HTTP",
     tlsVersion=TLSVersion.NONE,
     data=[keycloak_password, oidc_tokens],
+    controls=Controls(isEncrypted=False, authenticatesDestination=False),
+)
+flow(
+    operator,
+    opencti,
+    "OpenCTI UI login and session (loopback :8080, HTTP)",
+    protocol="HTTP",
+    tlsVersion=TLSVersion.NONE,
+    usesSessionTokens=True,
+    data=[opencti_admin_password, opencti_ui_session],
     controls=Controls(isEncrypted=False, authenticatesDestination=False),
 )
 flow(
@@ -1101,6 +1148,24 @@ for _server, _store, _what in (
         controls=Controls(isEncrypted=False),
     )
 flow(
+    connector_opencti,
+    datasets_repo,
+    "Reference dataset download (GitHub master, mutable)",
+    protocol="HTTPS",
+    tlsVersion=TLSVersion.TLSv12,
+    data=[reference_datasets],
+    controls=Controls(isEncrypted=True, authenticatesDestination=True),
+)
+flow(
+    connector_opencti,
+    opencti,
+    "Reference dataset ingestion (OPENCTI_ADMIN_TOKEN, HTTP)",
+    protocol="HTTP",
+    tlsVersion=TLSVersion.NONE,
+    data=[opencti_token, reference_datasets],
+    controls=Controls(isEncrypted=False, authenticatesSource=True),
+)
+flow(
     connector_misp,
     misp,
     "connector-misp polls MISP events",
@@ -1181,7 +1246,8 @@ _VENDOR_SESSIONS = (
 )
 _VENDOR_PROCESS = (
     "transferred",
-    "oauth2-proxy and connector-misp run as their pinned vendor images ship them; what happens "
+    "oauth2-proxy, connector-misp and connector-opencti run as their pinned vendor images ship "
+    "them; what happens "
     "inside them is upstream code.",
 )
 _VENDOR_AUTH = (
@@ -1332,13 +1398,14 @@ TRIAGE: dict[str, dict[str, Response]] = {
             "what fires here is deliberate: every lookup tells the public source which name is "
             "being researched (search queries and discovery traffic, plaintext DNS/WHOIS "
             "included; Amass's provider keys go to the providers that issued them, over TLS), "
-            "and the operator's API key, OIDC session and Keycloak password cross the host "
-            "boundary in clear on :8000 and on the shipped OIDC overlay, which terminates no "
-            "TLS (ADR-005). The "
+            "and the operator's API key, OIDC session, Keycloak password and OpenCTI admin "
+            "password and UI session cross the host boundary in clear on :8000, :8080 and the "
+            "shipped OIDC overlay, which terminates no TLS (ADR-005). The "
             "disclosure to the sources queried is inherent to OSINT and bounded by the per-target "
-            "authorisation. Hardening: a TLS terminator in front of :8000, :8002 and Keycloak's "
-            "browser endpoint (:8085), with KC_HOSTNAME and OIDC_BROWSER_LOGIN_URL on the "
-            "https:// name." + _DISCOVERY,
+            "authorisation. Hardening: a TLS terminator in front of :8000, :8002, OpenCTI's UI "
+            "(:8080, APP__BASE_URL on the https:// name) and Keycloak's browser endpoint "
+            "(:8085), with KC_HOSTNAME and OIDC_BROWSER_LOGIN_URL on the https:// name."
+            + _DISCOVERY,
         ),
     },
     "INP02": {  # Overflow Buffers
@@ -1422,7 +1489,9 @@ TRIAGE: dict[str, dict[str, Response]] = {
             "to anything on the host, which ADR-005 trusts. Production: a TLS terminator in front "
             "of the proxy and of Keycloak's browser endpoint (KC_HOSTNAME and "
             "OIDC_BROWSER_LOGIN_URL on the https:// name) and a Compose override that sets "
-            "OAUTH2_PROXY_COOKIE_SECURE to true.",
+            "OAUTH2_PROXY_COOKIE_SECURE to true. OpenCTI's own UI session on loopback :8080 "
+            "(APP__BASE_URL http://localhost:8080) is the same case: plain HTTP on the trusted "
+            "host, a TLS terminator and an https:// APP__BASE_URL in production.",
         ),
     },
     "CR03": {  # Dictionary-based Password Attack
@@ -1756,6 +1825,21 @@ _UNAUTHENTICATED_BACKING: Response = (
     "or network policies that pin each backing service to its platform.",
 )
 OVERRIDES: dict[tuple[str, str], Response] = {
+    ("OpenCTI UI login and session (loopback :8080, HTTP)", "CR02"): (
+        "transferred",
+        "TRACE handling on OpenCTI's web UI is the platform's; the UI is published on loopback "
+        "only and nothing the orchestrator serves issues TRACE. Hardening: a TLS terminator in "
+        "front of :8080 that drops TRACE.",
+    ),
+    ("Reference dataset download (GitHub master, mutable)", "CR06"): (
+        "accepted",
+        "The one unpinned input on record: connector-opencti fetches sectors.json and "
+        "geography.json from the datasets repository's master branch, a mutable reference, over "
+        "TLS to GitHub. A tampered file would land in OpenCTI as reference identities, "
+        "locations and markings, never as a finding about a target, and the orchestrator reads "
+        "nothing back from them. Hardening: pin CONFIG_SECTORS_FILE_URL and "
+        "CONFIG_GEOGRAPHY_FILE_URL to a commit, or mirror the files.",
+    ),
     ("Elasticsearch", "AA01"): _UNAUTHENTICATED_BACKING,
     ("Redis (OpenCTI)", "AA01"): _UNAUTHENTICATED_BACKING,
     ("Redis (MISP)", "AA01"): _UNAUTHENTICATED_BACKING,

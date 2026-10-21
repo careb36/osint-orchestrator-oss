@@ -10,6 +10,7 @@ AA01	vendor	OpenCTI platform
 AA01	vendor	Redis (MISP)
 AA01	vendor	Redis (OpenCTI)
 AA01	vendor	connector-misp
+AA01	vendor	connector-opencti
 AA01	vendor	oauth2-proxy
 AA02	orchestrator	APScheduler cron jobs
 AA02	orchestrator	Orchestrator API (FastAPI + APScheduler)
@@ -23,6 +24,7 @@ AA02	vendor	OpenCTI platform
 AA02	vendor	Redis (MISP)
 AA02	vendor	Redis (OpenCTI)
 AA02	vendor	connector-misp
+AA02	vendor	connector-opencti
 AA02	vendor	oauth2-proxy
 AA03	sidecar	Amass v5 engine
 AA03	sidecar	Ollama HTTP API
@@ -79,6 +81,7 @@ AC01	vendor	Redis (OpenCTI)
 AC01	vendor	SMTP relay (alert e-mail)
 AC01	vendor	Tavily search API
 AC01	vendor	connector-misp
+AC01	vendor	connector-opencti
 AC01	vendor	oauth2-proxy
 AC02	store	Amass asset database (shared volume)
 AC02	vendor	OpenCTI backing stores
@@ -103,6 +106,7 @@ AC05	flow	MISP database (MySQL, compose-internal)
 AC05	flow	MariaDB persists on misp-db-data
 AC05	flow	MinIO objects
 AC05	flow	MinIO persists objects (volume)
+AC05	flow	OpenCTI UI login and session (loopback :8080, HTTP)
 AC05	flow	Operator login (Keycloak authorization endpoint, shipped overlay)
 AC05	flow	Operator session (OIDC, shipped overlay)
 AC05	flow	POST /bundles (STIX intake)
@@ -123,6 +127,8 @@ AC05	flow	Read target inventory
 AC05	flow	Redis cache (no authentication)
 AC05	flow	Redis persists its snapshot (volume)
 AC05	flow	Redis persists on misp-redis-data
+AC05	flow	Reference dataset download (GitHub master, mutable)
+AC05	flow	Reference dataset ingestion (OPENCTI_ADMIN_TOKEN, HTTP)
 AC05	flow	Run/state SQL
 AC05	flow	STIX ingest (pycti, outbox retries)
 AC05	flow	Scan control & results
@@ -203,17 +209,21 @@ AC11	vendor	Tavily search API
 AC12	orchestrator	APScheduler cron jobs
 AC12	orchestrator	Orchestrator API (FastAPI + APScheduler)
 AC12	vendor	connector-misp
+AC12	vendor	connector-opencti
 AC12	vendor	oauth2-proxy
 AC13	orchestrator	APScheduler cron jobs
 AC13	orchestrator	Orchestrator API (FastAPI + APScheduler)
 AC13	vendor	connector-misp
+AC13	vendor	connector-opencti
 AC13	vendor	oauth2-proxy
 AC14	orchestrator	Orchestrator API (FastAPI + APScheduler)
 AC14	vendor	connector-misp
+AC14	vendor	connector-opencti
 AC14	vendor	oauth2-proxy
 AC15	orchestrator	APScheduler cron jobs
 AC15	orchestrator	Orchestrator API (FastAPI + APScheduler)
 AC15	vendor	connector-misp
+AC15	vendor	connector-opencti
 AC15	vendor	oauth2-proxy
 AC16	sidecar	Amass v5 engine
 AC16	sidecar	Ollama HTTP API
@@ -246,20 +256,24 @@ AC17	vendor	Redis (OpenCTI)
 AC17	vendor	SMTP relay (alert e-mail)
 AC17	vendor	Tavily search API
 AC18	vendor	connector-misp
+AC18	vendor	connector-opencti
 AC18	vendor	oauth2-proxy
 AC19	vendor	Keycloak
 AC19	vendor	OpenCTI platform
 AC20	vendor	connector-misp
+AC20	vendor	connector-opencti
 AC20	vendor	oauth2-proxy
 AC21	orchestrator	APScheduler cron jobs
 AC21	orchestrator	Orchestrator API (FastAPI + APScheduler)
 AC21	vendor	connector-misp
+AC21	vendor	connector-opencti
 AC23	flow	Alert e-mail (SMTP, STARTTLS by default)
 AC23	flow	Alert webhook (ALERT_WEBHOOK_URL)
 AC23	flow	Direct loopback API/console (no overlay)
 AC23	flow	Due-diligence queries
 AC23	flow	MISP database (MySQL, compose-internal)
 AC23	flow	MinIO objects
+AC23	flow	OpenCTI UI login and session (loopback :8080, HTTP)
 AC23	flow	Operator login (Keycloak authorization endpoint, shipped overlay)
 AC23	flow	Operator session (OIDC, shipped overlay)
 AC23	flow	POST /bundles (STIX intake)
@@ -270,16 +284,19 @@ AC23	flow	Proxied console/API calls
 AC23	flow	Qualification & synthesis prompts (cloud)
 AC23	flow	RabbitMQ queues
 AC23	flow	Read realm, users and sessions
+AC23	flow	Reference dataset ingestion (OPENCTI_ADMIN_TOKEN, HTTP)
 AC23	flow	STIX ingest (pycti, outbox retries)
 AC23	flow	SocialOSINT text and vision prompts (own endpoint and key)
 AC23	flow	Token redeem / userinfo
 AC23	flow	connector-misp polls MISP events
 AC23	flow	connector-misp writes to OpenCTI
 API01	orchestrator	Orchestrator API (FastAPI + APScheduler)
+CR01	flow	OpenCTI UI login and session (loopback :8080, HTTP)
 CR01	flow	Operator session (OIDC, shipped overlay)
 CR01	flow	Proxied console/API calls
 CR01	vendor	Keycloak
 CR01	vendor	OpenCTI platform
+CR02	flow	OpenCTI UI login and session (loopback :8080, HTTP)
 CR02	flow	Operator session (OIDC, shipped overlay)
 CR02	flow	Proxied console/API calls
 CR02	vendor	Keycloak
@@ -298,6 +315,7 @@ CR03	vendor	Redis (OpenCTI)
 CR03	vendor	SMTP relay (alert e-mail)
 CR03	vendor	Tavily search API
 CR03	vendor	connector-misp
+CR03	vendor	connector-opencti
 CR04	vendor	Keycloak
 CR04	vendor	OpenCTI platform
 CR05	sidecar	Amass v5 engine
@@ -345,6 +363,7 @@ CR06	flow	MISP database (MySQL, compose-internal)
 CR06	flow	MariaDB persists on misp-db-data
 CR06	flow	MinIO objects
 CR06	flow	MinIO persists objects (volume)
+CR06	flow	OpenCTI UI login and session (loopback :8080, HTTP)
 CR06	flow	Operator login (Keycloak authorization endpoint, shipped overlay)
 CR06	flow	Operator session (OIDC, shipped overlay)
 CR06	flow	POST /bundles (STIX intake)
@@ -365,6 +384,8 @@ CR06	flow	Read target inventory
 CR06	flow	Redis cache (no authentication)
 CR06	flow	Redis persists its snapshot (volume)
 CR06	flow	Redis persists on misp-redis-data
+CR06	flow	Reference dataset download (GitHub master, mutable)
+CR06	flow	Reference dataset ingestion (OPENCTI_ADMIN_TOKEN, HTTP)
 CR06	flow	Run/state SQL
 CR06	flow	STIX ingest (pycti, outbox retries)
 CR06	flow	Scan control & results
@@ -392,6 +413,7 @@ CR08	flow	MISP database (MySQL, compose-internal)
 CR08	flow	MariaDB persists on misp-db-data
 CR08	flow	MinIO objects
 CR08	flow	MinIO persists objects (volume)
+CR08	flow	OpenCTI UI login and session (loopback :8080, HTTP)
 CR08	flow	Operator login (Keycloak authorization endpoint, shipped overlay)
 CR08	flow	Operator session (OIDC, shipped overlay)
 CR08	flow	POST /bundles (STIX intake)
@@ -409,6 +431,7 @@ CR08	flow	Read target inventory
 CR08	flow	Redis cache (no authentication)
 CR08	flow	Redis persists its snapshot (volume)
 CR08	flow	Redis persists on misp-redis-data
+CR08	flow	Reference dataset ingestion (OPENCTI_ADMIN_TOKEN, HTTP)
 CR08	flow	Run/state SQL
 CR08	flow	STIX ingest (pycti, outbox retries)
 CR08	flow	Scan control & results
@@ -437,6 +460,7 @@ DE01	flow	MISP database (MySQL, compose-internal)
 DE01	flow	MariaDB persists on misp-db-data
 DE01	flow	MinIO objects
 DE01	flow	MinIO persists objects (volume)
+DE01	flow	OpenCTI UI login and session (loopback :8080, HTTP)
 DE01	flow	Operator login (Keycloak authorization endpoint, shipped overlay)
 DE01	flow	Operator session (OIDC, shipped overlay)
 DE01	flow	POST /bundles (STIX intake)
@@ -457,6 +481,8 @@ DE01	flow	Read target inventory
 DE01	flow	Redis cache (no authentication)
 DE01	flow	Redis persists its snapshot (volume)
 DE01	flow	Redis persists on misp-redis-data
+DE01	flow	Reference dataset download (GitHub master, mutable)
+DE01	flow	Reference dataset ingestion (OPENCTI_ADMIN_TOKEN, HTTP)
 DE01	flow	Run/state SQL
 DE01	flow	STIX ingest (pycti, outbox retries)
 DE01	flow	Scan control & results
@@ -483,6 +509,7 @@ DE02	vendor	Redis (OpenCTI)
 DE02	vendor	SMTP relay (alert e-mail)
 DE02	vendor	Tavily search API
 DE02	vendor	connector-misp
+DE02	vendor	connector-opencti
 DE02	vendor	oauth2-proxy
 DE03	flow	Alert e-mail (SMTP, STARTTLS by default)
 DE03	flow	Alert webhook (ALERT_WEBHOOK_URL)
@@ -505,6 +532,7 @@ DE03	flow	MISP database (MySQL, compose-internal)
 DE03	flow	MariaDB persists on misp-db-data
 DE03	flow	MinIO objects
 DE03	flow	MinIO persists objects (volume)
+DE03	flow	OpenCTI UI login and session (loopback :8080, HTTP)
 DE03	flow	Operator login (Keycloak authorization endpoint, shipped overlay)
 DE03	flow	Operator session (OIDC, shipped overlay)
 DE03	flow	POST /bundles (STIX intake)
@@ -525,6 +553,8 @@ DE03	flow	Read target inventory
 DE03	flow	Redis cache (no authentication)
 DE03	flow	Redis persists its snapshot (volume)
 DE03	flow	Redis persists on misp-redis-data
+DE03	flow	Reference dataset download (GitHub master, mutable)
+DE03	flow	Reference dataset ingestion (OPENCTI_ADMIN_TOKEN, HTTP)
 DE03	flow	Run/state SQL
 DE03	flow	STIX ingest (pycti, outbox retries)
 DE03	flow	Scan control & results
@@ -562,6 +592,7 @@ DO01	vendor	Redis (OpenCTI)
 DO01	vendor	SMTP relay (alert e-mail)
 DO01	vendor	Tavily search API
 DO01	vendor	connector-misp
+DO01	vendor	connector-opencti
 DO01	vendor	oauth2-proxy
 DO02	orchestrator	APScheduler cron jobs
 DO02	orchestrator	Orchestrator API (FastAPI + APScheduler)
@@ -590,6 +621,7 @@ DO02	vendor	Redis (OpenCTI)
 DO02	vendor	SMTP relay (alert e-mail)
 DO02	vendor	Tavily search API
 DO02	vendor	connector-misp
+DO02	vendor	connector-opencti
 DO02	vendor	oauth2-proxy
 DR01	flow	Cache collected profiles and posts (/app/data)
 DR01	flow	DNS and WHOIS pivots (OpenOSINT)
@@ -599,6 +631,7 @@ DR01	flow	Direct loopback API/console (no overlay)
 DR01	flow	GET /health, /metrics
 DR01	flow	MISP database (MySQL, compose-internal)
 DR01	flow	MinIO objects
+DR01	flow	OpenCTI UI login and session (loopback :8080, HTTP)
 DR01	flow	Operator login (Keycloak authorization endpoint, shipped overlay)
 DR01	flow	Operator session (OIDC, shipped overlay)
 DR01	flow	POST /bundles (STIX intake)
@@ -607,6 +640,7 @@ DR01	flow	Proxied console/API calls
 DR01	flow	RabbitMQ queues
 DR01	flow	Read cached profiles for later sessions
 DR01	flow	Read realm, users and sessions
+DR01	flow	Reference dataset ingestion (OPENCTI_ADMIN_TOKEN, HTTP)
 DR01	flow	STIX ingest (pycti, outbox retries)
 DR01	flow	Token redeem / userinfo
 DR01	flow	connector-misp writes to OpenCTI
@@ -661,6 +695,7 @@ DS06	flow	DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois)
 DS06	flow	Direct loopback API/console (no overlay)
 DS06	flow	GET /health, /metrics
 DS06	flow	HTTPS source lookups (OpenOSINT)
+DS06	flow	OpenCTI UI login and session (loopback :8080, HTTP)
 DS06	flow	Operator login (Keycloak authorization endpoint, shipped overlay)
 DS06	flow	Operator session (OIDC, shipped overlay)
 DS06	flow	POST /bundles (STIX intake)
@@ -699,6 +734,7 @@ HA03	vendor	Tavily search API
 INP02	orchestrator	APScheduler cron jobs
 INP02	orchestrator	Orchestrator API (FastAPI + APScheduler)
 INP02	vendor	connector-misp
+INP02	vendor	connector-opencti
 INP02	vendor	oauth2-proxy
 INP03	sidecar	Amass v5 engine
 INP03	sidecar	Ollama HTTP API
@@ -739,6 +775,7 @@ INP05	vendor	Redis (OpenCTI)
 INP05	vendor	SMTP relay (alert e-mail)
 INP05	vendor	Tavily search API
 INP07	vendor	connector-misp
+INP07	vendor	connector-opencti
 INP07	vendor	oauth2-proxy
 INP08	sidecar	Amass v5 engine
 INP08	sidecar	Ollama HTTP API
@@ -756,6 +793,7 @@ INP08	vendor	Redis (OpenCTI)
 INP08	vendor	SMTP relay (alert e-mail)
 INP08	vendor	Tavily search API
 INP08	vendor	connector-misp
+INP08	vendor	connector-opencti
 INP08	vendor	oauth2-proxy
 INP09	sidecar	Amass v5 engine
 INP09	sidecar	Ollama HTTP API
@@ -803,8 +841,10 @@ INP11	vendor	Redis (OpenCTI)
 INP11	vendor	SMTP relay (alert e-mail)
 INP11	vendor	Tavily search API
 INP12	vendor	connector-misp
+INP12	vendor	connector-opencti
 INP12	vendor	oauth2-proxy
 INP13	vendor	connector-misp
+INP13	vendor	connector-opencti
 INP13	vendor	oauth2-proxy
 INP14	sidecar	Amass v5 engine
 INP14	sidecar	Ollama HTTP API
@@ -822,6 +862,7 @@ INP14	vendor	Redis (OpenCTI)
 INP14	vendor	SMTP relay (alert e-mail)
 INP14	vendor	Tavily search API
 INP14	vendor	connector-misp
+INP14	vendor	connector-opencti
 INP14	vendor	oauth2-proxy
 INP15	vendor	SMTP relay (alert e-mail)
 INP16	sidecar	Amass v5 engine
@@ -885,6 +926,7 @@ INP19	vendor	Redis (OpenCTI)
 INP19	vendor	SMTP relay (alert e-mail)
 INP19	vendor	Tavily search API
 INP20	vendor	connector-misp
+INP20	vendor	connector-opencti
 INP20	vendor	oauth2-proxy
 INP21	sidecar	Amass v5 engine
 INP21	sidecar	Ollama HTTP API
@@ -917,16 +959,21 @@ INP22	vendor	Redis (OpenCTI)
 INP22	vendor	SMTP relay (alert e-mail)
 INP22	vendor	Tavily search API
 INP23	vendor	connector-misp
+INP23	vendor	connector-opencti
 INP23	vendor	oauth2-proxy
 INP24	orchestrator	APScheduler cron jobs
 INP24	orchestrator	Orchestrator API (FastAPI + APScheduler)
 INP24	vendor	connector-misp
+INP24	vendor	connector-opencti
 INP24	vendor	oauth2-proxy
 INP25	vendor	connector-misp
+INP25	vendor	connector-opencti
 INP25	vendor	oauth2-proxy
 INP26	vendor	connector-misp
+INP26	vendor	connector-opencti
 INP26	vendor	oauth2-proxy
 INP27	vendor	connector-misp
+INP27	vendor	connector-opencti
 INP27	vendor	oauth2-proxy
 INP28	sidecar	Amass v5 engine
 INP28	sidecar	Ollama HTTP API
@@ -944,6 +991,7 @@ INP28	vendor	Redis (OpenCTI)
 INP28	vendor	SMTP relay (alert e-mail)
 INP28	vendor	Tavily search API
 INP28	vendor	connector-misp
+INP28	vendor	connector-opencti
 INP28	vendor	oauth2-proxy
 INP29	sidecar	Amass v5 engine
 INP29	sidecar	Ollama HTTP API
@@ -961,14 +1009,19 @@ INP29	vendor	Redis (OpenCTI)
 INP29	vendor	SMTP relay (alert e-mail)
 INP29	vendor	Tavily search API
 INP29	vendor	connector-misp
+INP29	vendor	connector-opencti
 INP29	vendor	oauth2-proxy
 INP30	vendor	connector-misp
+INP30	vendor	connector-opencti
 INP30	vendor	oauth2-proxy
 INP31	vendor	connector-misp
+INP31	vendor	connector-opencti
 INP31	vendor	oauth2-proxy
 INP32	vendor	connector-misp
+INP32	vendor	connector-opencti
 INP32	vendor	oauth2-proxy
 INP33	vendor	connector-misp
+INP33	vendor	connector-opencti
 INP33	vendor	oauth2-proxy
 INP34	sidecar	Amass v5 engine
 INP34	sidecar	Ollama HTTP API
@@ -986,6 +1039,7 @@ INP34	vendor	Redis (OpenCTI)
 INP34	vendor	SMTP relay (alert e-mail)
 INP34	vendor	Tavily search API
 INP35	vendor	connector-misp
+INP35	vendor	connector-opencti
 INP35	vendor	oauth2-proxy
 INP36	sidecar	Amass v5 engine
 INP36	sidecar	Ollama HTTP API
@@ -1018,6 +1072,7 @@ INP37	vendor	Redis (OpenCTI)
 INP37	vendor	SMTP relay (alert e-mail)
 INP37	vendor	Tavily search API
 INP41	vendor	connector-misp
+INP41	vendor	connector-opencti
 INP41	vendor	oauth2-proxy
 LLM01	sidecar	Ollama (local models)
 LLM01	vendor	Cloud LLM provider
