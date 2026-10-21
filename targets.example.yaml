@@ -183,3 +183,27 @@ targets:
     llm: local
     # Sin `language`: hereda ORCHESTRATOR_LANGUAGE.
     report_dir: "daily_reports"
+
+  # ─── Muestra sin claves: `python -m orchestrator.showcase` ──────────────────
+  # Entidad ficticia (nombres reservados) que recibe las ejecuciones grabadas
+  # de demo/showcase/. Con `enabled: false` el planificador no la ejecuta y
+  # «Iniciar ejecución» la rechaza: la muestra nunca cuesta una llamada. Las
+  # grabaciones traen los textos en español y en inglés; se usa el idioma del
+  # objetivo (aquí, ORCHESTRATOR_LANGUAGE). Para convertirla en una ejecución
+  # real, pon `enabled: true`, cambia `fqdn` y `search_terms` por una entidad
+  # que estés autorizado a evaluar y define NEBIUS_API_KEY y TAVILY_API_KEY.
+  - id: showcase-example
+    enabled: false
+    fqdn: meridian-ridge.example
+    authorization: "Muestra ficticia incluida en el repositorio; no se recolecta nada"
+    purpose: "Enseñar el producto con una ejecución grabada, sin claves de API"
+    collectors:
+      openosint:
+        enabled: false
+      spiderfoot:
+        enabled: false
+      tavily:
+        enabled: true
+        search_terms: ["Meridian Ridge Holdings"]
+    llm: nebius
+    report_dir: "daily_reports"
