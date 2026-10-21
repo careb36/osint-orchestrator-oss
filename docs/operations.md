@@ -372,6 +372,35 @@ Rollback steps:
 4. Capture the browser console telemetry and the failing API response in the
    incident log so the underlying cause is fixed before a new rollout.
 
+## Threat model
+
+The repository carries an OWASP pytm model of this architecture
+(`scripts/threat_model.py`) and its generated report
+(`docs/threat-model.md`). The model mirrors `docs/architecture.md`, the ADRs
+and the compose files: four trust boundaries (public internet, optional OIDC
+edge, compose network, OpenCTI platform), the orchestrator and its sidecars,
+the data stores and every flow with its protocol, TLS version and carried
+credentials.
+
+pytm is a modelling tool, not a runtime dependency: it lives in a throwaway
+virtualenv, pinned, and never in `pyproject.toml`.
+
+    python3 -m venv .venv-pytm
+    .venv-pytm/bin/pip install pytm==1.4.0
+    .venv-pytm/bin/python scripts/threat_model.py
+
+The script resolves the 114-threat library against the model, writes
+`docs/threat-model.md` and **fails if any fired threat lacks a triage entry**:
+every finding in the report carries a response — `mitigated` (a control in
+this codebase, cited), `transferred` (vendor or upstream surface) or
+`accepted` (a documented decision, with its production hardening note).
+Regenerate the report after changing the model, the architecture or a triage
+rationale, and review the diff: an accepted finding is a decision on record,
+never a silence. The accepted set is short and deliberate — plaintext
+host-internal flows and stores on a single trusted host (ADR-005), static API
+keys (ADR-005) and the loopback-only unauthenticated sidecars — each with the
+hardening step a shared-infrastructure deployment must add.
+
 ## Release checklist and support SOP
 
 A release is a `vX.Y.Z` tag on `main`: the image workflow publishes
