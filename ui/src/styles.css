@@ -630,11 +630,12 @@ code {
   }
 }
 
-/* The colour and the label already say it; the pulse is decoration. */
+/* The colour and the label already say it; the pulse is decoration. The
+   pill rule below opts in under no-preference instead, because it comes
+   later in the cascade with the same specificity. */
 @media (prefers-reduced-motion: reduce) {
   .system-chip.warning .system-dot,
-  .system-chip.error .system-dot,
-  .status-pill[data-value]::before {
+  .system-chip.error .system-dot {
     animation: none;
   }
 }
@@ -757,13 +758,16 @@ code {
   color: #c7d2fe;
 }
 
-/* Active or uncontained states breathe. */
-.status-pill[data-value='running']::before,
-.status-pill[data-value='pending']::before,
-.status-pill[data-value='open']::before,
-.status-pill[data-value='critical']::before,
-.status-pill[data-value='high']::before {
-  animation: breathe 1.5s ease-in-out infinite;
+/* Active or uncontained states breathe, unless the operator asked for
+   reduced motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .status-pill[data-value='running']::before,
+  .status-pill[data-value='pending']::before,
+  .status-pill[data-value='open']::before,
+  .status-pill[data-value='critical']::before,
+  .status-pill[data-value='high']::before {
+    animation: breathe 1.5s ease-in-out infinite;
+  }
 }
 
 .state-card[data-status='ok'] {
