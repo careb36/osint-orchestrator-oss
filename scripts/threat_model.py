@@ -190,6 +190,13 @@ rabbitmq_credentials = Data(
     credentialsLife=Lifetime.LONG,
     classification=Classification.SECRET,
 )
+amass_provider_keys = Data(
+    name="Amass data-source keys",
+    description="API keys in amass/datasources.yaml, mounted read-only into the engine only.",
+    isCredentials=True,
+    credentialsLife=Lifetime.MANUAL,
+    classification=Classification.SECRET,
+)
 operator_session = Data(
     name="oauth2-proxy session cookie",
     description="OIDC session of the operator behind the optional proxy.",
@@ -326,7 +333,9 @@ ORCHESTRATOR_CONTROLS = dict(
     disablesiFrames=True,  # CSP frame-ancestors 'none'
     disablesDTD=True,  # no XML parser anywhere in the service
     definesConnectionTimeout=True,  # *_TIMEOUT_SECONDS on every client
-    handlesResourceConsumption=True,  # TAVILY_MAX_CALLS_PER_RUN, LLM_QUALIFY_MAX_ITEMS, ...
+    # Per-run caps bound the collectors and the models, but POST /bundles reads the
+    # whole body with request.json() and nothing limits its size.
+    handlesResourceConsumption=False,
     handlesInterruptions=True,  # outbox + retry queues (OpenCTI, alerts)
     handlesCrashes=True,  # restart policy + APScheduler misfire grace
     providesIntegrity=True,  # HMAC-signed manifest chain (ADR-007); not code signing
@@ -573,6 +582,24 @@ flow(
     controls=Controls(isEncrypted=False),
 )
 flow(
+    amass,
+    public_web,
+    "Passive data-source queries (datasources.yaml keys)",
+    protocol="HTTPS",
+    tlsVersion=TLSVersion.TLSv12,
+    data=[amass_provider_keys, evidence],
+    controls=Controls(isEncrypted=True, authenticatesDestination=True),
+)
+flow(
+    amass,
+    public_web,
+    "DNS resolution and active probes (zone transfers, certificate grabs when enabled)",
+    protocol="DNS",
+    tlsVersion=TLSVersion.NONE,
+    data=[evidence],
+    controls=Controls(isEncrypted=False, authenticatesDestination=False),
+)
+flow(
     orchestrator,
     socialosint,
     "Platform collection jobs",
@@ -611,7 +638,16 @@ flow(
 flow(
     spiderfoot,
     public_web,
-    "Active reconnaissance",
+    "DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois)",
+    protocol="DNS",
+    tlsVersion=TLSVersion.NONE,
+    data=[evidence],
+    controls=Controls(isEncrypted=False, authenticatesDestination=False),
+)
+flow(
+    spiderfoot,
+    public_web,
+    "TLS certificate and HTTPS fetches (sfp_sslcert)",
     protocol="HTTPS",
     tlsVersion=TLSVersion.TLSv12,
     data=[evidence],
@@ -818,6 +854,11 @@ _LLM = (
     "and model output is an aid, not a determination (README, Responsible use).",
 )
 
+_DISCOVERY = (
+    " The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of "
+    "the target's surface) is plaintext by nature: it carries the target name and what the "
+    "public already serves, never a credential, and its answers are treated as untrusted input."
+)
 _SIDECAR_INPUT = (
     "accepted",
     "Input handling inside the sidecar is upstream code the orchestrator does not change; the "
@@ -928,7 +969,7 @@ TRIAGE: dict[str, dict[str, Response]] = {
             "OpenCTI, Keycloak, SQLite and files; the shipped OIDC overlay terminates no TLS, so "
             "the operator session is a host-local plaintext hop too. Hardening for shared "
             "infrastructure: a TLS terminator in front of :8000/:8002, TLS between services, "
-            "disk encryption.",
+            "disk encryption." + _DISCOVERY,
         ),
     },
     "INP02": {  # Overflow Buffers
@@ -1028,10 +1069,11 @@ TRIAGE: dict[str, dict[str, Response]] = {
     "CR06": {  # Communication Channel Manipulation
         "flow": (
             "accepted",
-            "Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by "
+            "Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel "
+            "is pinned (git dependencies by "
             "40-character SHA, images by explicit tag). Host-internal hops are plaintext by "
             "decision (DS06) and can be manipulated only from the host itself. Hardening as in "
-            "DS06.",
+            "DS06." + _DISCOVERY,
         ),
     },
     "DE04": {  # Audit Log Manipulation
@@ -1052,7 +1094,7 @@ TRIAGE: dict[str, dict[str, Response]] = {
             "accepted",
             "Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass "
             "asset database, OpenCTI stores) and host-internal hops carry it in clear (DS06). "
-            "Hardening: encrypted volumes or disk encryption, TLS between services.",
+            "Hardening: encrypted volumes or disk encryption, TLS between services." + _DISCOVERY,
         ),
     },
     "INP22": {"*": _XML},  # XML Attribute Blowup
@@ -1154,7 +1196,7 @@ TRIAGE: dict[str, dict[str, Response]] = {
             "Everything that arrives through these flows is treated as untrusted text: escaped "
             "by React under CSP in the console, delimited in prompts, validated as STIX on "
             "intake. Spoofing the content of a host-internal plaintext hop needs a position on "
-            "the host (DS06).",
+            "the host (DS06)." + _DISCOVERY,
         ),
     },
     "AC07": {  # Exploiting Incorrectly Configured Access Control
@@ -1196,24 +1238,34 @@ TRIAGE: dict[str, dict[str, Response]] = {
             "The orchestrator validates protocol and headers on everything it serves and "
             "sends well-formed requests; POST /bundles parses its body as JSON without checking "
             "the declared media type, and the schema validation that follows is what bounds it. "
-            "Manipulating a host-internal plaintext hop needs a position on the host (DS06).",
+            "Manipulating a host-internal plaintext hop needs a position on the host (DS06)."
+            + _DISCOVERY,
         ),
     },
     "DE01": {  # Interception
         "flow": (
             "accepted",
             "Host-internal plaintext flows (loopback, compose bridge, in-process, files) are "
-            "within the trusted boundary of ADR-005; everything that leaves the host is TLS.",
+            "within the trusted boundary of ADR-005; what leaves the host with a credential or "
+            "evidence inside is TLS." + _DISCOVERY,
         ),
     },
     "DE03": {  # Sniffing Attacks
         "flow": (
             "accepted",
-            "Same boundary argument as DE01: sniffing requires host compromise, which is out "
-            "of the modelled scope.",
+            "Same boundary argument as DE01: sniffing a host-internal hop requires host "
+            "compromise, which is out of the modelled scope." + _DISCOVERY,
         ),
     },
     "DO02": {  # Excessive Allocation
+        "orchestrator": (
+            "accepted",
+            "Per-run budgets cap the collectors and the models (TAVILY_MAX_CALLS_PER_RUN, "
+            "LLM_QUALIFY_MAX_ITEMS, LLM_MAX_TOKENS), but POST /bundles reads the whole body with "
+            "request.json() before validating it and no middleware caps uploads, so an "
+            "authenticated producer can exhaust memory with one request. Hardening: a body-size "
+            "limit at the reverse proxy or TLS terminator in front of :8000.",
+        ),
         "sidecar": _SIDECAR_INPUT,
         "vendor": _VENDOR_INPUT,
         "store": (
@@ -1382,12 +1434,13 @@ lines = [
     "| Threat | Severity | Class | Response | Rationale |",
     "| --- | --- | --- | --- | --- |",
 ]
-summary: dict[tuple[str, str], tuple] = {}
+summary: dict[tuple[str, str, str, str], tuple[str, str]] = {}
 for f in findings:
+    # One row per distinct answer, so an override inside a class keeps its own row.
     summary.setdefault(
-        (f.threat_id, element_class(f)), (f.severity, f.response, f.triage_note, f.description)
+        (f.threat_id, element_class(f), f.response, f.triage_note), (f.severity, f.description)
     )
-for (tid, cls), (sev, resp, note, desc) in sorted(summary.items()):
+for (tid, cls, resp, note), (sev, desc) in sorted(summary.items()):
     lines.append(f"| {tid} {desc} | {sev} | {cls} | {resp} | {note} |")
 
 lines += ["", "## Full findings", ""]

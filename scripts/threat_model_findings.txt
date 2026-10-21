@@ -49,10 +49,11 @@ AC01	vendor	connector-misp
 AC01	vendor	oauth2-proxy
 AC02	store	Amass asset database (shared volume)
 AC02	vendor	OpenCTI backing stores
-AC05	flow	Active reconnaissance
 AC05	flow	Alert e-mail (SMTP, STARTTLS by default)
 AC05	flow	Alert webhook (ALERT_WEBHOOK_URL)
 AC05	flow	Cron dispatch (in-process)
+AC05	flow	DNS resolution and active probes (zone transfers, certificate grabs when enabled)
+AC05	flow	DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois)
 AC05	flow	Direct loopback API/console (no overlay)
 AC05	flow	Due-diligence queries
 AC05	flow	Elasticsearch indices
@@ -64,6 +65,7 @@ AC05	flow	Operator login (Keycloak authorization endpoint, shipped overlay)
 AC05	flow	Operator session (OIDC, shipped overlay)
 AC05	flow	POST /bundles (STIX intake)
 AC05	flow	Passive collection (OpenOSINT)
+AC05	flow	Passive data-source queries (datasources.yaml keys)
 AC05	flow	Platform collection (operator's API tokens)
 AC05	flow	Platform collection jobs
 AC05	flow	Proxied console/API calls
@@ -78,6 +80,7 @@ AC05	flow	STIX ingest (pycti, outbox retries)
 AC05	flow	Scan control & results
 AC05	flow	Seal run artefacts + manifest
 AC05	flow	SocialOSINT text and vision prompts (own endpoint and key)
+AC05	flow	TLS certificate and HTTPS fetches (sfp_sslcert)
 AC05	flow	Token redeem / userinfo
 AC05	flow	connector-misp polls MISP events
 AC05	flow	connector-misp writes to OpenCTI
@@ -166,6 +169,7 @@ AC23	flow	MinIO objects
 AC23	flow	Operator login (Keycloak authorization endpoint, shipped overlay)
 AC23	flow	Operator session (OIDC, shipped overlay)
 AC23	flow	POST /bundles (STIX intake)
+AC23	flow	Passive data-source queries (datasources.yaml keys)
 AC23	flow	Platform collection (operator's API tokens)
 AC23	flow	Proxied console/API calls
 AC23	flow	Qualification & synthesis prompts (cloud)
@@ -204,10 +208,11 @@ CR05	vendor	OpenCTI backing stores
 CR05	vendor	OpenCTI platform
 CR05	vendor	SMTP relay (alert e-mail)
 CR05	vendor	Tavily search API
-CR06	flow	Active reconnaissance
 CR06	flow	Alert e-mail (SMTP, STARTTLS by default)
 CR06	flow	Alert webhook (ALERT_WEBHOOK_URL)
 CR06	flow	Cron dispatch (in-process)
+CR06	flow	DNS resolution and active probes (zone transfers, certificate grabs when enabled)
+CR06	flow	DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois)
 CR06	flow	Direct loopback API/console (no overlay)
 CR06	flow	Due-diligence queries
 CR06	flow	Elasticsearch indices
@@ -219,6 +224,7 @@ CR06	flow	Operator login (Keycloak authorization endpoint, shipped overlay)
 CR06	flow	Operator session (OIDC, shipped overlay)
 CR06	flow	POST /bundles (STIX intake)
 CR06	flow	Passive collection (OpenOSINT)
+CR06	flow	Passive data-source queries (datasources.yaml keys)
 CR06	flow	Platform collection (operator's API tokens)
 CR06	flow	Platform collection jobs
 CR06	flow	Proxied console/API calls
@@ -233,10 +239,13 @@ CR06	flow	STIX ingest (pycti, outbox retries)
 CR06	flow	Scan control & results
 CR06	flow	Seal run artefacts + manifest
 CR06	flow	SocialOSINT text and vision prompts (own endpoint and key)
+CR06	flow	TLS certificate and HTTPS fetches (sfp_sslcert)
 CR06	flow	Token redeem / userinfo
 CR06	flow	connector-misp polls MISP events
 CR06	flow	connector-misp writes to OpenCTI
 CR08	flow	Cron dispatch (in-process)
+CR08	flow	DNS resolution and active probes (zone transfers, certificate grabs when enabled)
+CR08	flow	DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois)
 CR08	flow	Direct loopback API/console (no overlay)
 CR08	flow	Elasticsearch indices
 CR08	flow	Engine writes asset.db
@@ -259,10 +268,11 @@ CR08	flow	Scan control & results
 CR08	flow	Seal run artefacts + manifest
 CR08	flow	Token redeem / userinfo
 CR08	flow	connector-misp writes to OpenCTI
-DE01	flow	Active reconnaissance
 DE01	flow	Alert e-mail (SMTP, STARTTLS by default)
 DE01	flow	Alert webhook (ALERT_WEBHOOK_URL)
 DE01	flow	Cron dispatch (in-process)
+DE01	flow	DNS resolution and active probes (zone transfers, certificate grabs when enabled)
+DE01	flow	DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois)
 DE01	flow	Direct loopback API/console (no overlay)
 DE01	flow	Due-diligence queries
 DE01	flow	Elasticsearch indices
@@ -274,6 +284,7 @@ DE01	flow	Operator login (Keycloak authorization endpoint, shipped overlay)
 DE01	flow	Operator session (OIDC, shipped overlay)
 DE01	flow	POST /bundles (STIX intake)
 DE01	flow	Passive collection (OpenOSINT)
+DE01	flow	Passive data-source queries (datasources.yaml keys)
 DE01	flow	Platform collection (operator's API tokens)
 DE01	flow	Platform collection jobs
 DE01	flow	Proxied console/API calls
@@ -288,6 +299,7 @@ DE01	flow	STIX ingest (pycti, outbox retries)
 DE01	flow	Scan control & results
 DE01	flow	Seal run artefacts + manifest
 DE01	flow	SocialOSINT text and vision prompts (own endpoint and key)
+DE01	flow	TLS certificate and HTTPS fetches (sfp_sslcert)
 DE01	flow	Token redeem / userinfo
 DE01	flow	connector-misp polls MISP events
 DE01	flow	connector-misp writes to OpenCTI
@@ -301,10 +313,11 @@ DE02	vendor	SMTP relay (alert e-mail)
 DE02	vendor	Tavily search API
 DE02	vendor	connector-misp
 DE02	vendor	oauth2-proxy
-DE03	flow	Active reconnaissance
 DE03	flow	Alert e-mail (SMTP, STARTTLS by default)
 DE03	flow	Alert webhook (ALERT_WEBHOOK_URL)
 DE03	flow	Cron dispatch (in-process)
+DE03	flow	DNS resolution and active probes (zone transfers, certificate grabs when enabled)
+DE03	flow	DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois)
 DE03	flow	Direct loopback API/console (no overlay)
 DE03	flow	Due-diligence queries
 DE03	flow	Elasticsearch indices
@@ -316,6 +329,7 @@ DE03	flow	Operator login (Keycloak authorization endpoint, shipped overlay)
 DE03	flow	Operator session (OIDC, shipped overlay)
 DE03	flow	POST /bundles (STIX intake)
 DE03	flow	Passive collection (OpenOSINT)
+DE03	flow	Passive data-source queries (datasources.yaml keys)
 DE03	flow	Platform collection (operator's API tokens)
 DE03	flow	Platform collection jobs
 DE03	flow	Proxied console/API calls
@@ -330,6 +344,7 @@ DE03	flow	STIX ingest (pycti, outbox retries)
 DE03	flow	Scan control & results
 DE03	flow	Seal run artefacts + manifest
 DE03	flow	SocialOSINT text and vision prompts (own endpoint and key)
+DE03	flow	TLS certificate and HTTPS fetches (sfp_sslcert)
 DE03	flow	Token redeem / userinfo
 DE03	flow	connector-misp polls MISP events
 DE03	flow	connector-misp writes to OpenCTI
@@ -350,6 +365,8 @@ DO01	vendor	SMTP relay (alert e-mail)
 DO01	vendor	Tavily search API
 DO01	vendor	connector-misp
 DO01	vendor	oauth2-proxy
+DO02	orchestrator	APScheduler cron jobs
+DO02	orchestrator	Orchestrator API (FastAPI + APScheduler)
 DO02	sidecar	Amass v5 engine
 DO02	sidecar	SocialOSINT sidecar
 DO02	sidecar	SpiderFoot
@@ -365,6 +382,8 @@ DO02	vendor	SMTP relay (alert e-mail)
 DO02	vendor	Tavily search API
 DO02	vendor	connector-misp
 DO02	vendor	oauth2-proxy
+DR01	flow	DNS resolution and active probes (zone transfers, certificate grabs when enabled)
+DR01	flow	DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois)
 DR01	flow	Direct loopback API/console (no overlay)
 DR01	flow	Elasticsearch indices
 DR01	flow	Engine writes asset.db
@@ -408,9 +427,10 @@ DS04	vendor	MISP
 DS04	vendor	OpenCTI platform
 DS04	vendor	SMTP relay (alert e-mail)
 DS04	vendor	Tavily search API
-DS06	flow	Active reconnaissance
 DS06	flow	Alert e-mail (SMTP, STARTTLS by default)
 DS06	flow	Alert webhook (ALERT_WEBHOOK_URL)
+DS06	flow	DNS resolution and active probes (zone transfers, certificate grabs when enabled)
+DS06	flow	DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois)
 DS06	flow	Direct loopback API/console (no overlay)
 DS06	flow	Due-diligence queries
 DS06	flow	Elasticsearch indices
@@ -420,6 +440,7 @@ DS06	flow	Operator login (Keycloak authorization endpoint, shipped overlay)
 DS06	flow	Operator session (OIDC, shipped overlay)
 DS06	flow	POST /bundles (STIX intake)
 DS06	flow	Passive collection (OpenOSINT)
+DS06	flow	Passive data-source queries (datasources.yaml keys)
 DS06	flow	Platform collection (operator's API tokens)
 DS06	flow	Platform collection jobs
 DS06	flow	Proxied console/API calls
@@ -433,6 +454,7 @@ DS06	flow	STIX ingest (pycti, outbox retries)
 DS06	flow	Scan control & results
 DS06	flow	Seal run artefacts + manifest
 DS06	flow	SocialOSINT text and vision prompts (own endpoint and key)
+DS06	flow	TLS certificate and HTTPS fetches (sfp_sslcert)
 DS06	flow	Token redeem / userinfo
 DS06	flow	connector-misp polls MISP events
 DS06	flow	connector-misp writes to OpenCTI
