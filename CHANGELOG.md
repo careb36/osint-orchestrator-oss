@@ -30,6 +30,10 @@ from [SECURITY.md](SECURITY.md).
   process, such as the showcase command, racing the API loses the INSERT and
   is reported as not admitted. Runs still active when the migration runs are
   failed first, as the startup cleanup would.
+- Dashboard: the evidence tab of a run names the provider and model that
+  qualified the rows ("Qualified by nebius · nvidia/…"), next to the finding
+  that already shows its reasoning model and latency. README screenshots
+  regenerated.
 - README (both languages): the hackathon table now lists the work merged since the
   first dashboard, from alert cases and the external STIX intake to the threat model.
 - investigation-assistant worker (ADR-011, phase 3): `docker-compose.engine.yml`

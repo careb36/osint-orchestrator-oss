@@ -351,6 +351,7 @@ const en = {
   'handoff.summary.link': 'Dashboard',
   'evidence.continueReport': 'Continue to the report',
   'evidence.prepareHandoff': 'Prepare handoff',
+  'evidence.qualifiedBy': 'Qualified by {models}',
   // identifier values (display labels only; the data keeps the English value)
   'value.pending': 'pending',
   'value.running': 'running',
@@ -697,6 +698,7 @@ const es: Record<MessageKey, string> = {
   'handoff.summary.link': 'Panel',
   'evidence.continueReport': 'Continuar al informe',
   'evidence.prepareHandoff': 'Preparar la entrega',
+  'evidence.qualifiedBy': 'Calificada por {models}',
   'value.pending': 'pendiente',
   'value.running': 'en curso',
   'value.success': 'exitosa',

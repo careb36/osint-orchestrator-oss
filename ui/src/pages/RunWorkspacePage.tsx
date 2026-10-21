@@ -259,6 +259,10 @@ export function RunWorkspacePage() {
               <p className="muted">{t('runDetail.noEvidence')}</p>
             ) : (
               <>
+                {/* Which model qualified the rows: the fast route's provider and model, as persisted. */}
+                <p className="muted" data-testid="evidence-qualified-by">
+                  {t('evidence.qualifiedBy', { models: distinct(evidence.data, (row) => `${row.provider} · ${row.model}`).join(', ') })}
+                </p>
                 <div className="filters" role="search" aria-label={t('runDetail.evidenceFilters')}>
                   <SearchField label={t('search')} value={controls.get('q')} onChange={(value) => controls.set('q', value)} placeholder={t('runDetail.evidencePlaceholder')} />
                   <label>
