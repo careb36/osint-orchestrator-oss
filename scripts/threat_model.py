@@ -94,10 +94,17 @@ tm.assumptions = [
     "ORCHESTRATOR_SECRET_KEY is a private, randomly generated value. The default "
     "insecure-dev-key only earns a startup warning (auth.py); with it, or with an empty key, "
     "anyone can forge a manifest, and the integrity claims of this model do not hold.",
-    "LLM_BASE_URL points at the Ollama service of the shipped compose (same host, compose "
-    "network). OllamaClient posts to whatever URL is configured (providers/ollama.py), so a "
-    "remote LLM_BASE_URL turns `llm: local` into the cloud-provider case of this model; a "
+    "The shipped compose has no Ollama service (docs/operations.md): `llm: local` needs an "
+    "operator-provisioned Ollama on the same host, attached to the compose network or on "
+    "loopback, which LLM_BASE_URL points at; that prerequisite is modelled inside the trusted "
+    "compose boundary. OllamaClient posts to whatever URL is configured (providers/ollama.py), "
+    "so a remote LLM_BASE_URL turns `llm: local` into the cloud-provider case of this model; a "
     "remote Ollama is not modelled separately.",
+    "The operator's browser is outside the model. The console keeps ORCHESTRATOR_API_KEY in "
+    "sessionStorage and, with 'Remember me', in localStorage in clear (ui/src/lib/api.ts), so "
+    "a key retained in a shared or compromised browser is the operator's residual risk. "
+    "Hardening: no 'Remember me' on shared machines and rotation through the comma-separated "
+    "key set.",
 ]
 
 # ── Boundaries ──────────────────────────────────────────────────────────────
@@ -109,7 +116,7 @@ opencti_b = Boundary("OpenCTI platform (separate admin domain)")
 # ── Data assets ─────────────────────────────────────────────────────────────
 api_key = Data(
     name="ORCHESTRATOR_API_KEY",
-    description="Static operator API key, comma-separated rotation set (ADR-005).",
+    description="Static operator API key, comma-separated rotation set (ADR-005); the console keeps it in the browser's sessionStorage, and in localStorage with 'Remember me'.",
     isCredentials=True,
     credentialsLife=Lifetime.MANUAL,
     classification=Classification.SECRET,
@@ -246,6 +253,7 @@ operator_session = Data(
     classification=Classification.SECRET,
 )
 evidence = Data(
+    isPII=True,
     name="Qualified evidence & STIX bundle",
     description="Collector output qualified by the LLM, normalised to STIX 2.1; untrusted web text inside.",
     classification=Classification.RESTRICTED,
@@ -253,6 +261,7 @@ evidence = Data(
     isDestEncryptedAtRest=False,
 )
 run_artefacts = Data(
+    isPII=True,
     name="Sealed run artefacts",
     description="report.md, bundle, delta, evidence and the HMAC-signed manifest chain (ADR-007).",
     classification=Classification.RESTRICTED,
@@ -265,11 +274,13 @@ search_queries = Data(
     classification=Classification.RESTRICTED,
 )
 prompts = Data(
+    isPII=True,
     name="LLM prompts with collected text",
     description="Flattened, delimited untrusted collector text plus entity context sent to a model.",
     classification=Classification.RESTRICTED,
 )
 alert_payload = Data(
+    isPII=True,
     name="Alert event",
     description="Target, run status, risk level, synthesis summary and, when enabled, the new observables.",
     classification=Classification.RESTRICTED,
@@ -527,8 +538,8 @@ ollama_api = Server("Ollama HTTP API")
 ollama_api.inBoundary = compose
 ollama_api.protocol = "HTTP"
 ollama_api.description = (
-    "ollama/ollama image: HTTP API without authentication on the compose network; "
-    "the model behind it is the LLM element."
+    "Operator-provisioned Ollama (the shipped compose has none): HTTP API without "
+    "authentication on the same host; the model behind it is the LLM element."
 )
 ollama_api.controls = Controls(
     isHardened=False, isEncrypted=False, authenticatesSource=False, hasAccessControl=False
@@ -657,6 +668,22 @@ connector_opencti.description = (
 )
 connector_opencti.controls = Controls()  # vendor image; nothing asserted
 
+opencti_worker = Process("OpenCTI worker")
+opencti_worker.inBoundary = opencti_b
+opencti_worker.description = (
+    "opencti/worker (two replicas, pinned): consumes the ingestion queues and writes the "
+    "bundles into the platform with OPENCTI_ADMIN_TOKEN over HTTP (connector-base-env)."
+)
+opencti_worker.controls = Controls()  # vendor image; nothing asserted
+
+connector_import_stix = Process("connector-import-file-stix")
+connector_import_stix.inBoundary = opencti_b
+connector_import_stix.description = (
+    "Built-in import connector (pinned): parses the STIX JSON and XML files uploaded to the "
+    "platform (CONNECTOR_AUTO=true) and writes them back with OPENCTI_ADMIN_TOKEN over HTTP."
+)
+connector_import_stix.controls = Controls()  # vendor image; nothing asserted
+
 # ── Element classes (the triage is written per class, see TRIAGE) ───────────
 CLASSES: dict[str, list] = {
     "orchestrator": [orchestrator, scheduler],
@@ -674,6 +701,8 @@ CLASSES: dict[str, list] = {
         opencti_store,
         connector_misp,
         connector_opencti,
+        opencti_worker,
+        connector_import_stix,
         keycloak_db,
         misp_store,
         elasticsearch,
@@ -713,6 +742,8 @@ _LIMITS: dict[Classification, list] = {
         opencti_store,
         connector_misp,
         connector_opencti,
+        opencti_worker,
+        connector_import_stix,
         keycloak_db,
         misp_store,
         elasticsearch,
@@ -1166,6 +1197,33 @@ flow(
     controls=Controls(isEncrypted=False, authenticatesSource=True),
 )
 flow(
+    opencti_worker,
+    rabbitmq,
+    "Worker consumes the ingestion queues (AMQP, in clear)",
+    protocol="AMQP",
+    tlsVersion=TLSVersion.NONE,
+    data=[rabbitmq_credentials, evidence],
+    controls=Controls(isEncrypted=False, authenticatesDestination=False),
+)
+flow(
+    opencti_worker,
+    opencti,
+    "Worker writes processed bundles (OPENCTI_ADMIN_TOKEN, HTTP)",
+    protocol="HTTP",
+    tlsVersion=TLSVersion.NONE,
+    data=[opencti_token, evidence],
+    controls=Controls(isEncrypted=False, authenticatesSource=True),
+)
+flow(
+    connector_import_stix,
+    opencti,
+    "Fetch uploaded files and push the parsed bundle (OPENCTI_ADMIN_TOKEN, HTTP)",
+    protocol="HTTP",
+    tlsVersion=TLSVersion.NONE,
+    data=[opencti_token, evidence],
+    controls=Controls(isEncrypted=False, authenticatesSource=True),
+)
+flow(
     connector_misp,
     misp,
     "connector-misp polls MISP events",
@@ -1246,8 +1304,8 @@ _VENDOR_SESSIONS = (
 )
 _VENDOR_PROCESS = (
     "transferred",
-    "oauth2-proxy, connector-misp and connector-opencti run as their pinned vendor images ship "
-    "them; what happens "
+    "oauth2-proxy, connector-misp, connector-opencti, connector-import-file-stix and the "
+    "OpenCTI worker run as their pinned vendor images ship them; what happens "
     "inside them is upstream code.",
 )
 _VENDOR_AUTH = (
@@ -1535,8 +1593,9 @@ TRIAGE: dict[str, dict[str, Response]] = {
             "accepted",
             "Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass "
             "asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI "
-            "stores) and host-internal hops carry "
-            "it in clear; credentials and personal data travel only to the service they belong "
+            "stores) and host-internal hops carry it in clear, the personal data of the "
+            "target's public footprint (observables in evidence, artefacts, prompts and alerts) "
+            "included; credentials and personal data travel only to the service they belong "
             "to, under TLS when they leave the host. Hardening: encrypted volumes or disk "
             "encryption, TLS between services." + _DISCOVERY,
         ),

@@ -7,8 +7,10 @@ AA01	sidecar	SpiderFoot
 AA01	vendor	Elasticsearch
 AA01	vendor	Keycloak
 AA01	vendor	OpenCTI platform
+AA01	vendor	OpenCTI worker
 AA01	vendor	Redis (MISP)
 AA01	vendor	Redis (OpenCTI)
+AA01	vendor	connector-import-file-stix
 AA01	vendor	connector-misp
 AA01	vendor	connector-opencti
 AA01	vendor	oauth2-proxy
@@ -21,8 +23,10 @@ AA02	sidecar	SpiderFoot
 AA02	vendor	Elasticsearch
 AA02	vendor	Keycloak
 AA02	vendor	OpenCTI platform
+AA02	vendor	OpenCTI worker
 AA02	vendor	Redis (MISP)
 AA02	vendor	Redis (OpenCTI)
+AA02	vendor	connector-import-file-stix
 AA02	vendor	connector-misp
 AA02	vendor	connector-opencti
 AA02	vendor	oauth2-proxy
@@ -75,11 +79,13 @@ AC01	vendor	MariaDB (MISP)
 AC01	vendor	MinIO
 AC01	vendor	OpenCTI backing stores
 AC01	vendor	OpenCTI platform
+AC01	vendor	OpenCTI worker
 AC01	vendor	RabbitMQ
 AC01	vendor	Redis (MISP)
 AC01	vendor	Redis (OpenCTI)
 AC01	vendor	SMTP relay (alert e-mail)
 AC01	vendor	Tavily search API
+AC01	vendor	connector-import-file-stix
 AC01	vendor	connector-misp
 AC01	vendor	connector-opencti
 AC01	vendor	oauth2-proxy
@@ -98,6 +104,7 @@ AC05	flow	Elasticsearch indices
 AC05	flow	Elasticsearch persists its indices (volume)
 AC05	flow	Engine writes asset.db
 AC05	flow	Enumeration submit (oam_enum)
+AC05	flow	Fetch uploaded files and push the parsed bundle (OPENCTI_ADMIN_TOKEN, HTTP)
 AC05	flow	GET /health, /metrics
 AC05	flow	HTTPS source lookups (OpenOSINT)
 AC05	flow	Local model inference
@@ -136,6 +143,8 @@ AC05	flow	Seal run artefacts + manifest
 AC05	flow	SocialOSINT text and vision prompts (own endpoint and key)
 AC05	flow	TLS certificate and HTTPS fetches (sfp_sslcert)
 AC05	flow	Token redeem / userinfo
+AC05	flow	Worker consumes the ingestion queues (AMQP, in clear)
+AC05	flow	Worker writes processed bundles (OPENCTI_ADMIN_TOKEN, HTTP)
 AC05	flow	Write scan results and logs
 AC05	flow	connector-misp polls MISP events
 AC05	flow	connector-misp writes to OpenCTI
@@ -208,20 +217,28 @@ AC11	vendor	SMTP relay (alert e-mail)
 AC11	vendor	Tavily search API
 AC12	orchestrator	APScheduler cron jobs
 AC12	orchestrator	Orchestrator API (FastAPI + APScheduler)
+AC12	vendor	OpenCTI worker
+AC12	vendor	connector-import-file-stix
 AC12	vendor	connector-misp
 AC12	vendor	connector-opencti
 AC12	vendor	oauth2-proxy
 AC13	orchestrator	APScheduler cron jobs
 AC13	orchestrator	Orchestrator API (FastAPI + APScheduler)
+AC13	vendor	OpenCTI worker
+AC13	vendor	connector-import-file-stix
 AC13	vendor	connector-misp
 AC13	vendor	connector-opencti
 AC13	vendor	oauth2-proxy
 AC14	orchestrator	Orchestrator API (FastAPI + APScheduler)
+AC14	vendor	OpenCTI worker
+AC14	vendor	connector-import-file-stix
 AC14	vendor	connector-misp
 AC14	vendor	connector-opencti
 AC14	vendor	oauth2-proxy
 AC15	orchestrator	APScheduler cron jobs
 AC15	orchestrator	Orchestrator API (FastAPI + APScheduler)
+AC15	vendor	OpenCTI worker
+AC15	vendor	connector-import-file-stix
 AC15	vendor	connector-misp
 AC15	vendor	connector-opencti
 AC15	vendor	oauth2-proxy
@@ -255,22 +272,29 @@ AC17	vendor	Redis (MISP)
 AC17	vendor	Redis (OpenCTI)
 AC17	vendor	SMTP relay (alert e-mail)
 AC17	vendor	Tavily search API
+AC18	vendor	OpenCTI worker
+AC18	vendor	connector-import-file-stix
 AC18	vendor	connector-misp
 AC18	vendor	connector-opencti
 AC18	vendor	oauth2-proxy
 AC19	vendor	Keycloak
 AC19	vendor	OpenCTI platform
+AC20	vendor	OpenCTI worker
+AC20	vendor	connector-import-file-stix
 AC20	vendor	connector-misp
 AC20	vendor	connector-opencti
 AC20	vendor	oauth2-proxy
 AC21	orchestrator	APScheduler cron jobs
 AC21	orchestrator	Orchestrator API (FastAPI + APScheduler)
+AC21	vendor	OpenCTI worker
+AC21	vendor	connector-import-file-stix
 AC21	vendor	connector-misp
 AC21	vendor	connector-opencti
 AC23	flow	Alert e-mail (SMTP, STARTTLS by default)
 AC23	flow	Alert webhook (ALERT_WEBHOOK_URL)
 AC23	flow	Direct loopback API/console (no overlay)
 AC23	flow	Due-diligence queries
+AC23	flow	Fetch uploaded files and push the parsed bundle (OPENCTI_ADMIN_TOKEN, HTTP)
 AC23	flow	MISP database (MySQL, compose-internal)
 AC23	flow	MinIO objects
 AC23	flow	OpenCTI UI login and session (loopback :8080, HTTP)
@@ -288,6 +312,8 @@ AC23	flow	Reference dataset ingestion (OPENCTI_ADMIN_TOKEN, HTTP)
 AC23	flow	STIX ingest (pycti, outbox retries)
 AC23	flow	SocialOSINT text and vision prompts (own endpoint and key)
 AC23	flow	Token redeem / userinfo
+AC23	flow	Worker consumes the ingestion queues (AMQP, in clear)
+AC23	flow	Worker writes processed bundles (OPENCTI_ADMIN_TOKEN, HTTP)
 AC23	flow	connector-misp polls MISP events
 AC23	flow	connector-misp writes to OpenCTI
 API01	orchestrator	Orchestrator API (FastAPI + APScheduler)
@@ -309,11 +335,13 @@ CR03	vendor	Elasticsearch
 CR03	vendor	MISP
 CR03	vendor	MariaDB (MISP)
 CR03	vendor	MinIO
+CR03	vendor	OpenCTI worker
 CR03	vendor	RabbitMQ
 CR03	vendor	Redis (MISP)
 CR03	vendor	Redis (OpenCTI)
 CR03	vendor	SMTP relay (alert e-mail)
 CR03	vendor	Tavily search API
+CR03	vendor	connector-import-file-stix
 CR03	vendor	connector-misp
 CR03	vendor	connector-opencti
 CR04	vendor	Keycloak
@@ -355,6 +383,7 @@ CR06	flow	Elasticsearch indices
 CR06	flow	Elasticsearch persists its indices (volume)
 CR06	flow	Engine writes asset.db
 CR06	flow	Enumeration submit (oam_enum)
+CR06	flow	Fetch uploaded files and push the parsed bundle (OPENCTI_ADMIN_TOKEN, HTTP)
 CR06	flow	GET /health, /metrics
 CR06	flow	HTTPS source lookups (OpenOSINT)
 CR06	flow	Local model inference
@@ -393,6 +422,8 @@ CR06	flow	Seal run artefacts + manifest
 CR06	flow	SocialOSINT text and vision prompts (own endpoint and key)
 CR06	flow	TLS certificate and HTTPS fetches (sfp_sslcert)
 CR06	flow	Token redeem / userinfo
+CR06	flow	Worker consumes the ingestion queues (AMQP, in clear)
+CR06	flow	Worker writes processed bundles (OPENCTI_ADMIN_TOKEN, HTTP)
 CR06	flow	Write scan results and logs
 CR06	flow	connector-misp polls MISP events
 CR06	flow	connector-misp writes to OpenCTI
@@ -406,6 +437,7 @@ CR08	flow	Elasticsearch indices
 CR08	flow	Elasticsearch persists its indices (volume)
 CR08	flow	Engine writes asset.db
 CR08	flow	Enumeration submit (oam_enum)
+CR08	flow	Fetch uploaded files and push the parsed bundle (OPENCTI_ADMIN_TOKEN, HTTP)
 CR08	flow	GET /health, /metrics
 CR08	flow	Local model inference
 CR08	flow	MISP cache and queues (Redis, no password)
@@ -437,6 +469,8 @@ CR08	flow	STIX ingest (pycti, outbox retries)
 CR08	flow	Scan control & results
 CR08	flow	Seal run artefacts + manifest
 CR08	flow	Token redeem / userinfo
+CR08	flow	Worker consumes the ingestion queues (AMQP, in clear)
+CR08	flow	Worker writes processed bundles (OPENCTI_ADMIN_TOKEN, HTTP)
 CR08	flow	Write scan results and logs
 CR08	flow	connector-misp writes to OpenCTI
 DE01	flow	Alert e-mail (SMTP, STARTTLS by default)
@@ -452,6 +486,7 @@ DE01	flow	Elasticsearch indices
 DE01	flow	Elasticsearch persists its indices (volume)
 DE01	flow	Engine writes asset.db
 DE01	flow	Enumeration submit (oam_enum)
+DE01	flow	Fetch uploaded files and push the parsed bundle (OPENCTI_ADMIN_TOKEN, HTTP)
 DE01	flow	GET /health, /metrics
 DE01	flow	HTTPS source lookups (OpenOSINT)
 DE01	flow	Local model inference
@@ -490,6 +525,8 @@ DE01	flow	Seal run artefacts + manifest
 DE01	flow	SocialOSINT text and vision prompts (own endpoint and key)
 DE01	flow	TLS certificate and HTTPS fetches (sfp_sslcert)
 DE01	flow	Token redeem / userinfo
+DE01	flow	Worker consumes the ingestion queues (AMQP, in clear)
+DE01	flow	Worker writes processed bundles (OPENCTI_ADMIN_TOKEN, HTTP)
 DE01	flow	Write scan results and logs
 DE01	flow	connector-misp polls MISP events
 DE01	flow	connector-misp writes to OpenCTI
@@ -503,11 +540,13 @@ DE02	vendor	MISP
 DE02	vendor	MariaDB (MISP)
 DE02	vendor	MinIO
 DE02	vendor	OpenCTI platform
+DE02	vendor	OpenCTI worker
 DE02	vendor	RabbitMQ
 DE02	vendor	Redis (MISP)
 DE02	vendor	Redis (OpenCTI)
 DE02	vendor	SMTP relay (alert e-mail)
 DE02	vendor	Tavily search API
+DE02	vendor	connector-import-file-stix
 DE02	vendor	connector-misp
 DE02	vendor	connector-opencti
 DE02	vendor	oauth2-proxy
@@ -524,6 +563,7 @@ DE03	flow	Elasticsearch indices
 DE03	flow	Elasticsearch persists its indices (volume)
 DE03	flow	Engine writes asset.db
 DE03	flow	Enumeration submit (oam_enum)
+DE03	flow	Fetch uploaded files and push the parsed bundle (OPENCTI_ADMIN_TOKEN, HTTP)
 DE03	flow	GET /health, /metrics
 DE03	flow	HTTPS source lookups (OpenOSINT)
 DE03	flow	Local model inference
@@ -562,6 +602,8 @@ DE03	flow	Seal run artefacts + manifest
 DE03	flow	SocialOSINT text and vision prompts (own endpoint and key)
 DE03	flow	TLS certificate and HTTPS fetches (sfp_sslcert)
 DE03	flow	Token redeem / userinfo
+DE03	flow	Worker consumes the ingestion queues (AMQP, in clear)
+DE03	flow	Worker writes processed bundles (OPENCTI_ADMIN_TOKEN, HTTP)
 DE03	flow	Write scan results and logs
 DE03	flow	connector-misp polls MISP events
 DE03	flow	connector-misp writes to OpenCTI
@@ -586,11 +628,13 @@ DO01	vendor	MISP
 DO01	vendor	MariaDB (MISP)
 DO01	vendor	MinIO
 DO01	vendor	OpenCTI platform
+DO01	vendor	OpenCTI worker
 DO01	vendor	RabbitMQ
 DO01	vendor	Redis (MISP)
 DO01	vendor	Redis (OpenCTI)
 DO01	vendor	SMTP relay (alert e-mail)
 DO01	vendor	Tavily search API
+DO01	vendor	connector-import-file-stix
 DO01	vendor	connector-misp
 DO01	vendor	connector-opencti
 DO01	vendor	oauth2-proxy
@@ -615,11 +659,13 @@ DO02	vendor	MariaDB (MISP)
 DO02	vendor	MinIO
 DO02	vendor	OpenCTI backing stores
 DO02	vendor	OpenCTI platform
+DO02	vendor	OpenCTI worker
 DO02	vendor	RabbitMQ
 DO02	vendor	Redis (MISP)
 DO02	vendor	Redis (OpenCTI)
 DO02	vendor	SMTP relay (alert e-mail)
 DO02	vendor	Tavily search API
+DO02	vendor	connector-import-file-stix
 DO02	vendor	connector-misp
 DO02	vendor	connector-opencti
 DO02	vendor	oauth2-proxy
@@ -628,21 +674,43 @@ DR01	flow	DNS and WHOIS pivots (OpenOSINT)
 DR01	flow	DNS resolution and active probes (zone transfers, certificate grabs when enabled)
 DR01	flow	DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois)
 DR01	flow	Direct loopback API/console (no overlay)
+DR01	flow	Elasticsearch indices
+DR01	flow	Elasticsearch persists its indices (volume)
+DR01	flow	Engine writes asset.db
+DR01	flow	Fetch uploaded files and push the parsed bundle (OPENCTI_ADMIN_TOKEN, HTTP)
 DR01	flow	GET /health, /metrics
+DR01	flow	Local model inference
+DR01	flow	MISP cache and queues (Redis, no password)
 DR01	flow	MISP database (MySQL, compose-internal)
+DR01	flow	MariaDB persists on misp-db-data
 DR01	flow	MinIO objects
+DR01	flow	MinIO persists objects (volume)
 DR01	flow	OpenCTI UI login and session (loopback :8080, HTTP)
 DR01	flow	Operator login (Keycloak authorization endpoint, shipped overlay)
 DR01	flow	Operator session (OIDC, shipped overlay)
 DR01	flow	POST /bundles (STIX intake)
 DR01	flow	Persist realm users, client secret and sessions
+DR01	flow	Platform collection jobs
 DR01	flow	Proxied console/API calls
+DR01	flow	Qualification & synthesis prompts (local HTTP API)
+DR01	flow	RabbitMQ persists queues (volume)
 DR01	flow	RabbitMQ queues
 DR01	flow	Read cached profiles for later sessions
+DR01	flow	Read discovered names (oam_subs, shared volume)
 DR01	flow	Read realm, users and sessions
+DR01	flow	Read scan results for the API
+DR01	flow	Redis cache (no authentication)
+DR01	flow	Redis persists its snapshot (volume)
+DR01	flow	Redis persists on misp-redis-data
 DR01	flow	Reference dataset ingestion (OPENCTI_ADMIN_TOKEN, HTTP)
+DR01	flow	Run/state SQL
 DR01	flow	STIX ingest (pycti, outbox retries)
+DR01	flow	Scan control & results
+DR01	flow	Seal run artefacts + manifest
 DR01	flow	Token redeem / userinfo
+DR01	flow	Worker consumes the ingestion queues (AMQP, in clear)
+DR01	flow	Worker writes processed bundles (OPENCTI_ADMIN_TOKEN, HTTP)
+DR01	flow	Write scan results and logs
 DR01	flow	connector-misp writes to OpenCTI
 DS01	sidecar	Amass v5 engine
 DS01	sidecar	Ollama HTTP API
@@ -733,6 +801,8 @@ HA03	vendor	SMTP relay (alert e-mail)
 HA03	vendor	Tavily search API
 INP02	orchestrator	APScheduler cron jobs
 INP02	orchestrator	Orchestrator API (FastAPI + APScheduler)
+INP02	vendor	OpenCTI worker
+INP02	vendor	connector-import-file-stix
 INP02	vendor	connector-misp
 INP02	vendor	connector-opencti
 INP02	vendor	oauth2-proxy
@@ -774,6 +844,8 @@ INP05	vendor	Redis (MISP)
 INP05	vendor	Redis (OpenCTI)
 INP05	vendor	SMTP relay (alert e-mail)
 INP05	vendor	Tavily search API
+INP07	vendor	OpenCTI worker
+INP07	vendor	connector-import-file-stix
 INP07	vendor	connector-misp
 INP07	vendor	connector-opencti
 INP07	vendor	oauth2-proxy
@@ -787,11 +859,13 @@ INP08	vendor	MISP
 INP08	vendor	MariaDB (MISP)
 INP08	vendor	MinIO
 INP08	vendor	OpenCTI platform
+INP08	vendor	OpenCTI worker
 INP08	vendor	RabbitMQ
 INP08	vendor	Redis (MISP)
 INP08	vendor	Redis (OpenCTI)
 INP08	vendor	SMTP relay (alert e-mail)
 INP08	vendor	Tavily search API
+INP08	vendor	connector-import-file-stix
 INP08	vendor	connector-misp
 INP08	vendor	connector-opencti
 INP08	vendor	oauth2-proxy
@@ -840,9 +914,13 @@ INP11	vendor	Redis (MISP)
 INP11	vendor	Redis (OpenCTI)
 INP11	vendor	SMTP relay (alert e-mail)
 INP11	vendor	Tavily search API
+INP12	vendor	OpenCTI worker
+INP12	vendor	connector-import-file-stix
 INP12	vendor	connector-misp
 INP12	vendor	connector-opencti
 INP12	vendor	oauth2-proxy
+INP13	vendor	OpenCTI worker
+INP13	vendor	connector-import-file-stix
 INP13	vendor	connector-misp
 INP13	vendor	connector-opencti
 INP13	vendor	oauth2-proxy
@@ -856,11 +934,13 @@ INP14	vendor	MISP
 INP14	vendor	MariaDB (MISP)
 INP14	vendor	MinIO
 INP14	vendor	OpenCTI platform
+INP14	vendor	OpenCTI worker
 INP14	vendor	RabbitMQ
 INP14	vendor	Redis (MISP)
 INP14	vendor	Redis (OpenCTI)
 INP14	vendor	SMTP relay (alert e-mail)
 INP14	vendor	Tavily search API
+INP14	vendor	connector-import-file-stix
 INP14	vendor	connector-misp
 INP14	vendor	connector-opencti
 INP14	vendor	oauth2-proxy
@@ -925,6 +1005,8 @@ INP19	vendor	Redis (MISP)
 INP19	vendor	Redis (OpenCTI)
 INP19	vendor	SMTP relay (alert e-mail)
 INP19	vendor	Tavily search API
+INP20	vendor	OpenCTI worker
+INP20	vendor	connector-import-file-stix
 INP20	vendor	connector-misp
 INP20	vendor	connector-opencti
 INP20	vendor	oauth2-proxy
@@ -958,20 +1040,30 @@ INP22	vendor	Redis (MISP)
 INP22	vendor	Redis (OpenCTI)
 INP22	vendor	SMTP relay (alert e-mail)
 INP22	vendor	Tavily search API
+INP23	vendor	OpenCTI worker
+INP23	vendor	connector-import-file-stix
 INP23	vendor	connector-misp
 INP23	vendor	connector-opencti
 INP23	vendor	oauth2-proxy
 INP24	orchestrator	APScheduler cron jobs
 INP24	orchestrator	Orchestrator API (FastAPI + APScheduler)
+INP24	vendor	OpenCTI worker
+INP24	vendor	connector-import-file-stix
 INP24	vendor	connector-misp
 INP24	vendor	connector-opencti
 INP24	vendor	oauth2-proxy
+INP25	vendor	OpenCTI worker
+INP25	vendor	connector-import-file-stix
 INP25	vendor	connector-misp
 INP25	vendor	connector-opencti
 INP25	vendor	oauth2-proxy
+INP26	vendor	OpenCTI worker
+INP26	vendor	connector-import-file-stix
 INP26	vendor	connector-misp
 INP26	vendor	connector-opencti
 INP26	vendor	oauth2-proxy
+INP27	vendor	OpenCTI worker
+INP27	vendor	connector-import-file-stix
 INP27	vendor	connector-misp
 INP27	vendor	connector-opencti
 INP27	vendor	oauth2-proxy
@@ -985,11 +1077,13 @@ INP28	vendor	MISP
 INP28	vendor	MariaDB (MISP)
 INP28	vendor	MinIO
 INP28	vendor	OpenCTI platform
+INP28	vendor	OpenCTI worker
 INP28	vendor	RabbitMQ
 INP28	vendor	Redis (MISP)
 INP28	vendor	Redis (OpenCTI)
 INP28	vendor	SMTP relay (alert e-mail)
 INP28	vendor	Tavily search API
+INP28	vendor	connector-import-file-stix
 INP28	vendor	connector-misp
 INP28	vendor	connector-opencti
 INP28	vendor	oauth2-proxy
@@ -1003,23 +1097,33 @@ INP29	vendor	MISP
 INP29	vendor	MariaDB (MISP)
 INP29	vendor	MinIO
 INP29	vendor	OpenCTI platform
+INP29	vendor	OpenCTI worker
 INP29	vendor	RabbitMQ
 INP29	vendor	Redis (MISP)
 INP29	vendor	Redis (OpenCTI)
 INP29	vendor	SMTP relay (alert e-mail)
 INP29	vendor	Tavily search API
+INP29	vendor	connector-import-file-stix
 INP29	vendor	connector-misp
 INP29	vendor	connector-opencti
 INP29	vendor	oauth2-proxy
+INP30	vendor	OpenCTI worker
+INP30	vendor	connector-import-file-stix
 INP30	vendor	connector-misp
 INP30	vendor	connector-opencti
 INP30	vendor	oauth2-proxy
+INP31	vendor	OpenCTI worker
+INP31	vendor	connector-import-file-stix
 INP31	vendor	connector-misp
 INP31	vendor	connector-opencti
 INP31	vendor	oauth2-proxy
+INP32	vendor	OpenCTI worker
+INP32	vendor	connector-import-file-stix
 INP32	vendor	connector-misp
 INP32	vendor	connector-opencti
 INP32	vendor	oauth2-proxy
+INP33	vendor	OpenCTI worker
+INP33	vendor	connector-import-file-stix
 INP33	vendor	connector-misp
 INP33	vendor	connector-opencti
 INP33	vendor	oauth2-proxy
@@ -1038,6 +1142,8 @@ INP34	vendor	Redis (MISP)
 INP34	vendor	Redis (OpenCTI)
 INP34	vendor	SMTP relay (alert e-mail)
 INP34	vendor	Tavily search API
+INP35	vendor	OpenCTI worker
+INP35	vendor	connector-import-file-stix
 INP35	vendor	connector-misp
 INP35	vendor	connector-opencti
 INP35	vendor	oauth2-proxy
@@ -1071,6 +1177,8 @@ INP37	vendor	Redis (MISP)
 INP37	vendor	Redis (OpenCTI)
 INP37	vendor	SMTP relay (alert e-mail)
 INP37	vendor	Tavily search API
+INP41	vendor	OpenCTI worker
+INP41	vendor	connector-import-file-stix
 INP41	vendor	connector-misp
 INP41	vendor	connector-opencti
 INP41	vendor	oauth2-proxy
