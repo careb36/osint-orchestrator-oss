@@ -165,6 +165,14 @@ recordings' language follows the target's `language`, then
 `ORCHESTRATOR_LANGUAGE`. `--seed-dir` points the command at another
 directory of `run-*.json` files, for example a recording of your own.
 
+Run it with the API already up (`docker compose exec`, the documented path)
+or before starting the API, not while the API is starting: the startup
+recovery fails every run still PENDING or RUNNING in the database
+(`mark_interrupted_runs`), a replay included, since a process that has
+just started cannot know about a runner outside it. A replay failed that
+way is reported with exit code 1 (`status failed: interrupted …`); replay
+it again once the API is up.
+
 ## API
 
 Interactive reference: `/docs` (OpenAPI at `/openapi.json`). Public routes are
