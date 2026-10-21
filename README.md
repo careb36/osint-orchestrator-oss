@@ -174,6 +174,7 @@ API. Added since:
 | Test coverage of the scheduler, pipeline error paths, LLM providers, qualification, evidence chain, sink and normaliser edges; UI smoke-flow fix | [#94](https://github.com/careb36/osint-orchestrator-oss/pull/94), [#113](https://github.com/careb36/osint-orchestrator-oss/pull/113), [#114](https://github.com/careb36/osint-orchestrator-oss/pull/114), [#116](https://github.com/careb36/osint-orchestrator-oss/pull/116) |
 | Obsidian Sentinel redesign of the dashboard and landing: navigation rail, live health chip, responsive card layouts, accessibility fixes; README screenshots | [#119](https://github.com/careb36/osint-orchestrator-oss/pull/119), [#122](https://github.com/careb36/osint-orchestrator-oss/pull/122) |
 | OWASP pytm threat model with a triaged report and a findings ledger checked on every regeneration | [#120](https://github.com/careb36/osint-orchestrator-oss/pull/120) |
+| Showcase run: two recorded runs of a fictitious entity replayed through the real pipeline, so the console shows the product without API keys | [#124](https://github.com/careb36/osint-orchestrator-oss/pull/124) |
 | Documentation: Token Factory setup block, LLM routing explained, path-scoped agent rules, hackathon tables | [#85](https://github.com/careb36/osint-orchestrator-oss/pull/85), [#91](https://github.com/careb36/osint-orchestrator-oss/pull/91), [#115](https://github.com/careb36/osint-orchestrator-oss/pull/115), [#121](https://github.com/careb36/osint-orchestrator-oss/pull/121) |
 
 ## Responsible use
