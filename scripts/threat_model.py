@@ -79,7 +79,8 @@ tm.assumptions = [
     "ORCHESTRATOR_API_KEY is set. require_api_key is a no-op with an empty key (open mode, "
     "documented in ADR-005 and ADR-006); that mode is out of this model's scope.",
     "The shipped docker-compose.auth.yml terminates no TLS: oauth2-proxy listens on plain HTTP "
-    "on loopback with AUTH_PROXY_COOKIE_SECURE=false. A TLS terminator in front of it is a "
+    "on loopback and hardcodes OAUTH2_PROXY_COOKIE_SECURE=false. A TLS terminator in front of it "
+    "is a "
     "production hardening step, modelled as absent.",
     "Alert channels are modelled with their defaults: SMTP with STARTTLS "
     "(ALERT_SMTP_STARTTLS=true) and the webhook over the operator's URL with the optional "
@@ -197,6 +198,13 @@ amass_provider_keys = Data(
     credentialsLife=Lifetime.MANUAL,
     classification=Classification.SECRET,
 )
+webhook_url_token = Data(
+    name="Hosted webhook URL token",
+    description="Slack, Teams and Discord webhook URLs carry their secret in the path; the alert code keeps it out of logs.",
+    isCredentials=True,
+    credentialsLife=Lifetime.LONG,
+    classification=Classification.SECRET,
+)
 operator_session = Data(
     name="oauth2-proxy session cookie",
     description="OIDC session of the operator behind the optional proxy.",
@@ -256,6 +264,18 @@ webhook_receiver.description = (
     "with HMAC-SHA256 only when ALERT_WEBHOOK_SECRET is set."
 )
 
+socialosint_llm = LLM("SocialOSINT's LLM endpoint")
+socialosint_llm.inBoundary = internet
+socialosint_llm.isThirdParty = True
+socialosint_llm.processesPersonalData = True  # profiles, posts and images of named people
+socialosint_llm.description = (
+    "SOCIALOSINT_LLM_BASE_URL (OpenRouter, OpenAI or another OpenAI-compatible endpoint): "
+    "text and vision analysis whose reply is a free-text Markdown report."
+)
+socialosint_llm.controls = Controls(
+    isEncrypted=True, authenticatesSource=True, authenticationScheme="SOCIALOSINT_LLM_API_KEY"
+)
+
 social_platforms = ExternalEntity("Social platforms")
 social_platforms.inBoundary = internet
 social_platforms.description = "Twitter, Reddit, GitHub, Bluesky, Mastodon: SocialOSINT's sources."
@@ -269,6 +289,7 @@ tavily.controls = Controls(
 cloud_llm = LLM("Cloud LLM provider")
 cloud_llm.inBoundary = internet
 cloud_llm.isThirdParty = True
+cloud_llm.processesPersonalData = True  # observables in the prompt: e-mail, phone, person names
 cloud_llm.controls = Controls(
     isEncrypted=True, authenticatesSource=True, authenticationScheme="provider API key"
 )
@@ -292,7 +313,7 @@ proxy.description = (
 proxy.controls = Controls(
     implementsAuthenticationScheme=True,
     authenticationScheme="OIDC authorization code (Keycloak)",
-    encryptsCookies=False,  # AUTH_PROXY_COOKIE_SECURE=false in the shipped overlay
+    encryptsCookies=False,  # OAUTH2_PROXY_COOKIE_SECURE is hardcoded to "false" in the overlay
     usesStrongSessionIdentifiers=True,
     implementsCSRFToken=True,
     verifySessionIdentifiers=True,
@@ -410,9 +431,20 @@ socialosint.controls = Controls(
     isHardened=False, isEncrypted=False, authenticatesSource=False, hasAccessControl=False
 )
 
+ollama_api = Server("Ollama HTTP API")
+ollama_api.inBoundary = compose
+ollama_api.description = (
+    "ollama/ollama image: HTTP API without authentication on the compose network; "
+    "the model behind it is the LLM element."
+)
+ollama_api.controls = Controls(
+    isHardened=False, isEncrypted=False, authenticatesSource=False, hasAccessControl=False
+)
+
 ollama = LLM("Ollama (local models)")
 ollama.inBoundary = compose
 ollama.isThirdParty = False
+ollama.processesPersonalData = True  # same prompts, kept on the host
 ollama.controls = Controls(isEncrypted=False, authenticatesSource=False)
 
 misp = Server("MISP")
@@ -450,10 +482,11 @@ connector_misp.controls = Controls()  # vendor image; nothing asserted
 # ── Element classes (the triage is written per class, see TRIAGE) ───────────
 CLASSES: dict[str, list] = {
     "orchestrator": [orchestrator, scheduler],
-    "sidecar": [spiderfoot, amass, socialosint, ollama],
+    "sidecar": [spiderfoot, amass, socialosint, ollama, ollama_api],
     "vendor": [
         tavily,
         cloud_llm,
+        socialosint_llm,
         smtp_relay,
         webhook_receiver,
         proxy,
@@ -610,7 +643,7 @@ flow(
 )
 flow(
     socialosint,
-    cloud_llm,
+    socialosint_llm,
     "SocialOSINT text and vision prompts (own endpoint and key)",
     protocol="HTTPS",
     tlsVersion=TLSVersion.TLSv12,
@@ -656,7 +689,16 @@ flow(
 flow(
     orchestrator,
     public_web,
-    "Passive collection (OpenOSINT)",
+    "DNS and WHOIS pivots (OpenOSINT)",
+    protocol="DNS",
+    tlsVersion=TLSVersion.NONE,
+    data=[evidence],
+    controls=Controls(isEncrypted=False, authenticatesDestination=False),
+)
+flow(
+    orchestrator,
+    public_web,
+    "HTTPS source lookups (OpenOSINT)",
     protocol="HTTPS",
     tlsVersion=TLSVersion.TLSv12,
     data=[evidence],
@@ -666,12 +708,20 @@ flow(
 # Models
 flow(
     orchestrator,
-    ollama,
-    "Qualification & synthesis prompts (local)",
+    ollama_api,
+    "Qualification & synthesis prompts (local HTTP API)",
     protocol="HTTP",
     tlsVersion=TLSVersion.NONE,
     data=[prompts],
     controls=Controls(isEncrypted=False, authenticatesDestination=False),
+)
+flow(
+    ollama_api,
+    ollama,
+    "Local model inference",
+    protocol="inproc",
+    data=[prompts],
+    controls=Controls(authenticatesSource=True),
 )
 flow(
     orchestrator,
@@ -783,7 +833,7 @@ flow(
     "Alert webhook (ALERT_WEBHOOK_URL)",
     protocol="HTTPS",
     tlsVersion=TLSVersion.TLSv12,
-    data=[alert_payload],
+    data=[webhook_url_token, alert_payload],
     # Signature only with ALERT_WEBHOOK_SECRET; the default is unsigned.
     controls=Controls(isEncrypted=True, authenticatesDestination=True, providesIntegrity=False),
 )
@@ -1048,10 +1098,10 @@ TRIAGE: dict[str, dict[str, Response]] = {
         "vendor": _VENDOR_SESSIONS,
         "flow": (
             "accepted",
-            "The shipped OIDC overlay runs oauth2-proxy on plain HTTP on loopback with "
-            "AUTH_PROXY_COOKIE_SECURE=false: the session cookie is exposed to anything on the "
-            "host, which ADR-005 trusts. Production: a TLS terminator in front of the proxy and "
-            "AUTH_PROXY_COOKIE_SECURE=true.",
+            "The shipped OIDC overlay runs oauth2-proxy on plain HTTP on loopback and hardcodes "
+            "OAUTH2_PROXY_COOKIE_SECURE=false (no variable reads it): the session cookie is exposed "
+            "to anything on the host, which ADR-005 trusts. Production: a TLS terminator in front "
+            "of the proxy and a Compose override that sets OAUTH2_PROXY_COOKIE_SECURE to true.",
         ),
     },
     "CR03": {  # Dictionary-based Password Attack
@@ -1110,6 +1160,29 @@ TRIAGE: dict[str, dict[str, Response]] = {
     "INP34": {"*": _XML},  # SOAP Array Overflow
     "INP37": {"sidecar": _SMUGGLING_SIDECAR, "vendor": _SMUGGLING_VENDOR},  # Request Smuggling
     "LLM01": {"*": _LLM},  # Direct Prompt Injection
+    "LLM03": {  # Sensitive Data Leakage to Third-Party Provider
+        "vendor": (
+            "accepted",
+            "The prompts carry personal data of the target's public footprint with no redaction: "
+            "the orchestrator sends the observables it collected (domains, URLs, e-mail "
+            "addresses, phone numbers, person names) and SocialOSINT sends profiles, posts and "
+            "images to its own endpoint. Both go only to the provider the operator configured, "
+            "over TLS; `llm: local` keeps the orchestrator's prompts on the host. Hardening: a "
+            "provider under a data-processing agreement with retention and training opted out, "
+            "or local models for sensitive workloads.",
+        ),
+    },
+    "LLM08": {  # Sensitive Information Disclosure Through Output
+        "*": (
+            "accepted",
+            "A reply is consumed as data, never executed: the orchestrator's synthesis is "
+            "JSON-schema validated and SocialOSINT's report is attached as an unverified note, "
+            "and both are stored and rendered escaped under the console's CSP. What a reply can "
+            "echo is the public footprint the prompt carried, which the evidence already holds; "
+            "nothing filters personal-data patterns out of a summary before it is stored. "
+            "Hardening: output redaction or DLP before a finding or note is persisted.",
+        ),
+    },
     "LLM07": {  # Jailbreaking and Safety Bypass
         "*": (
             "accepted",
@@ -1337,7 +1410,17 @@ TRIAGE: dict[str, dict[str, Response]] = {
 }
 
 # (element, threat) pairs whose answer differs from their class.
+_SOCIALOSINT_LLM = (
+    "accepted",
+    "SocialOSINT sends its own prompts (profiles, posts, images) to this endpoint and gets a "
+    "free-text Markdown report back. The orchestrator attaches that report as a note labelled "
+    "unverified (collectors/socialosint.py), never as observables, with no schema validation; "
+    "the console renders it escaped and nothing acts on it. Residual risk: a manipulated "
+    "report misleads the analyst who reads the note.",
+)
 OVERRIDES: dict[tuple[str, str], Response] = {
+    ("SocialOSINT's LLM endpoint", "LLM01"): _SOCIALOSINT_LLM,
+    ("SocialOSINT's LLM endpoint", "LLM07"): _SOCIALOSINT_LLM,
     ("SQLite run store", "DE04"): (
         "accepted",
         "Run rows are outside the manifest chain: /targets/{id}/chain/verify checks the "

@@ -1,6 +1,7 @@
 AA01	orchestrator	APScheduler cron jobs
 AA01	orchestrator	Orchestrator API (FastAPI + APScheduler)
 AA01	sidecar	Amass v5 engine
+AA01	sidecar	Ollama HTTP API
 AA01	sidecar	SocialOSINT sidecar
 AA01	sidecar	SpiderFoot
 AA01	vendor	Keycloak
@@ -10,6 +11,7 @@ AA01	vendor	oauth2-proxy
 AA02	orchestrator	APScheduler cron jobs
 AA02	orchestrator	Orchestrator API (FastAPI + APScheduler)
 AA02	sidecar	Amass v5 engine
+AA02	sidecar	Ollama HTTP API
 AA02	sidecar	SocialOSINT sidecar
 AA02	sidecar	SpiderFoot
 AA02	vendor	Keycloak
@@ -17,6 +19,7 @@ AA02	vendor	OpenCTI platform
 AA02	vendor	connector-misp
 AA02	vendor	oauth2-proxy
 AA03	sidecar	Amass v5 engine
+AA03	sidecar	Ollama HTTP API
 AA03	sidecar	SocialOSINT sidecar
 AA03	sidecar	SpiderFoot
 AA03	vendor	Keycloak
@@ -25,6 +28,7 @@ AA03	vendor	OpenCTI platform
 AA03	vendor	SMTP relay (alert e-mail)
 AA03	vendor	Tavily search API
 AA04	sidecar	Amass v5 engine
+AA04	sidecar	Ollama HTTP API
 AA04	sidecar	SocialOSINT sidecar
 AA04	sidecar	SpiderFoot
 AA04	vendor	Keycloak
@@ -33,6 +37,7 @@ AA04	vendor	OpenCTI platform
 AA04	vendor	SMTP relay (alert e-mail)
 AA04	vendor	Tavily search API
 AC01	sidecar	Amass v5 engine
+AC01	sidecar	Ollama HTTP API
 AC01	sidecar	SocialOSINT sidecar
 AC01	sidecar	SpiderFoot
 AC01	store	Amass asset database (shared volume)
@@ -52,6 +57,7 @@ AC02	vendor	OpenCTI backing stores
 AC05	flow	Alert e-mail (SMTP, STARTTLS by default)
 AC05	flow	Alert webhook (ALERT_WEBHOOK_URL)
 AC05	flow	Cron dispatch (in-process)
+AC05	flow	DNS and WHOIS pivots (OpenOSINT)
 AC05	flow	DNS resolution and active probes (zone transfers, certificate grabs when enabled)
 AC05	flow	DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois)
 AC05	flow	Direct loopback API/console (no overlay)
@@ -60,17 +66,18 @@ AC05	flow	Elasticsearch indices
 AC05	flow	Engine writes asset.db
 AC05	flow	Enumeration submit (oam_enum)
 AC05	flow	GET /health, /metrics
+AC05	flow	HTTPS source lookups (OpenOSINT)
+AC05	flow	Local model inference
 AC05	flow	MinIO objects
 AC05	flow	Operator login (Keycloak authorization endpoint, shipped overlay)
 AC05	flow	Operator session (OIDC, shipped overlay)
 AC05	flow	POST /bundles (STIX intake)
-AC05	flow	Passive collection (OpenOSINT)
 AC05	flow	Passive data-source queries (datasources.yaml keys)
 AC05	flow	Platform collection (operator's API tokens)
 AC05	flow	Platform collection jobs
 AC05	flow	Proxied console/API calls
 AC05	flow	Qualification & synthesis prompts (cloud)
-AC05	flow	Qualification & synthesis prompts (local)
+AC05	flow	Qualification & synthesis prompts (local HTTP API)
 AC05	flow	RabbitMQ queues
 AC05	flow	Read discovered names (oam_subs, shared volume)
 AC05	flow	Read target inventory
@@ -85,6 +92,7 @@ AC05	flow	Token redeem / userinfo
 AC05	flow	connector-misp polls MISP events
 AC05	flow	connector-misp writes to OpenCTI
 AC06	sidecar	Amass v5 engine
+AC06	sidecar	Ollama HTTP API
 AC06	sidecar	SocialOSINT sidecar
 AC06	sidecar	SpiderFoot
 AC06	vendor	Keycloak
@@ -93,6 +101,7 @@ AC06	vendor	OpenCTI platform
 AC06	vendor	SMTP relay (alert e-mail)
 AC06	vendor	Tavily search API
 AC07	sidecar	Amass v5 engine
+AC07	sidecar	Ollama HTTP API
 AC07	sidecar	SocialOSINT sidecar
 AC07	sidecar	SpiderFoot
 AC07	vendor	Keycloak
@@ -100,6 +109,7 @@ AC07	vendor	MISP
 AC07	vendor	SMTP relay (alert e-mail)
 AC07	vendor	Tavily search API
 AC08	sidecar	Amass v5 engine
+AC08	sidecar	Ollama HTTP API
 AC08	sidecar	SocialOSINT sidecar
 AC08	sidecar	SpiderFoot
 AC08	vendor	Keycloak
@@ -107,6 +117,7 @@ AC08	vendor	MISP
 AC08	vendor	SMTP relay (alert e-mail)
 AC08	vendor	Tavily search API
 AC09	sidecar	Amass v5 engine
+AC09	sidecar	Ollama HTTP API
 AC09	sidecar	SocialOSINT sidecar
 AC09	sidecar	SpiderFoot
 AC09	vendor	Keycloak
@@ -115,6 +126,7 @@ AC09	vendor	OpenCTI platform
 AC09	vendor	SMTP relay (alert e-mail)
 AC09	vendor	Tavily search API
 AC11	sidecar	Amass v5 engine
+AC11	sidecar	Ollama HTTP API
 AC11	sidecar	SocialOSINT sidecar
 AC11	sidecar	SpiderFoot
 AC11	vendor	Keycloak
@@ -138,6 +150,7 @@ AC15	orchestrator	Orchestrator API (FastAPI + APScheduler)
 AC15	vendor	connector-misp
 AC15	vendor	oauth2-proxy
 AC16	sidecar	Amass v5 engine
+AC16	sidecar	Ollama HTTP API
 AC16	sidecar	SocialOSINT sidecar
 AC16	sidecar	SpiderFoot
 AC16	vendor	Keycloak
@@ -146,6 +159,7 @@ AC16	vendor	OpenCTI platform
 AC16	vendor	SMTP relay (alert e-mail)
 AC16	vendor	Tavily search API
 AC17	sidecar	Amass v5 engine
+AC17	sidecar	Ollama HTTP API
 AC17	sidecar	SocialOSINT sidecar
 AC17	sidecar	SpiderFoot
 AC17	vendor	Keycloak
@@ -163,6 +177,7 @@ AC21	orchestrator	APScheduler cron jobs
 AC21	orchestrator	Orchestrator API (FastAPI + APScheduler)
 AC21	vendor	connector-misp
 AC23	flow	Alert e-mail (SMTP, STARTTLS by default)
+AC23	flow	Alert webhook (ALERT_WEBHOOK_URL)
 AC23	flow	Direct loopback API/console (no overlay)
 AC23	flow	Due-diligence queries
 AC23	flow	MinIO objects
@@ -187,6 +202,7 @@ CR01	vendor	OpenCTI platform
 CR02	flow	Operator session (OIDC, shipped overlay)
 CR02	flow	Proxied console/API calls
 CR03	sidecar	Amass v5 engine
+CR03	sidecar	Ollama HTTP API
 CR03	sidecar	SocialOSINT sidecar
 CR03	sidecar	SpiderFoot
 CR03	vendor	MISP
@@ -196,6 +212,7 @@ CR03	vendor	connector-misp
 CR04	vendor	Keycloak
 CR04	vendor	OpenCTI platform
 CR05	sidecar	Amass v5 engine
+CR05	sidecar	Ollama HTTP API
 CR05	sidecar	SocialOSINT sidecar
 CR05	sidecar	SpiderFoot
 CR05	store	Amass asset database (shared volume)
@@ -211,6 +228,7 @@ CR05	vendor	Tavily search API
 CR06	flow	Alert e-mail (SMTP, STARTTLS by default)
 CR06	flow	Alert webhook (ALERT_WEBHOOK_URL)
 CR06	flow	Cron dispatch (in-process)
+CR06	flow	DNS and WHOIS pivots (OpenOSINT)
 CR06	flow	DNS resolution and active probes (zone transfers, certificate grabs when enabled)
 CR06	flow	DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois)
 CR06	flow	Direct loopback API/console (no overlay)
@@ -219,17 +237,18 @@ CR06	flow	Elasticsearch indices
 CR06	flow	Engine writes asset.db
 CR06	flow	Enumeration submit (oam_enum)
 CR06	flow	GET /health, /metrics
+CR06	flow	HTTPS source lookups (OpenOSINT)
+CR06	flow	Local model inference
 CR06	flow	MinIO objects
 CR06	flow	Operator login (Keycloak authorization endpoint, shipped overlay)
 CR06	flow	Operator session (OIDC, shipped overlay)
 CR06	flow	POST /bundles (STIX intake)
-CR06	flow	Passive collection (OpenOSINT)
 CR06	flow	Passive data-source queries (datasources.yaml keys)
 CR06	flow	Platform collection (operator's API tokens)
 CR06	flow	Platform collection jobs
 CR06	flow	Proxied console/API calls
 CR06	flow	Qualification & synthesis prompts (cloud)
-CR06	flow	Qualification & synthesis prompts (local)
+CR06	flow	Qualification & synthesis prompts (local HTTP API)
 CR06	flow	RabbitMQ queues
 CR06	flow	Read discovered names (oam_subs, shared volume)
 CR06	flow	Read target inventory
@@ -244,6 +263,7 @@ CR06	flow	Token redeem / userinfo
 CR06	flow	connector-misp polls MISP events
 CR06	flow	connector-misp writes to OpenCTI
 CR08	flow	Cron dispatch (in-process)
+CR08	flow	DNS and WHOIS pivots (OpenOSINT)
 CR08	flow	DNS resolution and active probes (zone transfers, certificate grabs when enabled)
 CR08	flow	DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois)
 CR08	flow	Direct loopback API/console (no overlay)
@@ -251,13 +271,14 @@ CR08	flow	Elasticsearch indices
 CR08	flow	Engine writes asset.db
 CR08	flow	Enumeration submit (oam_enum)
 CR08	flow	GET /health, /metrics
+CR08	flow	Local model inference
 CR08	flow	MinIO objects
 CR08	flow	Operator login (Keycloak authorization endpoint, shipped overlay)
 CR08	flow	Operator session (OIDC, shipped overlay)
 CR08	flow	POST /bundles (STIX intake)
 CR08	flow	Platform collection jobs
 CR08	flow	Proxied console/API calls
-CR08	flow	Qualification & synthesis prompts (local)
+CR08	flow	Qualification & synthesis prompts (local HTTP API)
 CR08	flow	RabbitMQ queues
 CR08	flow	Read discovered names (oam_subs, shared volume)
 CR08	flow	Read target inventory
@@ -271,6 +292,7 @@ CR08	flow	connector-misp writes to OpenCTI
 DE01	flow	Alert e-mail (SMTP, STARTTLS by default)
 DE01	flow	Alert webhook (ALERT_WEBHOOK_URL)
 DE01	flow	Cron dispatch (in-process)
+DE01	flow	DNS and WHOIS pivots (OpenOSINT)
 DE01	flow	DNS resolution and active probes (zone transfers, certificate grabs when enabled)
 DE01	flow	DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois)
 DE01	flow	Direct loopback API/console (no overlay)
@@ -279,17 +301,18 @@ DE01	flow	Elasticsearch indices
 DE01	flow	Engine writes asset.db
 DE01	flow	Enumeration submit (oam_enum)
 DE01	flow	GET /health, /metrics
+DE01	flow	HTTPS source lookups (OpenOSINT)
+DE01	flow	Local model inference
 DE01	flow	MinIO objects
 DE01	flow	Operator login (Keycloak authorization endpoint, shipped overlay)
 DE01	flow	Operator session (OIDC, shipped overlay)
 DE01	flow	POST /bundles (STIX intake)
-DE01	flow	Passive collection (OpenOSINT)
 DE01	flow	Passive data-source queries (datasources.yaml keys)
 DE01	flow	Platform collection (operator's API tokens)
 DE01	flow	Platform collection jobs
 DE01	flow	Proxied console/API calls
 DE01	flow	Qualification & synthesis prompts (cloud)
-DE01	flow	Qualification & synthesis prompts (local)
+DE01	flow	Qualification & synthesis prompts (local HTTP API)
 DE01	flow	RabbitMQ queues
 DE01	flow	Read discovered names (oam_subs, shared volume)
 DE01	flow	Read target inventory
@@ -304,6 +327,7 @@ DE01	flow	Token redeem / userinfo
 DE01	flow	connector-misp polls MISP events
 DE01	flow	connector-misp writes to OpenCTI
 DE02	sidecar	Amass v5 engine
+DE02	sidecar	Ollama HTTP API
 DE02	sidecar	SocialOSINT sidecar
 DE02	sidecar	SpiderFoot
 DE02	vendor	Keycloak
@@ -316,6 +340,7 @@ DE02	vendor	oauth2-proxy
 DE03	flow	Alert e-mail (SMTP, STARTTLS by default)
 DE03	flow	Alert webhook (ALERT_WEBHOOK_URL)
 DE03	flow	Cron dispatch (in-process)
+DE03	flow	DNS and WHOIS pivots (OpenOSINT)
 DE03	flow	DNS resolution and active probes (zone transfers, certificate grabs when enabled)
 DE03	flow	DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois)
 DE03	flow	Direct loopback API/console (no overlay)
@@ -324,17 +349,18 @@ DE03	flow	Elasticsearch indices
 DE03	flow	Engine writes asset.db
 DE03	flow	Enumeration submit (oam_enum)
 DE03	flow	GET /health, /metrics
+DE03	flow	HTTPS source lookups (OpenOSINT)
+DE03	flow	Local model inference
 DE03	flow	MinIO objects
 DE03	flow	Operator login (Keycloak authorization endpoint, shipped overlay)
 DE03	flow	Operator session (OIDC, shipped overlay)
 DE03	flow	POST /bundles (STIX intake)
-DE03	flow	Passive collection (OpenOSINT)
 DE03	flow	Passive data-source queries (datasources.yaml keys)
 DE03	flow	Platform collection (operator's API tokens)
 DE03	flow	Platform collection jobs
 DE03	flow	Proxied console/API calls
 DE03	flow	Qualification & synthesis prompts (cloud)
-DE03	flow	Qualification & synthesis prompts (local)
+DE03	flow	Qualification & synthesis prompts (local HTTP API)
 DE03	flow	RabbitMQ queues
 DE03	flow	Read discovered names (oam_subs, shared volume)
 DE03	flow	Read target inventory
@@ -356,6 +382,7 @@ DE04	vendor	OpenCTI backing stores
 DO01	orchestrator	APScheduler cron jobs
 DO01	orchestrator	Orchestrator API (FastAPI + APScheduler)
 DO01	sidecar	Amass v5 engine
+DO01	sidecar	Ollama HTTP API
 DO01	sidecar	SocialOSINT sidecar
 DO01	sidecar	SpiderFoot
 DO01	vendor	Keycloak
@@ -368,6 +395,7 @@ DO01	vendor	oauth2-proxy
 DO02	orchestrator	APScheduler cron jobs
 DO02	orchestrator	Orchestrator API (FastAPI + APScheduler)
 DO02	sidecar	Amass v5 engine
+DO02	sidecar	Ollama HTTP API
 DO02	sidecar	SocialOSINT sidecar
 DO02	sidecar	SpiderFoot
 DO02	store	Amass asset database (shared volume)
@@ -382,18 +410,20 @@ DO02	vendor	SMTP relay (alert e-mail)
 DO02	vendor	Tavily search API
 DO02	vendor	connector-misp
 DO02	vendor	oauth2-proxy
+DR01	flow	DNS and WHOIS pivots (OpenOSINT)
 DR01	flow	DNS resolution and active probes (zone transfers, certificate grabs when enabled)
 DR01	flow	DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois)
 DR01	flow	Direct loopback API/console (no overlay)
 DR01	flow	Elasticsearch indices
 DR01	flow	Engine writes asset.db
+DR01	flow	Local model inference
 DR01	flow	MinIO objects
 DR01	flow	Operator login (Keycloak authorization endpoint, shipped overlay)
 DR01	flow	Operator session (OIDC, shipped overlay)
 DR01	flow	POST /bundles (STIX intake)
 DR01	flow	Platform collection jobs
 DR01	flow	Proxied console/API calls
-DR01	flow	Qualification & synthesis prompts (local)
+DR01	flow	Qualification & synthesis prompts (local HTTP API)
 DR01	flow	RabbitMQ queues
 DR01	flow	Read discovered names (oam_subs, shared volume)
 DR01	flow	Redis cache (no authentication)
@@ -404,6 +434,7 @@ DR01	flow	Seal run artefacts + manifest
 DR01	flow	Token redeem / userinfo
 DR01	flow	connector-misp writes to OpenCTI
 DS01	sidecar	Amass v5 engine
+DS01	sidecar	Ollama HTTP API
 DS01	sidecar	SocialOSINT sidecar
 DS01	sidecar	SpiderFoot
 DS01	vendor	Keycloak
@@ -412,6 +443,7 @@ DS01	vendor	OpenCTI platform
 DS01	vendor	SMTP relay (alert e-mail)
 DS01	vendor	Tavily search API
 DS03	sidecar	Amass v5 engine
+DS03	sidecar	Ollama HTTP API
 DS03	sidecar	SocialOSINT sidecar
 DS03	sidecar	SpiderFoot
 DS03	vendor	Keycloak
@@ -420,6 +452,7 @@ DS03	vendor	OpenCTI platform
 DS03	vendor	SMTP relay (alert e-mail)
 DS03	vendor	Tavily search API
 DS04	sidecar	Amass v5 engine
+DS04	sidecar	Ollama HTTP API
 DS04	sidecar	SocialOSINT sidecar
 DS04	sidecar	SpiderFoot
 DS04	vendor	Keycloak
@@ -429,23 +462,25 @@ DS04	vendor	SMTP relay (alert e-mail)
 DS04	vendor	Tavily search API
 DS06	flow	Alert e-mail (SMTP, STARTTLS by default)
 DS06	flow	Alert webhook (ALERT_WEBHOOK_URL)
+DS06	flow	DNS and WHOIS pivots (OpenOSINT)
 DS06	flow	DNS resolution and active probes (zone transfers, certificate grabs when enabled)
 DS06	flow	DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois)
 DS06	flow	Direct loopback API/console (no overlay)
 DS06	flow	Due-diligence queries
 DS06	flow	Elasticsearch indices
 DS06	flow	Engine writes asset.db
+DS06	flow	HTTPS source lookups (OpenOSINT)
+DS06	flow	Local model inference
 DS06	flow	MinIO objects
 DS06	flow	Operator login (Keycloak authorization endpoint, shipped overlay)
 DS06	flow	Operator session (OIDC, shipped overlay)
 DS06	flow	POST /bundles (STIX intake)
-DS06	flow	Passive collection (OpenOSINT)
 DS06	flow	Passive data-source queries (datasources.yaml keys)
 DS06	flow	Platform collection (operator's API tokens)
 DS06	flow	Platform collection jobs
 DS06	flow	Proxied console/API calls
 DS06	flow	Qualification & synthesis prompts (cloud)
-DS06	flow	Qualification & synthesis prompts (local)
+DS06	flow	Qualification & synthesis prompts (local HTTP API)
 DS06	flow	RabbitMQ queues
 DS06	flow	Read discovered names (oam_subs, shared volume)
 DS06	flow	Redis cache (no authentication)
@@ -459,6 +494,7 @@ DS06	flow	Token redeem / userinfo
 DS06	flow	connector-misp polls MISP events
 DS06	flow	connector-misp writes to OpenCTI
 HA01	sidecar	Amass v5 engine
+HA01	sidecar	Ollama HTTP API
 HA01	sidecar	SocialOSINT sidecar
 HA01	sidecar	SpiderFoot
 HA01	vendor	Keycloak
@@ -467,6 +503,7 @@ HA01	vendor	OpenCTI platform
 HA01	vendor	SMTP relay (alert e-mail)
 HA01	vendor	Tavily search API
 HA03	sidecar	Amass v5 engine
+HA03	sidecar	Ollama HTTP API
 HA03	sidecar	SocialOSINT sidecar
 HA03	sidecar	SpiderFoot
 HA03	vendor	Keycloak
@@ -479,6 +516,7 @@ INP02	orchestrator	Orchestrator API (FastAPI + APScheduler)
 INP02	vendor	connector-misp
 INP02	vendor	oauth2-proxy
 INP03	sidecar	Amass v5 engine
+INP03	sidecar	Ollama HTTP API
 INP03	sidecar	SocialOSINT sidecar
 INP03	sidecar	SpiderFoot
 INP03	vendor	Keycloak
@@ -487,6 +525,7 @@ INP03	vendor	OpenCTI platform
 INP03	vendor	SMTP relay (alert e-mail)
 INP03	vendor	Tavily search API
 INP05	sidecar	Amass v5 engine
+INP05	sidecar	Ollama HTTP API
 INP05	sidecar	SocialOSINT sidecar
 INP05	sidecar	SpiderFoot
 INP05	vendor	Keycloak
@@ -497,6 +536,7 @@ INP05	vendor	Tavily search API
 INP07	vendor	connector-misp
 INP07	vendor	oauth2-proxy
 INP08	sidecar	Amass v5 engine
+INP08	sidecar	Ollama HTTP API
 INP08	sidecar	SocialOSINT sidecar
 INP08	sidecar	SpiderFoot
 INP08	vendor	Keycloak
@@ -507,6 +547,7 @@ INP08	vendor	Tavily search API
 INP08	vendor	connector-misp
 INP08	vendor	oauth2-proxy
 INP09	sidecar	Amass v5 engine
+INP09	sidecar	Ollama HTTP API
 INP09	sidecar	SocialOSINT sidecar
 INP09	sidecar	SpiderFoot
 INP09	vendor	Keycloak
@@ -515,6 +556,7 @@ INP09	vendor	OpenCTI platform
 INP09	vendor	SMTP relay (alert e-mail)
 INP09	vendor	Tavily search API
 INP10	sidecar	Amass v5 engine
+INP10	sidecar	Ollama HTTP API
 INP10	sidecar	SocialOSINT sidecar
 INP10	sidecar	SpiderFoot
 INP10	vendor	Keycloak
@@ -523,6 +565,7 @@ INP10	vendor	OpenCTI platform
 INP10	vendor	SMTP relay (alert e-mail)
 INP10	vendor	Tavily search API
 INP11	sidecar	Amass v5 engine
+INP11	sidecar	Ollama HTTP API
 INP11	sidecar	SocialOSINT sidecar
 INP11	sidecar	SpiderFoot
 INP11	vendor	Keycloak
@@ -535,6 +578,7 @@ INP12	vendor	oauth2-proxy
 INP13	vendor	connector-misp
 INP13	vendor	oauth2-proxy
 INP14	sidecar	Amass v5 engine
+INP14	sidecar	Ollama HTTP API
 INP14	sidecar	SocialOSINT sidecar
 INP14	sidecar	SpiderFoot
 INP14	vendor	Keycloak
@@ -545,6 +589,7 @@ INP14	vendor	Tavily search API
 INP14	vendor	connector-misp
 INP14	vendor	oauth2-proxy
 INP16	sidecar	Amass v5 engine
+INP16	sidecar	Ollama HTTP API
 INP16	sidecar	SocialOSINT sidecar
 INP16	sidecar	SpiderFoot
 INP16	vendor	Keycloak
@@ -553,6 +598,7 @@ INP16	vendor	OpenCTI platform
 INP16	vendor	SMTP relay (alert e-mail)
 INP16	vendor	Tavily search API
 INP17	sidecar	Amass v5 engine
+INP17	sidecar	Ollama HTTP API
 INP17	sidecar	SocialOSINT sidecar
 INP17	sidecar	SpiderFoot
 INP17	vendor	Keycloak
@@ -561,6 +607,7 @@ INP17	vendor	OpenCTI platform
 INP17	vendor	SMTP relay (alert e-mail)
 INP17	vendor	Tavily search API
 INP18	sidecar	Amass v5 engine
+INP18	sidecar	Ollama HTTP API
 INP18	sidecar	SocialOSINT sidecar
 INP18	sidecar	SpiderFoot
 INP18	vendor	Keycloak
@@ -569,6 +616,7 @@ INP18	vendor	OpenCTI platform
 INP18	vendor	SMTP relay (alert e-mail)
 INP18	vendor	Tavily search API
 INP19	sidecar	Amass v5 engine
+INP19	sidecar	Ollama HTTP API
 INP19	sidecar	SocialOSINT sidecar
 INP19	sidecar	SpiderFoot
 INP19	vendor	Keycloak
@@ -579,6 +627,7 @@ INP19	vendor	Tavily search API
 INP20	vendor	connector-misp
 INP20	vendor	oauth2-proxy
 INP21	sidecar	Amass v5 engine
+INP21	sidecar	Ollama HTTP API
 INP21	sidecar	SocialOSINT sidecar
 INP21	sidecar	SpiderFoot
 INP21	vendor	Keycloak
@@ -587,6 +636,7 @@ INP21	vendor	OpenCTI platform
 INP21	vendor	SMTP relay (alert e-mail)
 INP21	vendor	Tavily search API
 INP22	sidecar	Amass v5 engine
+INP22	sidecar	Ollama HTTP API
 INP22	sidecar	SocialOSINT sidecar
 INP22	sidecar	SpiderFoot
 INP22	vendor	Keycloak
@@ -607,6 +657,7 @@ INP26	vendor	oauth2-proxy
 INP27	vendor	connector-misp
 INP27	vendor	oauth2-proxy
 INP28	sidecar	Amass v5 engine
+INP28	sidecar	Ollama HTTP API
 INP28	sidecar	SocialOSINT sidecar
 INP28	sidecar	SpiderFoot
 INP28	vendor	Keycloak
@@ -617,6 +668,7 @@ INP28	vendor	Tavily search API
 INP28	vendor	connector-misp
 INP28	vendor	oauth2-proxy
 INP29	sidecar	Amass v5 engine
+INP29	sidecar	Ollama HTTP API
 INP29	sidecar	SocialOSINT sidecar
 INP29	sidecar	SpiderFoot
 INP29	vendor	Keycloak
@@ -635,6 +687,7 @@ INP32	vendor	oauth2-proxy
 INP33	vendor	connector-misp
 INP33	vendor	oauth2-proxy
 INP34	sidecar	Amass v5 engine
+INP34	sidecar	Ollama HTTP API
 INP34	sidecar	SocialOSINT sidecar
 INP34	sidecar	SpiderFoot
 INP34	vendor	Keycloak
@@ -645,6 +698,7 @@ INP34	vendor	Tavily search API
 INP35	vendor	connector-misp
 INP35	vendor	oauth2-proxy
 INP36	sidecar	Amass v5 engine
+INP36	sidecar	Ollama HTTP API
 INP36	sidecar	SocialOSINT sidecar
 INP36	sidecar	SpiderFoot
 INP36	vendor	Keycloak
@@ -653,6 +707,7 @@ INP36	vendor	OpenCTI platform
 INP36	vendor	SMTP relay (alert e-mail)
 INP36	vendor	Tavily search API
 INP37	sidecar	Amass v5 engine
+INP37	sidecar	Ollama HTTP API
 INP37	sidecar	SocialOSINT sidecar
 INP37	sidecar	SpiderFoot
 INP37	vendor	Keycloak
@@ -664,9 +719,17 @@ INP41	vendor	connector-misp
 INP41	vendor	oauth2-proxy
 LLM01	sidecar	Ollama (local models)
 LLM01	vendor	Cloud LLM provider
+LLM01	vendor	SocialOSINT's LLM endpoint
+LLM03	vendor	Cloud LLM provider
+LLM03	vendor	SocialOSINT's LLM endpoint
 LLM07	sidecar	Ollama (local models)
 LLM07	vendor	Cloud LLM provider
+LLM07	vendor	SocialOSINT's LLM endpoint
+LLM08	sidecar	Ollama (local models)
+LLM08	vendor	Cloud LLM provider
+LLM08	vendor	SocialOSINT's LLM endpoint
 SC02	sidecar	Amass v5 engine
+SC02	sidecar	Ollama HTTP API
 SC02	sidecar	SocialOSINT sidecar
 SC02	sidecar	SpiderFoot
 SC02	vendor	Keycloak
@@ -675,6 +738,7 @@ SC02	vendor	OpenCTI platform
 SC02	vendor	SMTP relay (alert e-mail)
 SC02	vendor	Tavily search API
 SC03	sidecar	Amass v5 engine
+SC03	sidecar	Ollama HTTP API
 SC03	sidecar	SocialOSINT sidecar
 SC03	sidecar	SpiderFoot
 SC03	vendor	Keycloak
@@ -683,6 +747,7 @@ SC03	vendor	OpenCTI platform
 SC03	vendor	SMTP relay (alert e-mail)
 SC03	vendor	Tavily search API
 SC04	sidecar	Amass v5 engine
+SC04	sidecar	Ollama HTTP API
 SC04	sidecar	SocialOSINT sidecar
 SC04	sidecar	SpiderFoot
 SC04	vendor	Keycloak
@@ -691,6 +756,7 @@ SC04	vendor	OpenCTI platform
 SC04	vendor	SMTP relay (alert e-mail)
 SC04	vendor	Tavily search API
 SC05	sidecar	Amass v5 engine
+SC05	sidecar	Ollama HTTP API
 SC05	sidecar	SocialOSINT sidecar
 SC05	sidecar	SpiderFoot
 SC05	vendor	Keycloak
