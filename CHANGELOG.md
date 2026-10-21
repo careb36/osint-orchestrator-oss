@@ -146,6 +146,10 @@ from [SECURITY.md](SECURITY.md).
 
 ### Changed
 
+- README (both languages) shows the four `.env` lines and the per-target
+  `llm: nebius` that run every target on Token Factory with the two Nemotron
+  routes; `.env.example` names the Nemotron models next to `LLM_MODEL_FAST`
+  and `LLM_MODEL_REASONING`.
 - `targets.yaml` is validated strictly: an unknown key anywhere in a target
   (`enabeld:`, `schedual:`, `modlues:`) makes that target invalid and reported
   instead of silently taking the default, a `misfire_grace_time_seconds` below
