@@ -701,7 +701,7 @@ async def test_pipeline_finding_in_db_and_report(
 
     fixed_finding_holder: list[Finding] = []
 
-    async def _fake_synthesize(target, run_id, report_data):
+    async def _fake_synthesize(target, run_id, report_data, *, client=None):
         f = Finding(
             target_id=target.id,
             run_id=run_id,

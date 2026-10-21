@@ -294,7 +294,7 @@ async def test_run_stays_running_until_sealed_so_no_second_run_is_admitted(
     monkeypatch.setattr(run_control_module, "get_session", harness.session)
     seen: dict[str, object] = {}
 
-    async def _synthesize(target, run_id, report_data):
+    async def _synthesize(target, run_id, report_data, *, client=None):
         async with harness.session() as session:
             seen["status"] = (await session.get(Run, run_id)).status
         seen["admitted"] = await run_control_module.create_pending_run(target.id)
