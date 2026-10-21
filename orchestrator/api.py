@@ -468,6 +468,7 @@ async def root(request: Request) -> HTMLResponse:
             "landing_docs": t("landing_docs", language=language),
             "landing_health": t("landing_health", language=language),
             "landing_console": t("landing_console", language=language),
+            "landing_status": t("landing_status", language=language),
         },
     )
 
