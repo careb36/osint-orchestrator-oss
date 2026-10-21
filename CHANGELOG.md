@@ -11,6 +11,10 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- README (both languages): the quickstart has three tiers, from no keys to the
+  full stack: the showcase run, a real Tavily → Nemotron run with
+  `NEBIUS_API_KEY` and `TAVILY_API_KEY` on the `showcase-example` block
+  (no SpiderFoot scan, no OpenCTI), and the OpenCTI profile.
 - Showcase run: `python -m orchestrator.showcase` replays the two recorded runs
   in `orchestrator/showcase_data/` (a fictitious entity, reserved names only)
   through the real pipeline, so an empty deployment shows finished runs,
