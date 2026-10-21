@@ -147,13 +147,17 @@ NEBIUS_API_KEY=<su clave de Token Factory>
 TAVILY_API_KEY=<su clave de Tavily>
 ```
 
-En `targets.yaml`, tome el bloque `showcase-example`, ponga `enabled: true` y
-reemplace `fqdn` y `search_terms` por una entidad que esté autorizado a
-evaluar; deje `openosint` y `spiderfoot` desactivados, como vienen en el
-bloque. Reinicie el orquestador para que lea las claves (`docker compose up -d
-orchestrator`; `targets.yaml` se lee en cada petición) e inicie la corrida
-desde el botón *Iniciar corrida* de la consola o con `POST /targets/<id>/run`. Una corrida tarda alrededor de un minuto; la consola
-muestra qué modelo calificó cada evidencia y cuál escribió el hallazgo.
+En `targets.yaml`, copie el bloque `showcase-example` con un **`id` nuevo**
+(las corridas, los observables vistos y el historial de riesgo de la muestra
+quedan con la muestra; una entidad real no debe heredarlos), ponga
+`enabled: true` y reemplace `fqdn` y `search_terms` por una entidad que esté
+autorizado a evaluar; deje `openosint` y `spiderfoot` desactivados, como
+vienen en el bloque, y no toque el bloque de la muestra. Reinicie el
+orquestador para que lea las claves (`docker compose up -d orchestrator`;
+`targets.yaml` se lee en cada petición) e inicie la corrida desde el botón
+*Iniciar corrida* de la consola o con `POST /targets/<id>/run`. Una corrida
+tarda alrededor de un minuto; la consola muestra qué modelo calificó cada
+evidencia y cuál escribió el hallazgo.
 
 ### 3. El stack completo
 

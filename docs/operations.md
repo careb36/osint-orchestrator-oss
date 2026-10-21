@@ -149,9 +149,13 @@ output: every `evidence_qualifications` and `findings` row says provider
 `showcase` and model `recorded-sample`. The target block in
 `targets.example.yaml` ships `enabled: false`, so the scheduler never runs it
 and `POST /targets/showcase-example/run` answers 400; the replay admits its
-runs directly. To turn the block into a real target, set `enabled: true`,
-replace `fqdn` and `search_terms` with an entity you are authorised to
-assess, and set `NEBIUS_API_KEY` and `TAVILY_API_KEY`.
+runs directly. For a real target, copy the block under a new `id`, set
+`enabled: true`, replace `fqdn` and `search_terms` with an entity you are
+authorised to assess, and set `NEBIUS_API_KEY` and `TAVILY_API_KEY`; keep the
+sample block as it is. The id is the key of a target's history
+(`seen_observables`, the synthesis history, the risk trend), so reusing
+`showcase-example` for a real entity would feed it the sample's fabricated
+observables as prior observations.
 
 Preconditions, each reported with exit code 1: `OPENCTI_ENABLED=false`
 (the sample must not be ingested into a knowledge graph); the target

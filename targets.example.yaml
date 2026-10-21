@@ -186,12 +186,15 @@ targets:
 
   # ─── Muestra sin claves: `python -m orchestrator.showcase` ──────────────────
   # Entidad ficticia (nombres reservados) que recibe las ejecuciones grabadas
-  # de demo/showcase/. Con `enabled: false` el planificador no la ejecuta y
-  # «Iniciar ejecución» la rechaza: la muestra nunca cuesta una llamada. Las
-  # grabaciones traen los textos en español y en inglés; se usa el idioma del
-  # objetivo (aquí, ORCHESTRATOR_LANGUAGE). Para convertirla en una ejecución
-  # real, pon `enabled: true`, cambia `fqdn` y `search_terms` por una entidad
-  # que estés autorizado a evaluar y define NEBIUS_API_KEY y TAVILY_API_KEY.
+  # de orchestrator/showcase_data/. Con `enabled: false` el planificador no la
+  # ejecuta y «Iniciar ejecución» la rechaza: la muestra nunca cuesta una
+  # llamada. Las grabaciones traen los textos en español y en inglés; se usa
+  # el idioma del objetivo (aquí, ORCHESTRATOR_LANGUAGE). Para una ejecución
+  # real, copia este bloque con un `id` nuevo (el historial de un objetivo va
+  # ligado a su id: una entidad real no debe heredar los observables de la
+  # muestra), pon `enabled: true`, cambia `fqdn` y `search_terms` por una
+  # entidad que estés autorizado a evaluar y define NEBIUS_API_KEY y
+  # TAVILY_API_KEY. Este bloque queda como está.
   - id: showcase-example
     enabled: false
     fqdn: meridian-ridge.example

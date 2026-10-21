@@ -140,13 +140,16 @@ NEBIUS_API_KEY=<your Token Factory key>
 TAVILY_API_KEY=<your Tavily key>
 ```
 
-In `targets.yaml`, take the `showcase-example` block, set `enabled: true`,
-and replace `fqdn` and `search_terms` with an entity you are authorised to
-assess; keep `openosint` and `spiderfoot` disabled as the block ships them.
-Restart the orchestrator so it reads the keys (`docker compose up -d
-orchestrator`; `targets.yaml` is read on every request) and start the run
-from the console's *Start run* button or `POST /targets/<id>/run`. A run takes about a minute; the console shows which
-model qualified each piece of evidence and which one wrote the finding.
+In `targets.yaml`, copy the `showcase-example` block under a **new `id`**
+(the sample's runs, seen observables and risk history stay with the sample;
+a real entity must not inherit them), set `enabled: true`, and replace
+`fqdn` and `search_terms` with an entity you are authorised to assess; keep
+`openosint` and `spiderfoot` disabled as the block ships them, and leave the
+sample block as it is. Restart the orchestrator so it reads the keys
+(`docker compose up -d orchestrator`; `targets.yaml` is read on every
+request) and start the run from the console's *Start run* button or
+`POST /targets/<id>/run`. A run takes about a minute; the console shows
+which model qualified each piece of evidence and which one wrote the finding.
 
 ### 3. The full stack
 
