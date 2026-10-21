@@ -532,6 +532,25 @@ misp_store.description = (
 misp_store.isSQL = True
 misp_store.controls = Controls(isEncryptedAtRest=False)
 
+misp_db = Server("MariaDB (MISP)")
+misp_db.inBoundary = compose
+misp_db.protocol = "MySQL"
+misp_db.description = "mariadb:10.11.19 with MYSQL_USER/MYSQL_PASSWORD (MISP_MYSQL_PASSWORD); MySQL in clear on the compose network."
+misp_db.controls = Controls(
+    isEncrypted=False,
+    authenticatesSource=True,
+    hasAccessControl=True,
+    authenticationScheme="MySQL user / password",
+)
+
+misp_redis = Server("Redis (MISP)")
+misp_redis.inBoundary = compose
+misp_redis.protocol = "RESP"
+misp_redis.description = "redis:8.0.6 without a password (ENABLE_REDIS_EMPTY_PASSWORD): no authentication, not published on the host."
+misp_redis.controls = Controls(
+    isHardened=False, isEncrypted=False, authenticatesSource=False, hasAccessControl=False
+)
+
 # ── OpenCTI platform ────────────────────────────────────────────────────────
 opencti = Server("OpenCTI platform")
 opencti.inBoundary = opencti_b
@@ -542,6 +561,51 @@ opencti.controls = Controls(
     implementsAuthenticationScheme=True,
     authenticationScheme="admin token / GraphQL session",
     isEncrypted=False,  # compose-internal HTTP
+)
+
+elasticsearch = Server("Elasticsearch")
+elasticsearch.inBoundary = opencti_b
+elasticsearch.protocol = "HTTP"
+elasticsearch.description = (
+    "elasticsearch:8.14.3 single-node with xpack.security.enabled=false: no authentication, "
+    "no TLS, not published on the host."
+)
+elasticsearch.controls = Controls(
+    isHardened=False, isEncrypted=False, authenticatesSource=False, hasAccessControl=False
+)
+
+opencti_redis = Server("Redis (OpenCTI)")
+opencti_redis.inBoundary = opencti_b
+opencti_redis.protocol = "RESP"
+opencti_redis.description = (
+    "redis:8.0.6 without requirepass: no authentication, not published on the host."
+)
+opencti_redis.controls = Controls(
+    isHardened=False, isEncrypted=False, authenticatesSource=False, hasAccessControl=False
+)
+
+minio = Server("MinIO")
+minio.inBoundary = opencti_b
+minio.protocol = "HTTP"
+minio.description = "MinIO with MINIO_ROOT_USER/PASSWORD as access and secret key; plain HTTP on the compose network."
+minio.controls = Controls(
+    isEncrypted=False,
+    authenticatesSource=True,
+    hasAccessControl=True,
+    authenticationScheme="access key / secret key",
+)
+
+rabbitmq = Server("RabbitMQ")
+rabbitmq.inBoundary = opencti_b
+rabbitmq.protocol = "AMQP"
+rabbitmq.description = (
+    "rabbitmq:3.13.7 with RABBITMQ_DEFAULT_USER/PASS; AMQP in clear on the compose network."
+)
+rabbitmq.controls = Controls(
+    isEncrypted=False,
+    authenticatesSource=True,
+    hasAccessControl=True,
+    authenticationScheme="user / password",
 )
 
 opencti_store = Datastore("OpenCTI backing stores")
@@ -576,6 +640,12 @@ CLASSES: dict[str, list] = {
         connector_misp,
         keycloak_db,
         misp_store,
+        elasticsearch,
+        opencti_redis,
+        minio,
+        rabbitmq,
+        misp_db,
+        misp_redis,
     ],
     "store": [sqlite, targets_yaml, reports, amass_db, socialosint_cache, spiderfoot_db],
     "actor": [operator, anonymous, stix_producer, public_web, social_platforms],
@@ -608,6 +678,12 @@ _LIMITS: dict[Classification, list] = {
         connector_misp,
         keycloak_db,
         misp_store,
+        elasticsearch,
+        opencti_redis,
+        minio,
+        rabbitmq,
+        misp_db,
+        misp_redis,
         amass,  # provider keys mounted from datasources.yaml
         socialosint,  # platform tokens in its environment
     ],
@@ -955,7 +1031,7 @@ flow(
 )
 flow(
     opencti,
-    opencti_store,
+    elasticsearch,
     "Elasticsearch indices",
     protocol="HTTP",
     tlsVersion=TLSVersion.NONE,
@@ -964,7 +1040,7 @@ flow(
 )
 flow(
     opencti,
-    opencti_store,
+    minio,
     "MinIO objects",
     protocol="HTTP",
     tlsVersion=TLSVersion.NONE,
@@ -973,7 +1049,7 @@ flow(
 )
 flow(
     opencti,
-    opencti_store,
+    rabbitmq,
     "RabbitMQ queues",
     protocol="AMQP",
     tlsVersion=TLSVersion.NONE,
@@ -982,7 +1058,7 @@ flow(
 )
 flow(
     opencti,
-    opencti_store,
+    opencti_redis,
     "Redis cache (no authentication)",
     protocol="RESP",
     tlsVersion=TLSVersion.NONE,
@@ -991,7 +1067,7 @@ flow(
 )
 flow(
     misp,
-    misp_store,
+    misp_db,
     "MISP database (MySQL, compose-internal)",
     protocol="MySQL",
     tlsVersion=TLSVersion.NONE,
@@ -1000,13 +1076,30 @@ flow(
 )
 flow(
     misp,
-    misp_store,
+    misp_redis,
     "MISP cache and queues (Redis, no password)",
     protocol="RESP",
     tlsVersion=TLSVersion.NONE,
     data=[evidence],
     controls=Controls(isEncrypted=False, authenticatesDestination=False),
 )
+# Persistence: each backing server writes its own volume of the platform's stores.
+for _server, _store, _what in (
+    (elasticsearch, opencti_store, "Elasticsearch persists its indices (volume)"),
+    (minio, opencti_store, "MinIO persists objects (volume)"),
+    (rabbitmq, opencti_store, "RabbitMQ persists queues (volume)"),
+    (opencti_redis, opencti_store, "Redis persists its snapshot (volume)"),
+    (misp_db, misp_store, "MariaDB persists on misp-db-data"),
+    (misp_redis, misp_store, "Redis persists on misp-redis-data"),
+):
+    flow(
+        _server,
+        _store,
+        _what,
+        protocol="file",
+        data=[evidence],
+        controls=Controls(isEncrypted=False),
+    )
 flow(
     connector_misp,
     misp,
@@ -1093,8 +1186,9 @@ _VENDOR_PROCESS = (
 )
 _VENDOR_AUTH = (
     "transferred",
-    "Authentication and authorisation inside Keycloak, OpenCTI, MISP, Tavily, oauth2-proxy and "
-    "connector-misp are the vendor's.",
+    "Authentication and authorisation inside Keycloak, OpenCTI, MISP, Tavily, oauth2-proxy, "
+    "connector-misp and the credentialed backing services (MinIO, RabbitMQ, MariaDB) are the "
+    "vendor's.",
 )
 _LLM = (
     "accepted",
@@ -1653,7 +1747,18 @@ _SOCIALOSINT_LLM = (
     "the console renders it escaped and nothing acts on it. Residual risk: a manipulated "
     "report misleads the analyst who reads the note.",
 )
+_UNAUTHENTICATED_BACKING: Response = (
+    "accepted",
+    "Runs without authentication by the compose file's decision (xpack.security.enabled=false "
+    "for Elasticsearch, no requirepass for Redis): reachable only on the compose network, never "
+    "published on the host, and only its own platform talks to it (ADR-005). Hardening for "
+    "shared hosts: enable the service's authentication (xpack security, requirepass) and TLS, "
+    "or network policies that pin each backing service to its platform.",
+)
 OVERRIDES: dict[tuple[str, str], Response] = {
+    ("Elasticsearch", "AA01"): _UNAUTHENTICATED_BACKING,
+    ("Redis (OpenCTI)", "AA01"): _UNAUTHENTICATED_BACKING,
+    ("Redis (MISP)", "AA01"): _UNAUTHENTICATED_BACKING,
     ("GET /health, /metrics", "DS06"): (
         "accepted",
         "GET /metrics answers without an API key by design (scrapers are not API clients; "
