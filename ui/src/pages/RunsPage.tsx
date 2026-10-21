@@ -142,23 +142,23 @@ export function RunsPage() {
               const active = isActiveStatus(run.status);
               return (
                 <tr key={run.id}>
-                  <td>
+                  <td data-label={t('col.run')}>
                     <Link to={`/runs/${run.id}`}>#{run.id}</Link>
                   </td>
-                  <td>
+                  <td data-label={t('col.target')}>
                     <Link to={`/targets/${encodeURIComponent(run.target_id)}`}>{run.target_id}</Link>
                   </td>
-                  <td>
+                  <td data-label={t('col.status')}>
                     <StatusPill label={run.status} tone={runStatusTone(run.status)} />
                     {run.error ? <small className="error-text"> {run.error}</small> : null}
                   </td>
-                  <td>{run.risk_level ? <StatusPill label={run.risk_level} tone={riskTone(run.risk_level)} /> : <span className="muted">—</span>}</td>
-                  <td>
+                  <td data-label={t('col.risk')}>{run.risk_level ? <StatusPill label={run.risk_level} tone={riskTone(run.risk_level)} /> : <span className="muted">—</span>}</td>
+                  <td data-label={t('col.change')}>
                     <RunChange transition={transitions.get(run.id)} />
                   </td>
-                  <td>{run.new_observables}</td>
-                  <td>{formatDateTime(run.started_at, locale)}</td>
-                  <td>
+                  <td data-label={t('col.newObservables')}>{run.new_observables}</td>
+                  <td data-label={t('col.started')}>{formatDateTime(run.started_at, locale)}</td>
+                  <td data-label={t('col.duration')}>
                     {active ? (
                       <>
                         {formatDuration(run.started_at, now.toISOString())} <small className="muted">{t('soFar')}</small>

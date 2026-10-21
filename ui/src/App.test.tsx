@@ -764,3 +764,22 @@ describe('App shell', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/la api rechazó esta clave/i);
   });
 });
+
+describe('System status chip', () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+    window.localStorage.clear();
+  });
+
+  it('reports a healthy platform', async () => {
+    installFetchMock();
+    renderApp();
+    expect(await within(screen.getByRole('banner')).findByText('System OK')).toBeInTheDocument();
+  });
+
+  it('shows offline when /health fails, instead of a cached or pending status', async () => {
+    installFetchMock({ routes: [{ pattern: /^\/health$/, status: 503, body: { detail: 'down' } }] });
+    renderApp();
+    expect(await within(screen.getByRole('banner')).findByText('Offline')).toBeInTheDocument();
+  });
+});

@@ -151,20 +151,20 @@ export function TargetDetailPage() {
           <tbody>
             {visibleRuns.map((run) => (
               <tr key={run.id}>
-                <td>
+                <td data-label={t('col.run')}>
                   <Link to={`/targets/${encodeURIComponent(targetId)}/runs/${run.id}`}>#{run.id}</Link>
                 </td>
-                <td>
+                <td data-label={t('col.status')}>
                   <StatusPill label={run.status} tone={runStatusTone(run.status)} />
                 </td>
-                <td>{run.risk_level ? <StatusPill label={run.risk_level} tone={riskTone(run.risk_level)} /> : <span className="muted">—</span>}</td>
-                <td>
+                <td data-label={t('col.risk')}>{run.risk_level ? <StatusPill label={run.risk_level} tone={riskTone(run.risk_level)} /> : <span className="muted">—</span>}</td>
+                <td data-label={t('col.change')}>
                   <RunChange transition={transitions.get(run.id)} />
                 </td>
-                <td>{run.collectors_run || '—'}</td>
-                <td>{run.new_observables}</td>
-                <td>{formatDateTime(run.started_at, locale)}</td>
-                <td>{formatDuration(run.started_at, run.finished_at)}</td>
+                <td data-label={t('col.collectors')}>{run.collectors_run || '—'}</td>
+                <td data-label={t('col.newObservables')}>{run.new_observables}</td>
+                <td data-label={t('col.started')}>{formatDateTime(run.started_at, locale)}</td>
+                <td data-label={t('col.duration')}>{formatDuration(run.started_at, run.finished_at)}</td>
               </tr>
             ))}
           </tbody>

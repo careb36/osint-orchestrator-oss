@@ -85,12 +85,16 @@ const RAIL_ICONS: Record<string, ReactNode> = {
  */
 function SystemStatusChip() {
   const { t } = useLocale();
-  const health = useQuery({ queryKey: ['shell-health'], queryFn: api.getHealth, staleTime: 30_000 });
-  const status = health.data?.status;
-  const tone = health.isLoading ? 'muted' : status === 'ok' ? 'ok' : status === 'degraded' ? 'warning' : status === 'offline' ? 'error' : 'muted';
-  const label = health.isLoading
-    ? t('system.checking')
-    : status === 'ok'
+  // Polled, not read once: the shell stays mounted across navigation and
+  // focus refetching is off (main.tsx), so without an interval the dot
+  // would keep its first answer for the whole session.
+  const health = useQuery({ queryKey: ['shell-health'], queryFn: api.getHealth, staleTime: 30_000, refetchInterval: 30_000 });
+  // A failed probe wins over the last cached answer: an API that stopped
+  // answering is offline, whatever it said before.
+  const status = health.isError ? 'offline' : health.data?.status;
+  const tone = status === 'ok' ? 'ok' : status === 'degraded' ? 'warning' : status === 'offline' ? 'error' : 'muted';
+  const label =
+    status === 'ok'
       ? t('system.ok')
       : status === 'degraded'
         ? t('system.degraded')

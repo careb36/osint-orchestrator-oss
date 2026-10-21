@@ -180,7 +180,7 @@ export function HomePage() {
             <tbody>
               {rows.map(({ target, lastRun, latestRisk, peakRisk, active }) => (
                 <tr key={target.id}>
-                  <td>
+                  <td data-label={t('col.target')}>
                     <Link to={`/targets/${encodeURIComponent(target.id)}`}>
                       <strong>{target.fqdn}</strong>
                     </Link>
@@ -190,7 +190,7 @@ export function HomePage() {
                       {target.enabled ? '' : t('disabledSuffix')}
                     </small>
                   </td>
-                  <td>
+                  <td data-label={t('col.lastRun')}>
                     {lastRun ? (
                       <Link to={`/runs/${lastRun.id}`}>
                         #{lastRun.id} · {formatDateTime(lastRun.started_at, locale)}
@@ -199,15 +199,15 @@ export function HomePage() {
                       <span className="muted">{t('never')}</span>
                     )}
                   </td>
-                  <td>{lastRun ? <StatusPill label={lastRun.status} tone={runStatusTone(lastRun.status)} /> : <span className="muted">{t('noRuns')}</span>}</td>
-                  <td>
+                  <td data-label={t('col.status')}>{lastRun ? <StatusPill label={lastRun.status} tone={runStatusTone(lastRun.status)} /> : <span className="muted">{t('noRuns')}</span>}</td>
+                  <td data-label={t('col.risk')}>
                     <StatusPill label={latestRisk} tone={riskTone(latestRisk)} />
                   </td>
-                  <td>
+                  <td data-label={t('col.peakRisk')}>
                     <StatusPill label={peakRisk} tone={riskTone(peakRisk)} />
                   </td>
-                  <td>{lastRun ? lastRun.new_observables : '—'}</td>
-                  <td>
+                  <td data-label={t('col.newObservables')}>{lastRun ? lastRun.new_observables : '—'}</td>
+                  <td data-label={t('col.actions')}>
                     <button type="button" className="ghost-button" disabled={isPending || active || !target.enabled} onClick={() => start(target.id)}>
                       {active ? t('run.running') : t('run.start')}
                       <span className="visually-hidden">{t('run.startFor', { targetId: target.id })}</span>
@@ -240,17 +240,17 @@ export function HomePage() {
             <tbody>
               {activeRuns.map((run) => (
                 <tr key={run.id}>
-                  <td>
+                  <td data-label={t('col.run')}>
                     <Link to={`/runs/${run.id}`}>#{run.id}</Link>
                   </td>
-                  <td>
+                  <td data-label={t('col.target')}>
                     <Link to={`/targets/${encodeURIComponent(run.target_id)}`}>{run.target_id}</Link>
                   </td>
-                  <td>
+                  <td data-label={t('col.status')}>
                     <StatusPill label={run.status} tone={runStatusTone(run.status)} />
                   </td>
-                  <td>{formatDateTime(run.started_at, locale)}</td>
-                  <td>{formatDuration(run.started_at, now.toISOString())}</td>
+                  <td data-label={t('col.started')}>{formatDateTime(run.started_at, locale)}</td>
+                  <td data-label={t('col.elapsed')}>{formatDuration(run.started_at, now.toISOString())}</td>
                 </tr>
               ))}
             </tbody>

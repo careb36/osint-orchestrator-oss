@@ -208,27 +208,27 @@ export function AlertsPage() {
           <tbody>
             {visible.map((row) => (
               <tr key={row.id} data-state={row.state}>
-                <td>#{row.id}</td>
-                <td>
+                <td data-label={t('col.case')}>#{row.id}</td>
+                <td data-label={t('col.target')}>
                   <Link to={`/targets/${encodeURIComponent(row.target_id)}`}>{row.target_id}</Link>
                 </td>
-                <td>
+                <td data-label={t('col.run')}>
                   <Link to={`/runs/${row.run_id}`}>#{row.run_id}</Link> <StatusPill label={row.run_status} tone={runStatusTone(row.run_status)} />
                 </td>
-                <td>
+                <td data-label={t('col.reason')}>
                   <StatusPill label={row.reason} tone={alertReasonTone(row.reason)} />
                 </td>
-                <td>
+                <td data-label={t('col.risk')}>
                   <StatusPill label={row.risk_level} tone={riskTone(row.risk_level)} />
                 </td>
-                <td>{row.new_observable_count}</td>
-                <td>{formatDateTime(row.created_at, locale)}</td>
-                <td>
+                <td data-label={t('col.newObservables')}>{row.new_observable_count}</td>
+                <td data-label={t('col.opened')}>{formatDateTime(row.created_at, locale)}</td>
+                <td data-label={t('col.state')}>
                   <StatusPill label={row.state} tone={alertCaseTone(row.state)} />
                   {row.acknowledged_by ? <small className="muted"> {t('alerts.handledBy', { name: row.resolved_by ?? row.acknowledged_by })}</small> : null}
                   {row.note ? <small className="muted"> · {row.note}</small> : null}
                 </td>
-                <td>
+                <td data-label={t('col.actions')}>
                   {row.state === 'open' ? (
                     <button type="button" className="ghost-button" disabled={!canAct} onClick={() => action.mutate({ caseId: row.id, kind: 'ack' })}>
                       {t('alerts.acknowledge')}

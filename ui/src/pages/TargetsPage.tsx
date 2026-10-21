@@ -137,7 +137,7 @@ export function TargetsPage() {
           <tbody>
             {visible.map(({ target, lastRun, latestRisk, active }) => (
               <tr key={target.id}>
-                <td>
+                <td data-label={t('col.target')}>
                   <Link to={`/targets/${encodeURIComponent(target.id)}`}>
                     <strong>{target.fqdn}</strong>
                   </Link>
@@ -147,8 +147,8 @@ export function TargetsPage() {
                     {target.enabled ? '' : t('disabledSuffix')}
                   </small>
                 </td>
-                <td>{enabledCollectors(target).join(', ') || '—'}</td>
-                <td>
+                <td data-label={t('col.collectors')}>{enabledCollectors(target).join(', ') || '—'}</td>
+                <td data-label={t('col.lastRun')}>
                   {lastRun ? (
                     <Link to={`/runs/${lastRun.id}`}>
                       #{lastRun.id} · {formatDateTime(lastRun.started_at, locale)}
@@ -157,11 +157,11 @@ export function TargetsPage() {
                     <span className="muted">{t('never')}</span>
                   )}
                 </td>
-                <td>{lastRun ? <StatusPill label={lastRun.status} tone={runStatusTone(lastRun.status)} /> : <span className="muted">{t('noRuns')}</span>}</td>
-                <td>
+                <td data-label={t('col.status')}>{lastRun ? <StatusPill label={lastRun.status} tone={runStatusTone(lastRun.status)} /> : <span className="muted">{t('noRuns')}</span>}</td>
+                <td data-label={t('col.risk')}>
                   <StatusPill label={latestRisk} tone={riskTone(latestRisk)} />
                 </td>
-                <td>
+                <td data-label={t('col.actions')}>
                   <button type="button" className="ghost-button" disabled={isPending || active || !target.enabled} onClick={() => start(target.id)}>
                     {active ? t('run.running') : t('run.start')}
                     <span className="visually-hidden">{t('run.startFor', { targetId: target.id })}</span>

@@ -306,12 +306,12 @@ export function RunWorkspacePage() {
                 <tbody>
                   {evidenceRows.map((row) => (
                     <tr key={row.id ?? row.url}>
-                      <td>{row.category}</td>
-                      <td>
+                      <td data-label={t('col.category')}>{row.category}</td>
+                      <td data-label={t('col.relevance')}>
                         <StatusPill label={row.relevance} tone={riskTone(row.relevance)} />
                       </td>
-                      <td>{Number(row.confidence).toFixed(2)}</td>
-                      <td>
+                      <td data-label={t('col.confidence')}>{Number(row.confidence).toFixed(2)}</td>
+                      <td data-label={t('col.source')}>
                         {isHttpUrl(row.url) ? (
                           <a href={row.url} rel="noopener noreferrer nofollow" target="_blank">
                             {row.title || row.url}
@@ -320,7 +320,7 @@ export function RunWorkspacePage() {
                           row.title || row.url
                         )}
                       </td>
-                      <td>{row.rationale}</td>
+                      <td data-label={t('col.rationale')}>{row.rationale}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -375,8 +375,8 @@ export function RunWorkspacePage() {
                 <tbody>
                   {deltaRows.map((row) => (
                     <tr key={row.stix_id}>
-                      <td>{row.stix_type}</td>
-                      <td className="mono">{row.value}</td>
+                      <td data-label={t('col.type')}>{row.stix_type}</td>
+                      <td data-label={t('col.value')} className="mono">{row.value}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -506,10 +506,10 @@ export function RunWorkspacePage() {
                 <tbody>
                   {run.data.alerts.map((alert, index) => (
                     <tr key={alert.id ?? index}>
-                      <td>{alert.channel ? tv(alert.channel) : '—'}</td>
-                      <td>{alert.status ? <StatusPill label={alert.status} tone={alertStatusTone(alert.status)} /> : '—'}</td>
-                      <td>{formatDateTime(alert.sent_at, locale)}</td>
-                      <td>{alert.error ?? '—'}</td>
+                      <td data-label={t('col.channel')}>{alert.channel ? tv(alert.channel) : '—'}</td>
+                      <td data-label={t('col.status')}>{alert.status ? <StatusPill label={alert.status} tone={alertStatusTone(alert.status)} /> : '—'}</td>
+                      <td data-label={t('col.sentAt')}>{formatDateTime(alert.sent_at, locale)}</td>
+                      <td data-label={t('col.error')}>{alert.error ?? '—'}</td>
                     </tr>
                   ))}
                 </tbody>

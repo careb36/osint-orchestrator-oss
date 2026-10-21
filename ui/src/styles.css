@@ -16,8 +16,8 @@
   --text: #dae2fd;
   --text-bright: #f8fafc;
   --text-soft: #bdc8d1;
-  --muted: #87929a;
-  --muted-2: #64748b;
+  --muted: #87929a; /* smallest text: 5.6:1 on --panel */
+  --muted-2: #64748b; /* dots and rules only: 3.75:1 fails AA for text */
   --cyan: #38bdf8;
   --cyan-deep: #0284c7;
   --cyan-soft: #7bd0ff;
@@ -176,7 +176,7 @@ code {
   font-size: 10px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--muted-2);
+  color: var(--muted);
 }
 
 /* Live platform telemetry in the topbar. */
@@ -260,7 +260,7 @@ code {
 .rail-title {
   margin: 0 0 10px;
   padding: 0 10px;
-  color: var(--muted-2);
+  color: var(--muted);
 }
 
 .rail-link {
@@ -471,7 +471,7 @@ code {
 .label {
   display: block;
   margin-bottom: 6px;
-  color: var(--muted-2);
+  color: var(--muted);
 }
 
 .stats-grid {
@@ -812,7 +812,7 @@ code {
   top: 0;
   z-index: 5;
   height: 32px;
-  color: var(--muted-2);
+  color: var(--muted);
   background: var(--panel);
   white-space: nowrap;
 }
@@ -838,7 +838,8 @@ code {
   color: var(--cyan-soft);
 }
 
-.data-table td:last-child {
+/* Action cells keep their buttons on one line; text columns wrap. */
+.data-table td:last-child:has(.ghost-button) {
   white-space: nowrap;
 }
 
@@ -930,7 +931,7 @@ code {
 }
 
 .filters input::placeholder {
-  color: var(--muted-2);
+  color: var(--muted);
   font-family: var(--font-mono);
   font-size: 12px;
 }
@@ -1002,7 +1003,6 @@ code {
 
 .primary-action:hover:not(:disabled) {
   background: var(--cyan-deep);
-  color: var(--text-bright);
   box-shadow: 0 0 12px -2px rgba(56, 189, 248, 0.35);
 }
 
@@ -1263,7 +1263,7 @@ code {
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--muted-2);
+  color: var(--muted);
 }
 
 .handoff-actions {
@@ -1407,16 +1407,38 @@ code {
     overflow: visible;
   }
 
+  /* The header row dissolves: sortable headers stay as a chip strip (the
+     only sort control on handhelds), plain ones are repeated inside each
+     card as field labels (data-label on every cell). */
   .data-table thead {
-    position: absolute;
-    width: 1px;
-    height: 1px;
+    display: block;
+  }
+
+  .data-table thead tr {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+
+  .data-table th {
+    position: static;
+    display: block;
+    height: auto;
     padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
     border: 0;
+    background: transparent;
+  }
+
+  .data-table th:not(:has(.sort-button)) {
+    display: none;
+  }
+
+  .data-table th .sort-button {
+    padding: 6px 10px;
+    border: 1px solid var(--hairline-strong);
+    border-radius: var(--r-pill);
+    background: var(--glass);
   }
 
   .data-table tbody {
@@ -1444,6 +1466,23 @@ code {
     white-space: normal;
     min-width: 0;
     overflow-wrap: anywhere;
+  }
+
+  .data-table tbody td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 2px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  /* A button is its own label. */
+  .data-table tbody td:has(> .ghost-button)::before {
+    display: none;
   }
 
   .data-table tbody td:first-child {
