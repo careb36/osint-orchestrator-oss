@@ -165,22 +165,22 @@ export function HomePage() {
         {trends.error ? <p className="helper-text">{t('overview.trendsDown')}</p> : null}
         {!targets.error && rows.length === 0 ? <EmptyState title={t('overview.noTargets.title')} description={t('overview.noTargets.body')} /> : null}
         {rows.length > 0 ? (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th scope="col">{t('col.target')}</th>
-                <th scope="col">{t('col.lastRun')}</th>
-                <th scope="col">{t('col.status')}</th>
-                <th scope="col">{t('col.risk')}</th>
-                <th scope="col">{t('col.peakRisk')}</th>
-                <th scope="col">{t('col.newObservables')}</th>
-                <th scope="col">{t('col.actions')}</th>
+          <table className="data-table" role="table">
+            <thead role="rowgroup">
+              <tr role="row">
+                <th role="columnheader" scope="col">{t('col.target')}</th>
+                <th role="columnheader" scope="col">{t('col.lastRun')}</th>
+                <th role="columnheader" scope="col">{t('col.status')}</th>
+                <th role="columnheader" scope="col">{t('col.risk')}</th>
+                <th role="columnheader" scope="col">{t('col.peakRisk')}</th>
+                <th role="columnheader" scope="col">{t('col.newObservables')}</th>
+                <th role="columnheader" scope="col">{t('col.actions')}</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody role="rowgroup">
               {rows.map(({ target, lastRun, latestRisk, peakRisk, active }) => (
-                <tr key={target.id}>
-                  <td>
+                <tr role="row" key={target.id}>
+                  <td role="cell" data-label={t('col.target')}>
                     <Link to={`/targets/${encodeURIComponent(target.id)}`}>
                       <strong>{target.fqdn}</strong>
                     </Link>
@@ -190,7 +190,7 @@ export function HomePage() {
                       {target.enabled ? '' : t('disabledSuffix')}
                     </small>
                   </td>
-                  <td>
+                  <td role="cell" data-label={t('col.lastRun')}>
                     {lastRun ? (
                       <Link to={`/runs/${lastRun.id}`}>
                         #{lastRun.id} · {formatDateTime(lastRun.started_at, locale)}
@@ -199,15 +199,15 @@ export function HomePage() {
                       <span className="muted">{t('never')}</span>
                     )}
                   </td>
-                  <td>{lastRun ? <StatusPill label={lastRun.status} tone={runStatusTone(lastRun.status)} /> : <span className="muted">{t('noRuns')}</span>}</td>
-                  <td>
+                  <td role="cell" data-label={t('col.status')}>{lastRun ? <StatusPill label={lastRun.status} tone={runStatusTone(lastRun.status)} /> : <span className="muted">{t('noRuns')}</span>}</td>
+                  <td role="cell" data-label={t('col.risk')}>
                     <StatusPill label={latestRisk} tone={riskTone(latestRisk)} />
                   </td>
-                  <td>
+                  <td role="cell" data-label={t('col.peakRisk')}>
                     <StatusPill label={peakRisk} tone={riskTone(peakRisk)} />
                   </td>
-                  <td>{lastRun ? lastRun.new_observables : '—'}</td>
-                  <td>
+                  <td role="cell" data-label={t('col.newObservables')}>{lastRun ? lastRun.new_observables : '—'}</td>
+                  <td role="cell" data-label={t('col.actions')}>
                     <button type="button" className="ghost-button" disabled={isPending || active || !target.enabled} onClick={() => start(target.id)}>
                       {active ? t('run.running') : t('run.start')}
                       <span className="visually-hidden">{t('run.startFor', { targetId: target.id })}</span>
@@ -227,30 +227,30 @@ export function HomePage() {
         {runs.error ? <ErrorState description={t('overview.runsDown')} /> : null}
         {!runs.error && activeRuns.length === 0 ? <EmptyState title={t('overview.nothingRunning.title')} description={t('overview.nothingRunning.body')} /> : null}
         {activeRuns.length > 0 ? (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th scope="col">{t('col.run')}</th>
-                <th scope="col">{t('col.target')}</th>
-                <th scope="col">{t('col.status')}</th>
-                <th scope="col">{t('col.started')}</th>
-                <th scope="col">{t('col.elapsed')}</th>
+          <table className="data-table" role="table">
+            <thead role="rowgroup">
+              <tr role="row">
+                <th role="columnheader" scope="col">{t('col.run')}</th>
+                <th role="columnheader" scope="col">{t('col.target')}</th>
+                <th role="columnheader" scope="col">{t('col.status')}</th>
+                <th role="columnheader" scope="col">{t('col.started')}</th>
+                <th role="columnheader" scope="col">{t('col.elapsed')}</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody role="rowgroup">
               {activeRuns.map((run) => (
-                <tr key={run.id}>
-                  <td>
+                <tr role="row" key={run.id}>
+                  <td role="cell" data-label={t('col.run')}>
                     <Link to={`/runs/${run.id}`}>#{run.id}</Link>
                   </td>
-                  <td>
+                  <td role="cell" data-label={t('col.target')}>
                     <Link to={`/targets/${encodeURIComponent(run.target_id)}`}>{run.target_id}</Link>
                   </td>
-                  <td>
+                  <td role="cell" data-label={t('col.status')}>
                     <StatusPill label={run.status} tone={runStatusTone(run.status)} />
                   </td>
-                  <td>{formatDateTime(run.started_at, locale)}</td>
-                  <td>{formatDuration(run.started_at, now.toISOString())}</td>
+                  <td role="cell" data-label={t('col.started')}>{formatDateTime(run.started_at, locale)}</td>
+                  <td role="cell" data-label={t('col.elapsed')}>{formatDuration(run.started_at, now.toISOString())}</td>
                 </tr>
               ))}
             </tbody>

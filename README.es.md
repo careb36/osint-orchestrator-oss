@@ -123,6 +123,10 @@ activas, hallazgos, evidencia con búsqueda y filtros, y un botón para iniciar
 corridas; pide `ORCHESTRATOR_API_KEY` al abrirlo. Código en
 [`ui/`](ui/README.md) (en inglés); las imágenes lo construyen solas.
 
+![Resumen: cifras clave y objetivos ordenados por atención](docs/img/dashboard-overview-es.png)
+
+![Espacio de la corrida: cada evidencia con su categoría, relevancia, confianza y justificación](docs/img/dashboard-run-evidence-es.png)
+
 ## Construido durante el hackathon
 
 El commit `Baseline: pre-hackathon snapshot` marca lo que existía antes: el
