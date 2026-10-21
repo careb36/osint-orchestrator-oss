@@ -128,6 +128,27 @@ jobs:
           docker run --rm -e ORCHESTRATOR_API_KEY osint-orchestrator:smoke \
             python -c "from orchestrator.config import settings; print(settings.llm_provider)"
 
+      # The first thing a reader runs: the showcase, inside the image, with the
+      # example targets mounted the way compose mounts targets.yaml and a
+      # reports directory the container (uid 1000) can write. Proves the
+      # recordings travel in the image, the migrations run on an empty
+      # database and the pipeline seals both runs.
+      - name: Smoke-test the showcase
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          reports="$(mktemp -d)"
+          chmod 777 "${reports}"
+          docker run --rm \
+            -e ORCHESTRATOR_API_KEY \
+            -e OPENCTI_ENABLED=false \
+            -v "${PWD}/targets.example.yaml:/app/targets.yaml:ro" \
+            -v "${reports}:/app/daily_reports" \
+            osint-orchestrator:smoke python -m orchestrator.showcase
+          manifests="$(find "${reports}" -name manifest.json | wc -l)"
+          echo "sealed runs: ${manifests}"
+          test "${manifests}" -eq 2
+
       - name: Smoke-test /health
         if: github.event_name == 'pull_request'
         run: |

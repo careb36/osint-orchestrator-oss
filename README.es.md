@@ -121,6 +121,11 @@ docker compose exec orchestrator python -m orchestrator.showcase
 # después, http://localhost:8000/console
 ```
 
+El contenedor escribe los informes en `./daily_reports` como uid 1000; el
+directorio viene en el clon para que Docker no lo cree como root. En Linux, si
+su usuario no es el uid 1000, ejecute antes `sudo chown -R 1000:1000
+daily_reports` ([despliegue](docs/deploy.md), en inglés).
+
 La muestra reproduce [`orchestrator/showcase_data/`](orchestrator/showcase_data/):
 una entidad ficticia (nombres `.example` reservados, direcciones TEST-NET)
 evaluada dos veces; la segunda corrida añade una entrada en una lista de
@@ -211,7 +216,8 @@ reportes, las alertas y la API. Agregado desde entonces:
 | Cobertura de pruebas del planificador, rutas de error del pipeline, proveedores LLM, calificación, cadena de evidencia, sumidero y normalizador; corrección del flujo de humo de la UI | [#94](https://github.com/careb36/osint-orchestrator-oss/pull/94), [#113](https://github.com/careb36/osint-orchestrator-oss/pull/113), [#114](https://github.com/careb36/osint-orchestrator-oss/pull/114), [#116](https://github.com/careb36/osint-orchestrator-oss/pull/116) |
 | Rediseño Obsidian Sentinel del dashboard y la landing: barra de navegación, chip de salud en vivo, tarjetas responsivas, correcciones de accesibilidad; capturas en el README | [#119](https://github.com/careb36/osint-orchestrator-oss/pull/119), [#122](https://github.com/careb36/osint-orchestrator-oss/pull/122) |
 | Modelo de amenazas OWASP pytm con informe triado y un registro de hallazgos verificado en cada regeneración | [#120](https://github.com/careb36/osint-orchestrator-oss/pull/120) |
-| Corrida de muestra: dos corridas grabadas de una entidad ficticia reproducidas con el pipeline real, para que la consola enseñe el producto sin claves de API | [#124](https://github.com/careb36/osint-orchestrator-oss/pull/124) |
+| Corrida de muestra: dos corridas grabadas de una entidad ficticia reproducidas con el pipeline real, para que la consola enseñe el producto sin claves de API; un solo run activo por objetivo garantizado por la base de datos; inicio rápido en tres niveles | [#124](https://github.com/careb36/osint-orchestrator-oss/pull/124) |
+| La pestaña de evidencia nombra el proveedor y el modelo que calificó cada fila | [#125](https://github.com/careb36/osint-orchestrator-oss/pull/125) |
 | Documentación: bloque de configuración de Token Factory, enrutamiento de LLM explicado, reglas de agente por ruta, tablas del hackathon | [#85](https://github.com/careb36/osint-orchestrator-oss/pull/85), [#91](https://github.com/careb36/osint-orchestrator-oss/pull/91), [#115](https://github.com/careb36/osint-orchestrator-oss/pull/115), [#121](https://github.com/careb36/osint-orchestrator-oss/pull/121) |
 
 ## Uso responsable

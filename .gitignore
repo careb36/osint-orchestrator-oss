@@ -85,7 +85,7 @@ targets.yaml
 *.db-wal
 *.db-shm
 orchestrator.db
-daily_reports/
+daily_reports/*
 data/
 # Amass data-source API keys (mounted only into the engine container)
 amass/datasources.yaml
@@ -93,3 +93,4 @@ amass/datasources.yaml
 docker-compose.local.yml
 docker-compose.*.local.yml
 
+!daily_reports/.gitkeep
