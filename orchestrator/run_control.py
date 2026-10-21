@@ -8,12 +8,16 @@ manual triggers and scheduler ticks.
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import UTC, datetime
 
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
 
 from orchestrator.database import get_session
 from orchestrator.models import Run, RunStatus
+
+logger = logging.getLogger(__name__)
 
 _target_locks: dict[str, asyncio.Lock] = {}
 
@@ -32,6 +36,12 @@ async def create_pending_run(target_id: str) -> int | None:
     Create a pending run unless this target already has a pending/running run.
 
     Returns the run id when admitted; otherwise ``None``.
+
+    The lock serialises admissions inside this process (API and scheduler);
+    the partial unique index ``ux_runs_one_active_per_target`` (migration
+    0010) makes the INSERT fail for an admission raced by another process,
+    such as ``python -m orchestrator.showcase``, and that is reported as
+    not admitted too.
     """
     async with _lock_for_target(target_id), get_session() as session:
         existing = await session.exec(
@@ -49,7 +59,16 @@ async def create_pending_run(target_id: str) -> int | None:
             status=RunStatus.PENDING,
         )
         session.add(run)
-        await session.commit()
+        try:
+            await session.commit()
+        except IntegrityError:
+            await session.rollback()
+            logger.info(
+                "Run not admitted: another process admitted one for target=%s first",
+                target_id,
+                extra={"target_id": target_id},
+            )
+            return None
         await session.refresh(run)
         return run.id
 

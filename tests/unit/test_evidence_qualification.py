@@ -541,7 +541,9 @@ async def test_opencti_disabled_still_runs_qualification_and_synthesis(
 
     synthesized: list[int] = []
 
-    async def _synthesize(target: Target, run_id: int, report_data: RunReportData):
+    async def _synthesize(
+        target: Target, run_id: int, report_data: RunReportData, *, client: object = None
+    ):
         _ = target
         _ = report_data
         synthesized.append(run_id)

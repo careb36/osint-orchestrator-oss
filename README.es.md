@@ -98,24 +98,79 @@ Nota, es calificada por Nemotron y queda registrada en
 
 ## Inicio rápido
 
-El stack completo (OpenCTI, SpiderFoot, corridas programadas, alertas) necesita
-Docker con Compose v2.20+ y 16 GB de RAM:
+Tres caminos, desde ninguna clave hasta el stack completo. Todos necesitan
+Docker con Compose v2.20+ y empiezan igual:
 
 ```bash
 cp .env.example .env                    # contraseñas, tokens y API keys que lista
 cp targets.example.yaml targets.yaml    # solo objetivos que esté autorizado a evaluar
-# Set OPENCTI_ENABLED=true in .env for the full stack.
-docker compose --profile opencti up -d --build
+docker compose up -d --build            # SpiderFoot y el orquestador (OPENCTI_ENABLED=false)
 ```
-
-Para una instalación ligera, mantenga `OPENCTI_ENABLED=false` (el valor por
-defecto de `.env.example`) y ejecute `docker compose up -d --build`: solo se
-inician SpiderFoot y el orquestador. Las instalaciones existentes con el sink
-activo deben añadir `--profile opencti` o definir `COMPOSE_PROFILES=opencti`
-en `.env`.
 
 Después, ver [operación](docs/operations.md), [configuración](docs/configuration.md)
 y, para un servidor, [despliegue](docs/deploy.md) (en inglés).
+
+### 1. Verlo primero: la corrida de muestra (sin claves de API)
+
+Antes de configurar un colector o un proveedor de modelos, reproduzca la
+muestra grabada con el pipeline real y abra la consola con dos corridas
+terminadas:
+
+```bash
+docker compose exec orchestrator python -m orchestrator.showcase
+# después, http://localhost:8000/console
+```
+
+La muestra reproduce [`orchestrator/showcase_data/`](orchestrator/showcase_data/):
+una entidad ficticia (nombres `.example` reservados, direcciones TEST-NET)
+evaluada dos veces; la segunda corrida añade una entrada en una lista de
+sanciones y una investigación sobre la propiedad. Solo están grabados la
+salida de los colectores y las respuestas del modelo; la normalización a STIX,
+el delta respecto de la primera corrida, el informe, `qualified_evidence.json`,
+el manifiesto firmado y encadenado y el caso de alerta los produce en su
+máquina el mismo código que usa una corrida programada. Las filas dicen
+proveedor `showcase` y modelo `recorded-sample`: la consola nunca atribuye a
+un modelo algo que no ejecutó. El objetivo `showcase-example` viene con
+`enabled: false`: el planificador no lo ejecuta y no cuesta ninguna llamada.
+Detalles en [operación](docs/operations.md#showcase-run) (en inglés).
+
+### 2. Una corrida real con dos claves (Token Factory y Tavily)
+
+El camino en vivo más corto es Tavily → Nemotron: evidencia web recolectada
+en el momento, calificada en la ruta rápida y sintetizada en la ruta de
+razonamiento, sin escaneo de SpiderFoot y sin OpenCTI. En `.env`, las cuatro
+líneas de Token Factory de [Correrlo en Token Factory](#correrlo-en-token-factory)
+más la clave de búsqueda:
+
+```bash
+NEBIUS_API_KEY=<su clave de Token Factory>
+TAVILY_API_KEY=<su clave de Tavily>
+```
+
+En `targets.yaml`, copie el bloque `showcase-example` con un **`id` nuevo**
+(las corridas, los observables vistos y el historial de riesgo de la muestra
+quedan con la muestra; una entidad real no debe heredarlos), ponga
+`enabled: true` y reemplace `fqdn` y `search_terms` por una entidad que esté
+autorizado a evaluar; deje `openosint` y `spiderfoot` desactivados, como
+vienen en el bloque, y no toque el bloque de la muestra. Reinicie el
+orquestador para que lea las claves (`docker compose up -d orchestrator`;
+`targets.yaml` se lee en cada petición) e inicie la corrida desde el botón
+*Iniciar corrida* de la consola o con `POST /targets/<id>/run`. Una corrida
+tarda alrededor de un minuto; la consola muestra qué modelo calificó cada
+evidencia y cuál escribió el hallazgo.
+
+### 3. El stack completo
+
+OpenCTI como grafo de conocimiento, SpiderFoot y OpenOSINT como colectores,
+corridas programadas y alertas: 16 GB de RAM, `OPENCTI_ENABLED=true` en `.env`
+y el perfil en la línea de comandos:
+
+```bash
+docker compose --profile opencti up -d --build
+```
+
+Las instalaciones existentes con el sink activo deben añadir
+`--profile opencti` o definir `COMPOSE_PROFILES=opencti` en `.env`.
 
 **Panel del operador:** <http://localhost:8000/console>, en español o inglés.
 Cifras clave, objetivos ordenados por lo que requiere atención, corridas
@@ -156,6 +211,7 @@ reportes, las alertas y la API. Agregado desde entonces:
 | Cobertura de pruebas del planificador, rutas de error del pipeline, proveedores LLM, calificación, cadena de evidencia, sumidero y normalizador; corrección del flujo de humo de la UI | [#94](https://github.com/careb36/osint-orchestrator-oss/pull/94), [#113](https://github.com/careb36/osint-orchestrator-oss/pull/113), [#114](https://github.com/careb36/osint-orchestrator-oss/pull/114), [#116](https://github.com/careb36/osint-orchestrator-oss/pull/116) |
 | Rediseño Obsidian Sentinel del dashboard y la landing: barra de navegación, chip de salud en vivo, tarjetas responsivas, correcciones de accesibilidad; capturas en el README | [#119](https://github.com/careb36/osint-orchestrator-oss/pull/119), [#122](https://github.com/careb36/osint-orchestrator-oss/pull/122) |
 | Modelo de amenazas OWASP pytm con informe triado y un registro de hallazgos verificado en cada regeneración | [#120](https://github.com/careb36/osint-orchestrator-oss/pull/120) |
+| Corrida de muestra: dos corridas grabadas de una entidad ficticia reproducidas con el pipeline real, para que la consola enseñe el producto sin claves de API | [#124](https://github.com/careb36/osint-orchestrator-oss/pull/124) |
 | Documentación: bloque de configuración de Token Factory, enrutamiento de LLM explicado, reglas de agente por ruta, tablas del hackathon | [#85](https://github.com/careb36/osint-orchestrator-oss/pull/85), [#91](https://github.com/careb36/osint-orchestrator-oss/pull/91), [#115](https://github.com/careb36/osint-orchestrator-oss/pull/115), [#121](https://github.com/careb36/osint-orchestrator-oss/pull/121) |
 
 ## Uso responsable

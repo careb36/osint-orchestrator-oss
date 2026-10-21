@@ -458,9 +458,14 @@ async def synthesize(
     target: Target,
     run_id: int,
     report_data: RunReportData,
+    *,
+    client: LLMClient | None = None,
 ) -> tuple[Finding | None, str]:
     """
     Produce a Finding for a completed run.
+
+    *client* stands in for the target's provider (the showcase replay);
+    ``LLM_PROVIDER=none`` still switches the step off.
 
     Returns ``(finding, status)`` where *status* is one of:
 
@@ -478,7 +483,10 @@ async def synthesize(
     """
     from orchestrator.synthesizer.providers import get_client
 
-    client = get_client(target)
+    if client is None:
+        client = get_client(target)
+    elif settings.llm_provider == "none":
+        client = None
     if client is None:
         return None, "skipped"
 

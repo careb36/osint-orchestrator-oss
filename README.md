@@ -94,23 +94,75 @@ observable and a Note, is qualified by Nemotron, and is recorded in
 
 ## Quickstart
 
-The full stack (OpenCTI, SpiderFoot, scheduled runs, alerts) needs Docker with
-Compose v2.20+ and 16 GB of RAM:
+Three ways in, from no keys to the full stack. Each needs Docker with Compose
+v2.20+ and starts the same way:
 
 ```bash
 cp .env.example .env                    # passwords, tokens and API keys it lists
 cp targets.example.yaml targets.yaml    # only targets you are authorised to assess
-# Set OPENCTI_ENABLED=true in .env for the full stack.
-docker compose --profile opencti up -d --build
+docker compose up -d --build            # SpiderFoot and the orchestrator (OPENCTI_ENABLED=false)
 ```
-
-For a lightweight install, keep `OPENCTI_ENABLED=false` (the `.env.example`
-default) and run `docker compose up -d --build`: only SpiderFoot and the
-orchestrator start. Existing sink-on installs must add `--profile opencti`
-or set `COMPOSE_PROFILES=opencti` in `.env`.
 
 Then see [operations](docs/operations.md), [configuration](docs/configuration.md)
 and, for a server, [deploy](docs/deploy.md).
+
+### 1. See it first: the showcase run (no API keys)
+
+Before configuring a collector or a model provider, replay the recorded sample
+through the real pipeline and open the console with two finished runs in it:
+
+```bash
+docker compose exec orchestrator python -m orchestrator.showcase
+# then http://localhost:8000/console
+```
+
+The showcase replays [`orchestrator/showcase_data/`](orchestrator/showcase_data/): a fictitious entity
+(reserved `.example` names, TEST-NET addresses) assessed twice, the second run
+adding a sanctions-list entry and an ownership investigation. Only the
+collector output and the model's answers are recorded; normalisation to STIX,
+the delta against the first run, the report, `qualified_evidence.json`, the
+signed and chained manifest and the alert case are produced on your machine
+by the same code a scheduled run uses. The rows say provider `showcase` and
+model `recorded-sample`, so the console never credits a model that did not
+run. The target `showcase-example` ships `enabled: false`: the scheduler never
+runs it and it costs no API call. Details in
+[operations](docs/operations.md#showcase-run).
+
+### 2. A real run with two keys (Token Factory and Tavily)
+
+The shortest live path is Tavily → Nemotron: web evidence collected at run
+time, qualified on the fast route and synthesised on the reasoning route, with
+no SpiderFoot scan and no OpenCTI. In `.env`, the four Token Factory lines from
+[Run it on Token Factory](#run-it-on-token-factory) plus the search key:
+
+```bash
+NEBIUS_API_KEY=<your Token Factory key>
+TAVILY_API_KEY=<your Tavily key>
+```
+
+In `targets.yaml`, copy the `showcase-example` block under a **new `id`**
+(the sample's runs, seen observables and risk history stay with the sample;
+a real entity must not inherit them), set `enabled: true`, and replace
+`fqdn` and `search_terms` with an entity you are authorised to assess; keep
+`openosint` and `spiderfoot` disabled as the block ships them, and leave the
+sample block as it is. Restart the orchestrator so it reads the keys
+(`docker compose up -d orchestrator`; `targets.yaml` is read on every
+request) and start the run from the console's *Start run* button or
+`POST /targets/<id>/run`. A run takes about a minute; the console shows
+which model qualified each piece of evidence and which one wrote the finding.
+
+### 3. The full stack
+
+OpenCTI as the knowledge graph, SpiderFoot and OpenOSINT as collectors,
+scheduled runs and alerts: 16 GB of RAM, `OPENCTI_ENABLED=true` in `.env` and
+the profile on the command line:
+
+```bash
+docker compose --profile opencti up -d --build
+```
+
+Existing sink-on installs must add `--profile opencti` or set
+`COMPOSE_PROFILES=opencti` in `.env`.
 
 **Operator dashboard:** <http://localhost:8000/console>, in Spanish or English.
 Key figures, targets ordered by what needs attention, active runs, findings,
@@ -151,6 +203,7 @@ API. Added since:
 | Test coverage of the scheduler, pipeline error paths, LLM providers, qualification, evidence chain, sink and normaliser edges; UI smoke-flow fix | [#94](https://github.com/careb36/osint-orchestrator-oss/pull/94), [#113](https://github.com/careb36/osint-orchestrator-oss/pull/113), [#114](https://github.com/careb36/osint-orchestrator-oss/pull/114), [#116](https://github.com/careb36/osint-orchestrator-oss/pull/116) |
 | Obsidian Sentinel redesign of the dashboard and landing: navigation rail, live health chip, responsive card layouts, accessibility fixes; README screenshots | [#119](https://github.com/careb36/osint-orchestrator-oss/pull/119), [#122](https://github.com/careb36/osint-orchestrator-oss/pull/122) |
 | OWASP pytm threat model with a triaged report and a findings ledger checked on every regeneration | [#120](https://github.com/careb36/osint-orchestrator-oss/pull/120) |
+| Showcase run: two recorded runs of a fictitious entity replayed through the real pipeline, so the console shows the product without API keys | [#124](https://github.com/careb36/osint-orchestrator-oss/pull/124) |
 | Documentation: Token Factory setup block, LLM routing explained, path-scoped agent rules, hackathon tables | [#85](https://github.com/careb36/osint-orchestrator-oss/pull/85), [#91](https://github.com/careb36/osint-orchestrator-oss/pull/91), [#115](https://github.com/careb36/osint-orchestrator-oss/pull/115), [#121](https://github.com/careb36/osint-orchestrator-oss/pull/121) |
 
 ## Responsible use

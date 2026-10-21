@@ -180,7 +180,7 @@ async def test_pipeline_with_fake_synthesizer_persists_finding_and_fills_report(
     monkeypatch.setattr(pipeline_module, "OpenCTISink", AsyncMock)
     monkeypatch.setattr(synth_module, "get_session", _session)
 
-    async def _fake_synthesize(target, run_id, report_data):
+    async def _fake_synthesize(target, run_id, report_data, *, client=None):
         f = Finding(
             target_id=target.id,
             run_id=run_id,

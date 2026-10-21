@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import smtplib
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from time import perf_counter
@@ -122,15 +123,23 @@ async def _ollama_reachable() -> bool:
 
 
 async def _qualification_client(
-    target: Target, evidence_items: list[EvidenceItem]
+    target: Target, evidence_items: list[EvidenceItem], *, client: LLMClient | None = None
 ) -> LLMClient | None:
+    """The client that qualifies this run's evidence, or None when the step is off.
+
+    *client* stands in for the target's provider (the showcase replay); the
+    operator's switches still apply to it, LLM_PROVIDER=none included.
+    """
     if not settings.llm_qualify_enabled:
         return None
     if settings.llm_qualify_max_items <= 0:
         return None
     if not evidence_items:
         return None
-    client = get_client(target)
+    if settings.llm_provider == "none":
+        return None
+    if client is None:
+        client = get_client(target)
     if client is None:
         return None
     if client.provider == "ollama" and not await _ollama_reachable():
@@ -594,15 +603,29 @@ async def replay_opencti_dead_letters(
     return {"moved": moved}
 
 
-async def run_target_pipeline(target: Target, run_id: int) -> None:
-    """Full collection → normalize → ingest → synthesize → report → alert pipeline."""
+async def run_target_pipeline(
+    target: Target,
+    run_id: int,
+    *,
+    collectors: Sequence[BaseCollector] | None = None,
+    llm_client: LLMClient | None = None,
+) -> None:
+    """Full collection → normalize → ingest → synthesize → report → alert pipeline.
+
+    *collectors* and *llm_client* replace the target's own collectors and LLM
+    provider; the showcase replay (``orchestrator/showcase.py``) uses them to
+    run a recorded sample through this same code. Left unset, the target
+    decides, as for every scheduled or manual run.
+    """
     log_ctx = {"target_id": target.id, "run_id": run_id}
     logger.info("Pipeline start: target=%s run_id=%d", target.id, run_id, extra=log_ctx)
     started = perf_counter()
     metrics.runs_in_progress.labels(target.id).inc()
     final_status: RunStatus | None = None
     try:
-        final_status = await _run_target_pipeline(target, run_id, log_ctx)
+        final_status = await _run_target_pipeline(
+            target, run_id, log_ctx, collectors=collectors, llm_client=llm_client
+        )
     except Exception as exc:
         # The per-target guard is the persisted Run.status; a row left RUNNING
         # here would block every later run of this target until edited by hand.
@@ -641,7 +664,14 @@ async def _mark_run_failed(run_id: int, error: str, log_ctx: dict) -> None:
         logger.exception("Could not mark run %d as failed", run_id, extra=log_ctx)
 
 
-async def _run_target_pipeline(target: Target, run_id: int, log_ctx: dict) -> RunStatus | None:
+async def _run_target_pipeline(
+    target: Target,
+    run_id: int,
+    log_ctx: dict,
+    *,
+    collectors: Sequence[BaseCollector] | None = None,
+    llm_client: LLMClient | None = None,
+) -> RunStatus | None:
     """Execute one run end to end and return its final status.
 
     Sequence: mark RUNNING → run enabled collectors sequentially (each
@@ -664,7 +694,7 @@ async def _run_target_pipeline(target: Target, run_id: int, log_ctx: dict) -> Ru
     results: list[CollectorResult] = []
     errors: list[str] = []
 
-    for collector in _get_collectors(target):
+    for collector in _get_collectors(target) if collectors is None else collectors:
         name = collector.name.value
         collector_started = perf_counter()
         try:
@@ -708,7 +738,7 @@ async def _run_target_pipeline(target: Target, run_id: int, log_ctx: dict) -> Ru
 
     evidence_items = [item for result in results for item in result.evidence]
     qualifications: list[EvidenceQualification] = []
-    qualification_client = await _qualification_client(target, evidence_items)
+    qualification_client = await _qualification_client(target, evidence_items, client=llm_client)
     qualification_attempted = qualification_client is not None
     if qualification_attempted:
         qualifications = await qualify_evidence(
@@ -897,7 +927,7 @@ async def _run_target_pipeline(target: Target, run_id: int, log_ctx: dict) -> Ru
     )
 
     # Synthesize: collect → normalize → ingest → SYNTHESIZE → report.
-    finding, synthesis_status = await synthesize(target, run_id, report_data)
+    finding, synthesis_status = await synthesize(target, run_id, report_data, client=llm_client)
     metrics.synthesis_total.labels(target.id, synthesis_status or "unknown").inc()
 
     report_error: str | None = None

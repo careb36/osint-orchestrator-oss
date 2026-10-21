@@ -192,3 +192,53 @@ def test_autogenerate_no_differences(tmp_db_url):
         assert diffs == [], f"Autogenerate found unexpected differences: {diffs}"
     finally:
         engine_.dispose()
+
+
+def test_0010_fails_stale_active_runs_before_adding_the_unique_index(tmp_db_url):
+    """
+    An existing database may hold two active rows for one target (a crash
+    before the startup cleanup). 0010 fails them first, then creates
+    ``ux_runs_one_active_per_target``, which refuses a second active row.
+    """
+    cfg = _make_alembic_cfg(tmp_db_url)
+    alembic_command.upgrade(cfg, "0009")
+
+    engine_ = create_engine(tmp_db_url)
+    try:
+        with engine_.begin() as conn:
+            for status in ("RUNNING", "PENDING", "SUCCESS"):
+                conn.execute(
+                    text(
+                        "INSERT INTO runs (target_id, started_at, status, collectors_run, "
+                        "new_observables) VALUES ('t1', '2026-10-21 00:00:00', :status, '', 0)"
+                    ),
+                    {"status": status},
+                )
+        alembic_command.upgrade(cfg, "head")
+
+        with engine_.connect() as conn:
+            rows = conn.execute(text("SELECT status, error FROM runs ORDER BY id")).fetchall()
+            assert [r[0] for r in rows] == ["FAILED", "FAILED", "SUCCESS"]
+            assert all("interrupted" in r[1] for r in rows[:2]) and rows[2][1] is None
+            indexes = {i["name"] for i in inspect(engine_).get_indexes("runs")}
+            assert "ux_runs_one_active_per_target" in indexes
+        with engine_.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO runs (target_id, started_at, status, collectors_run, "
+                    "new_observables) VALUES ('t1', '2026-10-21 00:00:00', 'PENDING', '', 0)"
+                )
+            )
+        with pytest.raises(sa.exc.IntegrityError), engine_.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO runs (target_id, started_at, status, collectors_run, "
+                    "new_observables) VALUES ('t1', '2026-10-21 00:00:00', 'RUNNING', '', 0)"
+                )
+            )
+        alembic_command.downgrade(cfg, "0009")
+        assert "ux_runs_one_active_per_target" not in {
+            i["name"] for i in inspect(engine_).get_indexes("runs")
+        }
+    finally:
+        engine_.dispose()

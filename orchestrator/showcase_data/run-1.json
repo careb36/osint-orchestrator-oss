@@ -1,0 +1,229 @@
+{
+  "showcase_version": 1,
+  "target_id": "showcase-example",
+  "collectors": [
+    {
+      "collector": "openosint",
+      "observables": [
+        {
+          "type": "domain-name",
+          "value": "meridian-ridge.example",
+          "extra": {
+            "source_tools": [
+              "dns",
+              "whois"
+            ]
+          }
+        },
+        {
+          "type": "ipv4-addr",
+          "value": "203.0.113.17",
+          "extra": {
+            "source_tools": [
+              "dns"
+            ]
+          }
+        },
+        {
+          "type": "domain-name",
+          "value": "mail.meridian-ridge.example",
+          "extra": {
+            "source_tools": [
+              "dns"
+            ]
+          }
+        },
+        {
+          "type": "email-addr",
+          "value": "press@meridian-ridge.example",
+          "extra": {
+            "source_tools": [
+              "whois"
+            ]
+          }
+        }
+      ],
+      "relationships": [
+        {
+          "source_value": "meridian-ridge.example",
+          "source_type": "domain-name",
+          "target_value": "203.0.113.17",
+          "target_type": "ipv4-addr",
+          "relationship_type": "resolves-to"
+        },
+        {
+          "source_value": "mail.meridian-ridge.example",
+          "source_type": "domain-name",
+          "target_value": "meridian-ridge.example",
+          "target_type": "domain-name",
+          "relationship_type": "related-to"
+        }
+      ],
+      "notes": [
+        "openosint: 4 entities from dns and whois (depth 2)"
+      ],
+      "evidence": []
+    },
+    {
+      "collector": "tavily",
+      "observables": [
+        {
+          "type": "url",
+          "value": "https://registry.example/companies/MRH-2041-7",
+          "extra": {
+            "source": "tavily"
+          }
+        },
+        {
+          "type": "url",
+          "value": "https://news.example/business/meridian-ridge-expands-port-logistics",
+          "extra": {
+            "source": "tavily"
+          }
+        },
+        {
+          "type": "url",
+          "value": "https://news.example/markets/customs-authority-fines-meridian-ridge",
+          "extra": {
+            "source": "tavily"
+          }
+        },
+        {
+          "type": "url",
+          "value": "https://courts.example/civil/2024/cv-1187",
+          "extra": {
+            "source": "tavily"
+          }
+        },
+        {
+          "type": "url",
+          "value": "https://blog.example/travel/meridian-ridge-trail-guide",
+          "extra": {
+            "source": "tavily"
+          }
+        }
+      ],
+      "relationships": [],
+      "notes": [
+        "tavily | Meridian Ridge Holdings S.A. — company record MRH-2041-7 | url=https://registry.example/companies/MRH-2041-7 | published=2026-03-31 | snippet=Registered 2014. Directors: A. Okafor (chair), L. Brennan, T. Varga. Share capital held 60 % by Meridian Ridge Capital Ltd (registered in Port Vale) and 40 % by three natural persons. Last annual retu",
+        "tavily | Meridian Ridge Holdings expands port logistics arm with two new terminals | url=https://news.example/business/meridian-ridge-expands-port-logistics | published=2026-02-11 | snippet=The group signed a 20-year concession for two container terminals at Port Vale, financed by a syndicated loan of 140 million. The chief executive said the terminals will start operating in the second ",
+        "tavily | Customs authority fines Meridian Ridge subsidiary over misdeclared cargo | url=https://news.example/markets/customs-authority-fines-meridian-ridge | published=2025-11-20 | snippet=The customs authority imposed a fine of 2.3 million on Meridian Ridge Trading for misdeclared cargo in 14 shipments during 2025. The company said it would not appeal and has replaced its customs broke",
+        "tavily | Harbour Supply Co. v. Meridian Ridge Holdings — civil case CV-1187/2024 | url=https://courts.example/civil/2024/cv-1187 | published=2025-06-03 | snippet=Contract dispute over delayed payments for crane maintenance. Claim of 410,000. Dismissed on 2025-06-03 after the parties reached a settlement; terms not disclosed.",
+        "tavily | Meridian Ridge trail guide: a two-day hike above the lakes | url=https://blog.example/travel/meridian-ridge-trail-guide | published=2024-07-19 | snippet=Trail notes, water sources and campsites for the Meridian Ridge traverse. Best season is late spring."
+      ],
+      "evidence": [
+        {
+          "url": "https://registry.example/companies/MRH-2041-7",
+          "title": "Meridian Ridge Holdings S.A. — company record MRH-2041-7",
+          "snippet": "Registered 2014. Directors: A. Okafor (chair), L. Brennan, T. Varga. Share capital held 60 % by Meridian Ridge Capital Ltd (registered in Port Vale) and 40 % by three natural persons. Last annual return filed 2026-03-31.",
+          "published": "2026-03-31",
+          "query": "\"Meridian Ridge Holdings\" ownership structure shareholders ultimate beneficial owner"
+        },
+        {
+          "url": "https://news.example/business/meridian-ridge-expands-port-logistics",
+          "title": "Meridian Ridge Holdings expands port logistics arm with two new terminals",
+          "snippet": "The group signed a 20-year concession for two container terminals at Port Vale, financed by a syndicated loan of 140 million. The chief executive said the terminals will start operating in the second half of 2027.",
+          "published": "2026-02-11",
+          "query": "\"Meridian Ridge Holdings\" adverse news OR sanctions OR litigation OR regulatory action"
+        },
+        {
+          "url": "https://news.example/markets/customs-authority-fines-meridian-ridge",
+          "title": "Customs authority fines Meridian Ridge subsidiary over misdeclared cargo",
+          "snippet": "The customs authority imposed a fine of 2.3 million on Meridian Ridge Trading for misdeclared cargo in 14 shipments during 2025. The company said it would not appeal and has replaced its customs broker.",
+          "published": "2025-11-20",
+          "query": "\"Meridian Ridge Holdings\" adverse news OR sanctions OR litigation OR regulatory action"
+        },
+        {
+          "url": "https://courts.example/civil/2024/cv-1187",
+          "title": "Harbour Supply Co. v. Meridian Ridge Holdings — civil case CV-1187/2024",
+          "snippet": "Contract dispute over delayed payments for crane maintenance. Claim of 410,000. Dismissed on 2025-06-03 after the parties reached a settlement; terms not disclosed.",
+          "published": "2025-06-03",
+          "query": "\"Meridian Ridge Holdings\" legal proceedings court case settlement investigation"
+        },
+        {
+          "url": "https://blog.example/travel/meridian-ridge-trail-guide",
+          "title": "Meridian Ridge trail guide: a two-day hike above the lakes",
+          "snippet": "Trail notes, water sources and campsites for the Meridian Ridge traverse. Best season is late spring.",
+          "published": "2024-07-19",
+          "query": "\"Meridian Ridge Holdings\" legal proceedings court case settlement investigation"
+        }
+      ]
+    }
+  ],
+  "qualifications": [
+    {
+      "url": "https://registry.example/companies/MRH-2041-7",
+      "category": "corporate_profile",
+      "relevance": "high",
+      "confidence": 0.91,
+      "rationale": {
+        "en": "Official company record naming the directors and the shareholders; the majority holder is a company, so the beneficial owner is one step further.",
+        "es": "Registro oficial de la sociedad con directores y accionistas; el accionista mayoritario es otra sociedad, así que el beneficiario final queda un paso más allá."
+      }
+    },
+    {
+      "url": "https://news.example/business/meridian-ridge-expands-port-logistics",
+      "category": "corporate_profile",
+      "relevance": "medium",
+      "confidence": 0.84,
+      "rationale": {
+        "en": "Business news about the group's own expansion; it describes the entity but reports nothing adverse.",
+        "es": "Noticia económica sobre la expansión del grupo; describe a la entidad y no informa de nada adverso."
+      }
+    },
+    {
+      "url": "https://news.example/markets/customs-authority-fines-meridian-ridge",
+      "category": "regulatory_action",
+      "relevance": "high",
+      "confidence": 0.89,
+      "rationale": {
+        "en": "A regulator's sanction against a subsidiary, with amount, period and the company's response; directly relevant to the entity.",
+        "es": "Sanción de un regulador a una filial, con importe, periodo y la respuesta de la empresa; atañe directamente a la entidad."
+      }
+    },
+    {
+      "url": "https://courts.example/civil/2024/cv-1187",
+      "category": "litigation",
+      "relevance": "medium",
+      "confidence": 0.8,
+      "rationale": {
+        "en": "Civil case against the entity, settled and dismissed; a closed commercial dispute of modest amount.",
+        "es": "Causa civil contra la entidad, cerrada por acuerdo; un pleito comercial de importe moderado."
+      }
+    },
+    {
+      "url": "https://blog.example/travel/meridian-ridge-trail-guide",
+      "category": "unrelated",
+      "relevance": "low",
+      "confidence": 0.96,
+      "rationale": {
+        "en": "A hiking guide: the name matches a mountain ridge, not the company.",
+        "es": "Guía de senderismo: el nombre coincide con una sierra, no con la empresa."
+      }
+    }
+  ],
+  "finding": {
+    "en": {
+      "summary": "Baseline run of the fictitious sample entity Meridian Ridge Holdings S.A. (meridian-ridge.example). The company record (registry.example, filed 2026-03-31) names three directors and a corporate majority shareholder, Meridian Ridge Capital Ltd (60 %), whose own owners are not on record. One regulatory action is documented: the customs authority fined the subsidiary Meridian Ridge Trading 2.3 million for misdeclared cargo in 14 shipments of 2025 (news.example, 2025-11-20); the company did not appeal. One civil case, CV-1187/2024, was settled and dismissed on 2025-06-03. The expansion of the port logistics arm (news.example, 2026-02-11) is corporate profile, not adverse. The trail guide is a homonym. Infrastructure: one domain, one address and one mail host, nothing exposed beyond that.",
+      "new_since_last_run": [],
+      "risk_level": "medium",
+      "risk_justification": "A regulator's fine with the company's acknowledgement and an unresolved question about the beneficial owner above the 60 % shareholder. No sanctions listing and no open proceedings at the time of the run.",
+      "suggested_pivots": [
+        "Port Vale company registry: owners of Meridian Ridge Capital Ltd",
+        "Customs authority decisions 2025: the full list of the 14 shipments",
+        "Directors A. Okafor, L. Brennan and T. Varga: other board seats"
+      ]
+    },
+    "es": {
+      "summary": "Ejecución de referencia de la entidad ficticia de muestra Meridian Ridge Holdings S.A. (meridian-ridge.example). El registro de la sociedad (registry.example, presentado el 31 de marzo de 2026) consigna tres directores y un accionista mayoritario que es otra sociedad, Meridian Ridge Capital Ltd (60 %), cuyos propietarios no constan. Hay una acción regulatoria documentada: la autoridad aduanera multó a la filial Meridian Ridge Trading con 2,3 millones por carga mal declarada en 14 embarques de 2025 (news.example, 20 de noviembre de 2025); la empresa no apeló. Una causa civil, CV-1187/2024, terminó por acuerdo y se archivó el 3 de junio de 2025. La ampliación del negocio portuario (news.example, 11 de febrero de 2026) es perfil societario, no información adversa. La guía de senderismo es un homónimo. Infraestructura: un dominio, una dirección y un servidor de correo; nada más expuesto.",
+      "new_since_last_run": [],
+      "risk_level": "medium",
+      "risk_justification": "Una multa de un regulador reconocida por la empresa y una pregunta sin responder sobre el beneficiario final por encima del accionista del 60 %. Sin inclusión en listas de sanciones ni procesos abiertos en el momento de la ejecución.",
+      "suggested_pivots": [
+        "Registro mercantil de Port Vale: propietarios de Meridian Ridge Capital Ltd",
+        "Resoluciones de la autoridad aduanera de 2025: la lista completa de los 14 embarques",
+        "Directores A. Okafor, L. Brennan y T. Varga: otros cargos en consejos"
+      ]
+    }
+  }
+}

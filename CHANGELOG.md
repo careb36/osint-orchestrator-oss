@@ -11,6 +11,25 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- README (both languages): the quickstart has three tiers, from no keys to the
+  full stack: the showcase run, a real Tavily → Nemotron run with
+  `NEBIUS_API_KEY` and `TAVILY_API_KEY` on the `showcase-example` block
+  (no SpiderFoot scan, no OpenCTI), and the OpenCTI profile.
+- Showcase run: `python -m orchestrator.showcase` replays the two recorded runs
+  in `orchestrator/showcase_data/` (a fictitious entity, reserved names only)
+  through the real pipeline, so an empty deployment shows finished runs,
+  qualified evidence, a finding, a signed and chained manifest and an alert
+  case without a collector or an LLM key. The rows say provider `showcase`
+  and model `recorded-sample`; the `showcase-example` target in
+  `targets.example.yaml` ships disabled. `run_target_pipeline`,
+  `_qualification_client` and `synthesize` accept injected collectors and an
+  LLM client for it. See docs/operations.md (Showcase run).
+- One active run per target is now enforced by the database (migration 0010:
+  partial unique index `ux_runs_one_active_per_target` on PENDING and RUNNING
+  rows), not only by the in-process lock of `create_pending_run`: a second
+  process, such as the showcase command, racing the API loses the INSERT and
+  is reported as not admitted. Runs still active when the migration runs are
+  failed first, as the startup cleanup would.
 - Dashboard: the evidence tab of a run names the provider and model that
   qualified the rows ("Qualified by nebius · nvidia/…"), next to the finding
   that already shows its reasoning model and latency. README screenshots
