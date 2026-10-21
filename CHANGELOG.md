@@ -11,6 +11,8 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- README (both languages): the hackathon table now lists the work merged since the
+  first dashboard, from alert cases and the external STIX intake to the threat model.
 - investigation-assistant worker (ADR-011, phase 3): `docker-compose.engine.yml`
   adds a one-shot `investigation-engine` service, built from the operator's
   clone of the producer with its own `Dockerfile`, that exports one case
