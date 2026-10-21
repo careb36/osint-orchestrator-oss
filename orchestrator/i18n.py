@@ -224,6 +224,10 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "es": "Panel del operador (requiere API key)",
         "en": "Operator dashboard (requires API key)",
     },
+    "landing_status": {
+        "es": "En línea",
+        "en": "Online",
+    },
     # /console without a dashboard build (orchestrator/static/ui-dist missing).
     "dashboard_missing_title": {
         "es": "El panel del operador no está instalado",

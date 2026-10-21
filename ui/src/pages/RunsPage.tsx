@@ -124,41 +124,41 @@ export function RunsPage() {
       {visible.length === 0 ? (
         <EmptyState title={t('runs.noMatch.title')} description={t('runs.noMatch.body')} action={clearButton} />
       ) : (
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th scope="col">{t('col.run')}</th>
+        <table className="data-table" role="table">
+          <thead role="rowgroup">
+            <tr role="row">
+              <th role="columnheader" scope="col">{t('col.run')}</th>
               <SortableHeader label={t('col.target')} column="target" sort={controls.sort} onSort={controls.toggleSort} />
               <SortableHeader label={t('col.status')} column="status" sort={controls.sort} onSort={controls.toggleSort} />
               <SortableHeader label={t('col.risk')} column="risk" sort={controls.sort} onSort={controls.toggleSort} naturalDir="desc" />
-              <th scope="col">{t('col.change')}</th>
+              <th role="columnheader" scope="col">{t('col.change')}</th>
               <SortableHeader label={t('col.newObservables')} column="observables" sort={controls.sort} onSort={controls.toggleSort} naturalDir="desc" />
               <SortableHeader label={t('col.started')} column="started" sort={controls.sort} onSort={controls.toggleSort} naturalDir="desc" />
               <SortableHeader label={t('col.duration')} column="duration" sort={controls.sort} onSort={controls.toggleSort} naturalDir="desc" />
             </tr>
           </thead>
-          <tbody>
+          <tbody role="rowgroup">
             {visible.map((run) => {
               const active = isActiveStatus(run.status);
               return (
-                <tr key={run.id}>
-                  <td>
+                <tr role="row" key={run.id}>
+                  <td role="cell" data-label={t('col.run')}>
                     <Link to={`/runs/${run.id}`}>#{run.id}</Link>
                   </td>
-                  <td>
+                  <td role="cell" data-label={t('col.target')}>
                     <Link to={`/targets/${encodeURIComponent(run.target_id)}`}>{run.target_id}</Link>
                   </td>
-                  <td>
+                  <td role="cell" data-label={t('col.status')}>
                     <StatusPill label={run.status} tone={runStatusTone(run.status)} />
                     {run.error ? <small className="error-text"> {run.error}</small> : null}
                   </td>
-                  <td>{run.risk_level ? <StatusPill label={run.risk_level} tone={riskTone(run.risk_level)} /> : <span className="muted">—</span>}</td>
-                  <td>
+                  <td role="cell" data-label={t('col.risk')}>{run.risk_level ? <StatusPill label={run.risk_level} tone={riskTone(run.risk_level)} /> : <span className="muted">—</span>}</td>
+                  <td role="cell" data-label={t('col.change')}>
                     <RunChange transition={transitions.get(run.id)} />
                   </td>
-                  <td>{run.new_observables}</td>
-                  <td>{formatDateTime(run.started_at, locale)}</td>
-                  <td>
+                  <td role="cell" data-label={t('col.newObservables')}>{run.new_observables}</td>
+                  <td role="cell" data-label={t('col.started')}>{formatDateTime(run.started_at, locale)}</td>
+                  <td role="cell" data-label={t('col.duration')}>
                     {active ? (
                       <>
                         {formatDuration(run.started_at, now.toISOString())} <small className="muted">{t('soFar')}</small>
