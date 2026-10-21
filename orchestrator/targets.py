@@ -45,14 +45,36 @@ def load_targets(path: str) -> tuple[list[Target], list[str]]:
 
     loaded_targets: list[Target] = []
     invalid_targets: list[str] = []
+    seen_ids: set[str] = set()
     for idx, raw in enumerate(raw_targets):
         if not isinstance(raw, dict):
             invalid_targets.append(f"<index {idx}>")
             continue
         try:
-            loaded_targets.append(Target(**raw))
+            target = Target(**raw)
         except Exception as exc:  # noqa: BLE001
             target_id = str(raw.get("id", f"<index {idx}>"))
-            logger.warning("Skipping invalid target %s from %s: %s", target_id, path, exc)
+            logger.warning(
+                "Skipping invalid target %s from %s: %s",
+                target_id,
+                path,
+                exc,
+                extra={"target_id": target_id, "path": str(path)},
+            )
             invalid_targets.append(target_id)
+            continue
+        if target.id in seen_ids:
+            # Two blocks with one id would run two configurations under one
+            # name: the API resolves the first block and the scheduler keeps
+            # the last. Only the first block counts; the repeat is reported.
+            logger.warning(
+                "Skipping duplicate target %s from %s: an earlier block already uses this id",
+                target.id,
+                path,
+                extra={"target_id": target.id, "path": str(path)},
+            )
+            invalid_targets.append(target.id)
+            continue
+        seen_ids.add(target.id)
+        loaded_targets.append(target)
     return loaded_targets, sorted(set(invalid_targets))

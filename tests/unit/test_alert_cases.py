@@ -215,3 +215,25 @@ async def test_dlq_replay_route_still_resolves(db) -> None:
         response = client.post("/alerts/dlq/replay")
     assert response.status_code == 200
     assert response.json()["status"] == "replayed"
+
+
+async def test_service_raises_for_an_unknown_case(db) -> None:
+    with pytest.raises(cases_module.AlertCaseNotFoundError):
+        await cases_module.get_case(4242)
+    with pytest.raises(cases_module.AlertCaseNotFoundError):
+        await cases_module.acknowledge_case(4242, by="ana")
+    with pytest.raises(cases_module.AlertCaseNotFoundError):
+        await cases_module.resolve_case(4242, by="ana")
+
+
+async def test_service_refuses_a_second_acknowledgement_and_a_second_resolution(db) -> None:
+    (case_id,) = await _seed_cases(db, 1)
+    acked = await cases_module.acknowledge_case(case_id, by="ana", note="looking")
+    assert (acked.state, acked.acknowledged_by, acked.note) == ("acknowledged", "ana", "looking")
+    with pytest.raises(cases_module.AlertCaseStateConflictError) as conflict:
+        await cases_module.acknowledge_case(case_id, by="bo")
+    assert conflict.value.state == "acknowledged"
+    resolved = await cases_module.resolve_case(case_id, by="bo")
+    assert (resolved.state, resolved.resolved_by, resolved.note) == ("resolved", "bo", "looking")
+    with pytest.raises(cases_module.AlertCaseStateConflictError):
+        await cases_module.resolve_case(case_id, by="bo")

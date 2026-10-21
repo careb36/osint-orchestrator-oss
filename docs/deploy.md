@@ -37,7 +37,7 @@ production deployment cannot leave at their default:
 | `OPENCTI_ADMIN_TOKEN`, the OpenCTI, MinIO and RabbitMQ passwords | Shared between the OpenCTI services and the orchestrator. |
 | `OPENCTI_ENCRYPTION_KEY` | Mandatory since OpenCTI 7.260224.0: the platform encrypts its secrets with it and does not start without one (`openssl rand -base64 32`). Back it up with the OpenCTI volumes. |
 | `ALERT_WEBHOOK_SECRET`, SMTP credentials | Only if alerts are delivered. |
-| `TAVILY_API_KEY`, `NEBIUS_API_KEY` (or the key of the provider chosen in `LLM_PROVIDER`) | Web research and synthesis. |
+| `TAVILY_API_KEY`, `NEBIUS_API_KEY` (or the key of the provider the targets select with `llm`) | Web research and synthesis. Targets default to `llm: local` (Ollama), which needs no key but does need an Ollama endpoint at `LLM_BASE_URL`. |
 
 Compose validates required variables even in inactive profiles: fill the
 OpenCTI credentials and `OPENCTI_ENCRYPTION_KEY`, and the MinIO and RabbitMQ

@@ -44,8 +44,12 @@ Details: [architecture](docs/architecture.md).
 
 ## NVIDIA Nemotron on Nebius Token Factory
 
-`LLM_PROVIDER=nebius` uses the Token Factory OpenAI-compatible endpoint. Two
-model routes are configured independently:
+A target opts into the Token Factory OpenAI-compatible endpoint with
+`llm: nebius` in `targets.yaml` (or with `llm: openai` when
+`LLM_PROVIDER=nebius`). Targets default to `llm: local`, which sends the LLM
+prompts to the Ollama server at `LLM_BASE_URL` and never to a cloud LLM
+provider; the prompts stay on your infrastructure only if that server does.
+Two model routes are configured independently:
 
 | Route | Setting | Model used in our runs | Job | Code |
 | --- | --- | --- | --- | --- |
@@ -53,9 +57,13 @@ model routes are configured independently:
 | reasoning | `LLM_MODEL_REASONING` | `nvidia/nemotron-3-super-120b-a12b` | Risk synthesis for the run | [`synthesizer/__init__.py`](orchestrator/synthesizer/__init__.py) |
 
 Both calls request a JSON-schema response, are retried within a time budget, and
-every returned value is validated before it is stored. At startup the service
-checks that the configured models are served by the provider. Requests, tokens
-and model availability are exported as Prometheus metrics. Provider client:
+every returned value is validated before it is stored. The startup check that
+the configured models are served follows the global setting, not the target's
+`llm`: it runs only with `LLM_PROVIDER=nebius` or `openai` and that provider's
+key set, so a deployment that opts in with `llm: nebius` alone gets no startup
+check.
+Requests, tokens and model availability are exported as Prometheus metrics.
+Provider client:
 [`providers/openai_compat.py`](orchestrator/synthesizer/providers/openai_compat.py).
 
 ## Tavily

@@ -11,6 +11,15 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- investigation-assistant worker (ADR-011, phase 3): `docker-compose.engine.yml`
+  adds a one-shot `investigation-engine` service, built from the operator's
+  clone of the producer with its own `Dockerfile`, that exports one case
+  (`INVESTIGATION_CASE`, default `demo_simulado`) and posts its STIX bundle to
+  `POST /bundles` once the orchestrator is healthy. The case corpus is mounted
+  read-only and worked on in a tmpfs; the worker's key comes from
+  `INVESTIGAR_ORCHESTRATOR_API_KEY` and must be one of the
+  `ORCHESTRATOR_API_KEY` values. One command starts orchestrator, OpenCTI and
+  the worker; see docs/operations.md.
 - External STIX 2.1 intake (ADR-011): `python -m orchestrator.ingest_bundle
   <file> [--work-name …] [--dry-run]` and `POST /bundles` validate a producer's
   bundle against the pinned JSON Schema in `orchestrator/contracts/`, parse it
@@ -137,6 +146,15 @@ from [SECURITY.md](SECURITY.md).
 
 ### Changed
 
+- `targets.yaml` is validated strictly: an unknown key anywhere in a target
+  (`enabeld:`, `schedual:`, `modlues:`) makes that target invalid and reported
+  instead of silently taking the default, a `misfire_grace_time_seconds` below
+  1 is rejected (APScheduler would have aborted the whole registration), and a
+  second block with an already used `id` is skipped and reported; the first
+  block wins, as the API already resolved it.
+- `osint_orchestrator_scheduled_jobs` counts target jobs only; it no longer
+  jumps by three on the first reload once the retention and retry workers
+  are registered.
 - OpenCTI stack moved from `6.8.11` to the long-term line `7.260811.0-lts.1`
   (platform, worker, `connector-import-file-stix`, `connector-opencti`,
   `connector-misp`), with `pycti` pinned to the matching release
@@ -254,6 +272,27 @@ from [SECURITY.md](SECURITY.md).
 
 ### Fixed
 
+- Documentation of LLM provider selection: the per-target `llm` field (default
+  `local`, Ollama) chooses the provider, and `LLM_PROVIDER` is a global switch
+  (`none` disables synthesis, `nebius` routes `llm: openai` targets to Token
+  Factory and selects the startup model check) that never moves a target off
+  Ollama. The READMEs, `SECURITY.md`, `docs/configuration.md`,
+  `docs/architecture.md`, `docs/deploy.md`, `docs/operations.md`,
+  `.env.example`, `targets.example.yaml`, the Helm chart README and values,
+  and the comment on the `llm` extra in `pyproject.toml` said or implied
+  otherwise. `llm: local` is described as the Ollama server at `LLM_BASE_URL`,
+  not as "nothing leaves the host", and the READMEs say that the startup model
+  check needs `LLM_PROVIDER=nebius` (or `openai`) and its key.
+- `http_request_duration_seconds` and `http_requests_total` are recorded when
+  the response is sent, not when the ASGI call returns: a manual run's
+  collectors ran inside that call as a background task and charged minutes of
+  latency to a 202 served in milliseconds.
+- `GET /runs/{id}/report` reads the file instead of checking then reading, so
+  a report purged by retention between the two, or a path that is a
+  directory, is a 404 rather than a 500.
+- The `opencti` and `bundles` tags (`POST /opencti/outbox/replay`,
+  `POST /bundles`) are described in the OpenAPI schema; a test now checks
+  that every tag in use has a description.
 - Installs declare `sqlalchemy[asyncio]`: recent SQLAlchemy releases stopped
   pulling in `greenlet`, so a fresh `pip install` (CI, the Docker image) could
   not import the async engine and every test and container start failed.

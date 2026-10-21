@@ -57,7 +57,15 @@ def _build_cron_trigger(cron_expr: str, *, context: str, job_id: str) -> CronTri
     """Build a cron trigger, returning None for invalid expressions without crashing the loop."""
     parts = cron_expr.strip().split()
     if len(parts) != 5:
-        logger.error("Invalid cron for %s %s: %s", context, job_id, cron_expr)
+        logger.error(
+            "Invalid cron for %s %s: %s",
+            context,
+            job_id,
+            cron_expr,
+            extra={"target_id": job_id, "cron": cron_expr}
+            if context == "target"
+            else {"job": job_id, "cron": cron_expr},
+        )
         return None
 
     try:
@@ -70,7 +78,15 @@ def _build_cron_trigger(cron_expr: str, *, context: str, job_id: str) -> CronTri
             timezone="UTC",
         )
     except ValueError:
-        logger.error("Invalid cron for %s %s: %s", context, job_id, cron_expr)
+        logger.error(
+            "Invalid cron for %s %s: %s",
+            context,
+            job_id,
+            cron_expr,
+            extra={"target_id": job_id, "cron": cron_expr}
+            if context == "target"
+            else {"job": job_id, "cron": cron_expr},
+        )
         return None
 
 
@@ -154,7 +170,11 @@ def register_targets(targets: list[Target]) -> None:
         if job.id.startswith("target-") and job.id.removeprefix("target-") not in desired_ids:
             scheduler.remove_job(job.id)
 
-    metrics.scheduled_jobs.set(len(scheduler.get_jobs()))
+    # Target jobs only: the retention and retry workers are registered after
+    # the first call and would otherwise make the gauge depend on call order.
+    metrics.scheduled_jobs.set(
+        sum(1 for job in scheduler.get_jobs() if job.id.startswith("target-"))
+    )
 
 
 def _current_target_signatures() -> dict[str, tuple[str, int]]:
@@ -397,7 +417,11 @@ def start_scheduler() -> None:
 
     targets, invalid_targets, _ = _load_targets()
     if invalid_targets:
-        logger.warning("Skipped invalid targets at startup: %s", ", ".join(invalid_targets))
+        logger.warning(
+            "Skipped invalid targets at startup: %s",
+            ", ".join(invalid_targets),
+            extra={"invalid_targets": invalid_targets},
+        )
     register_targets(targets)
     register_retention_job()
     register_alert_retry_job()

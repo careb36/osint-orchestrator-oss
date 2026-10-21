@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
-import os
 import re
 import secrets
 import uuid
@@ -189,6 +188,11 @@ _OPENAPI_TAGS = [
     {"name": "runs", "description": "Collection runs: trigger, status, delta, report and finding."},
     {"name": "scheduler", "description": "Runtime reload of cron jobs from targets.yaml."},
     {"name": "alerts", "description": "Alert delivery operations (DLQ replay)."},
+    {"name": "opencti", "description": "OpenCTI outbox operations (DLQ replay)."},
+    {
+        "name": "bundles",
+        "description": "Intake of STIX 2.1 bundles from external producers (ADR-011).",
+    },
     {"name": "analytics", "description": "Aggregated views for the operator console."},
     {"name": "console", "description": "Minimal read-only operator web console."},
 ]
@@ -250,20 +254,15 @@ class RequestContextMiddleware:
         token = request_id_var.set(request_id)
         status_code = 500
         started = perf_counter()
+        recorded = False
 
-        async def send_wrapper(message):  # noqa: ANN001 - ASGI message
-            nonlocal status_code
-            if message["type"] == "http.response.start":
-                status_code = message["status"]
-                headers = list(message.get("headers", []))
-                headers.append((REQUEST_ID_HEADER.lower().encode(), request_id.encode()))
-                message["headers"] = headers
-            await send(message)
-
-        try:
-            await self.app(scope, receive, send_wrapper)
-        finally:
-            request_id_var.reset(token)
+        def record() -> None:
+            # Once per request: when the last body chunk is sent, or in the
+            # finally below for a request that never produced a response.
+            nonlocal recorded
+            if recorded:
+                return
+            recorded = True
             route = scope.get("route")
             # Unmatched paths (404s, probes for /wp-admin) collapse into one
             # label value so they cannot blow up cardinality.
@@ -273,6 +272,26 @@ class RequestContextMiddleware:
             metrics.http_request_duration_seconds.labels(method, path).observe(
                 perf_counter() - started
             )
+
+        async def send_wrapper(message):  # noqa: ANN001 - ASGI message
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = message["status"]
+                headers = list(message.get("headers", []))
+                headers.append((REQUEST_ID_HEADER.lower().encode(), request_id.encode()))
+                message["headers"] = headers
+            await send(message)
+            # Starlette runs BackgroundTasks inside the same app call, after
+            # the response: timing the whole call would charge a manual run's
+            # collectors (minutes) to a 202 that was served in milliseconds.
+            if message["type"] == "http.response.body" and not message.get("more_body", False):
+                record()
+
+        try:
+            await self.app(scope, receive, send_wrapper)
+        finally:
+            request_id_var.reset(token)
+            record()
 
 
 app.add_middleware(RequestContextMiddleware)
@@ -1035,9 +1054,14 @@ async def get_run_report(run_id: int) -> PlainTextResponse:
         raise HTTPException(status_code=404, detail=t("run_not_found", run_id=run_id))
     if not run.report_path:
         raise HTTPException(status_code=404, detail=t("report_not_found", run_id=run_id))
-    if not os.path.exists(run.report_path):
-        raise HTTPException(status_code=404, detail=t("report_not_found", run_id=run_id))
-    return PlainTextResponse(Path(run.report_path).read_text(encoding="utf-8"))
+    # Read, do not check-then-read: the retention job can purge the run
+    # directory between the two, and a path that is a directory is not a
+    # report either. Both are a 404, not a 500.
+    try:
+        body = Path(run.report_path).read_text(encoding="utf-8")
+    except (FileNotFoundError, IsADirectoryError, NotADirectoryError):
+        raise HTTPException(status_code=404, detail=t("report_not_found", run_id=run_id)) from None
+    return PlainTextResponse(body)
 
 
 @router.get("/runs/{run_id}/finding", response_model=dict[str, Any], tags=["runs"])

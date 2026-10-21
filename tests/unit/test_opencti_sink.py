@@ -240,3 +240,43 @@ def test_backoff_doubles_with_bounded_jitter_and_a_cap() -> None:
             assert nominal * 0.75 <= delay <= nominal * 1.25
     for _ in range(50):
         assert backoff_delay(6, base=2.0) <= sink_mod.MAX_BACKOFF_SECONDS  # 128 s nominal
+
+
+def test_sync_ingest_permanent_error_raises_without_waiting(monkeypatch, bundle, sleeps) -> None:
+    """The bundle CLI uses the sync path: a refused token must fail at once."""
+    _, sync_sleep = sleeps
+    auth = ValueError({"name": "AUTH_REQUIRED", "error_message": "You must be logged in"})
+    client = _FakeClient(probe=[auth])
+    sink = _sink_with(monkeypatch, client)
+
+    with pytest.raises(ValueError, match="AUTH_REQUIRED"):
+        sink.ingest(bundle, "w", target_id="t-sync-auth")
+
+    assert client.probe_calls == 1
+    assert sync_sleep.call_count == 0
+
+
+def test_sync_ingest_without_pycti_is_a_noop(monkeypatch, bundle, sleeps) -> None:
+    _, sync_sleep = sleeps
+    sink = _sink_with(monkeypatch, None)
+    sink.ingest(bundle, "w", target_id="t-sync-none")
+    assert sync_sleep.call_count == 0
+
+
+def test_missing_pycti_package_builds_no_client(monkeypatch, caplog) -> None:
+    monkeypatch.setitem(sys.modules, "pycti", None)  # makes ``import pycti`` raise ImportError
+    with caplog.at_level(logging.WARNING, logger="orchestrator.sinks"):
+        sink = OpenCTISink()
+    assert sink._client is None
+    assert any("pycti not installed" in r.getMessage() for r in caplog.records)
+
+
+def test_rejected_summary_names_objects_and_counts_the_overflow() -> None:
+    failed = [{"id": f"domain-name--{i}", "type": "domain-name"} for i in range(11)]
+    failed.insert(1, {"standard_id": "ipv4-addr--1", "entity_type": "IPv4-Addr"})
+    failed.insert(2, "x" * 200)
+
+    summary = sink_mod._rejected_summary(failed)
+
+    assert summary.startswith("domain-name--0 (domain-name), ipv4-addr--1 (IPv4-Addr), " + "x" * 80)
+    assert summary.endswith(" (+3 more)")
