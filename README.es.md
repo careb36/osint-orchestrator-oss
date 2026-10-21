@@ -45,8 +45,13 @@ Detalle: [arquitectura](docs/architecture.md) (en inglés).
 
 ## NVIDIA Nemotron en Nebius Token Factory
 
-`LLM_PROVIDER=nebius` usa el endpoint compatible con OpenAI de Token Factory.
-Hay dos rutas de modelo que se configuran por separado:
+Un objetivo elige el endpoint compatible con OpenAI de Token Factory con
+`llm: nebius` en `targets.yaml` (o con `llm: openai` cuando
+`LLM_PROVIDER=nebius`). Por defecto los objetivos tienen `llm: local`, que
+envía los prompts del LLM al servidor Ollama de `LLM_BASE_URL` y nunca a un
+proveedor de LLM en la nube; los prompts quedan en tu infraestructura solo si
+ese servidor está en ella. Hay dos rutas de modelo que se configuran por
+separado:
 
 | Ruta | Variable | Modelo usado en nuestras corridas | Tarea | Código |
 | --- | --- | --- | --- | --- |
@@ -55,9 +60,13 @@ Hay dos rutas de modelo que se configuran por separado:
 
 Las dos llamadas piden una respuesta con esquema JSON, se reintentan dentro de
 un presupuesto de tiempo, y cada valor devuelto se valida antes de guardarse.
-Al arrancar, el servicio comprueba que el proveedor sirve los modelos
-configurados. Las peticiones, los tokens y la disponibilidad de los modelos se
-exportan como métricas Prometheus. Cliente del proveedor:
+La comprobación al arrancar de que el proveedor sirve los modelos configurados
+depende del ajuste global, no del `llm` del objetivo: solo se ejecuta con
+`LLM_PROVIDER=nebius` u `openai` y la clave de ese proveedor definida, de modo
+que un despliegue que solo pone `llm: nebius` en el objetivo no tiene esa
+comprobación. Las
+peticiones, los tokens y la disponibilidad de los modelos se exportan como
+métricas Prometheus. Cliente del proveedor:
 [`providers/openai_compat.py`](orchestrator/synthesizer/providers/openai_compat.py).
 
 ## Tavily

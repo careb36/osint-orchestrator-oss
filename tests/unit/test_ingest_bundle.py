@@ -115,3 +115,25 @@ def test_a_sink_error_exits_1_without_a_traceback(
 ) -> None:
     monkeypatch.setattr(mod, "OpenCTISink", lambda: _FailingSink(exc))
     assert mod.main([str(FIXTURE)]) == 1
+
+
+def test_an_unreadable_path_exits_2(tmp_path: Path) -> None:
+    # A directory is not readable as a file: the OSError becomes exit code 2.
+    assert mod.main([str(tmp_path)]) == 2
+
+
+def test_invalid_json_exits_2(tmp_path: Path) -> None:
+    path = tmp_path / "broken.json"
+    path.write_text("{not json", encoding="utf-8")
+    assert mod.main([str(path)]) == 2
+
+
+def test_a_rejected_ingest_exits_1(monkeypatch: pytest.MonkeyPatch) -> None:
+    from orchestrator.sinks import OpenCTIIngestError
+
+    class _RejectingSink:
+        def ingest(self, bundle: Any, work_name: str = "osint-orchestrator", **_: Any) -> None:
+            raise OpenCTIIngestError("2 of 4 objects rejected", transient=False)
+
+    monkeypatch.setattr(mod, "OpenCTISink", _RejectingSink)
+    assert mod.main([str(FIXTURE)]) == 1

@@ -136,3 +136,15 @@ def test_missing_or_malformed_targets_file_is_a_load_failure(
     bad.write_text("- not\n- a mapping\n", encoding="utf-8")
     monkeypatch.setattr(settings, "targets_file", str(bad))
     assert _load_targets() == ([], ["<targets-file>"], True)
+
+
+def test_scheduled_jobs_gauge_counts_target_jobs_only(clean_scheduler) -> None:
+    from orchestrator import metrics
+    from orchestrator.scheduler import register_retention_job
+
+    register_retention_job()
+    register_targets([_target("a"), _target("b")])
+    assert metrics.sample("osint_orchestrator_scheduled_jobs") == 2.0
+    # Re-registering with the worker job already present must not count it.
+    register_targets([_target("a")])
+    assert metrics.sample("osint_orchestrator_scheduled_jobs") == 1.0

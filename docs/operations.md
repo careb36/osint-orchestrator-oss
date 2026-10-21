@@ -43,6 +43,60 @@ Each one is off by default and enabled per target in `targets.yaml`.
 | OWASP SocialOSINT | `docker compose --profile socialosint up -d socialosint` | Needs its own OpenAI-compatible model with vision (`SOCIALOSINT_LLM_*`) and platform credentials; a platform without credentials is skipped. Its analysis is stored as an unverified Note. Platform developer terms apply to what you store |
 | MISP | `docker compose -f docker-compose.yml -f docker-compose.misp.yml --profile misp --profile opencti up -d` | Requires both profiles and `OPENCTI_ENABLED=true`. Synchronised through the official OpenCTI connector. First start takes 5–10 minutes; create the API key in MISP (*Administration → List Auth Keys*), set `MISP_KEY` and restart `connector-misp` |
 | OIDC login | `docker compose -f docker-compose.yml -f docker-compose.auth.yml --profile auth up -d` | Keycloak (`:8085`) and oauth2-proxy (`:8002`) in front of the console. No account is shipped: create one in the `orchestrator` realm. API keys keep working ([ADR-006](adr/ADR-006-oidc-proxy.md)) |
+| investigation-assistant worker | `docker compose -f docker-compose.yml -f docker-compose.engine.yml --profile opencti --profile engine up -d --build` | One-shot container that exports one case of the investigation-assistant engine and posts its STIX bundle to `POST /bundles` ([ADR-011](adr/ADR-011-external-stix-producers.md)). Needs `OPENCTI_ENABLED=true`, a clone of the producer and its own API key; see below |
+
+#### investigation-assistant worker
+
+The worker runs the investigation-assistant engine from its own image, built
+from the operator's clone of that repository with its own `Dockerfile`. It
+exports one case to a STIX 2.1 bundle, posts it to `POST /bundles` over the
+compose network (`http://orchestrator:8000`), and exits. It starts only once
+the orchestrator is healthy, which with the `opencti` profile means once
+OpenCTI is up. Its exit status is the result: `0` when the bundle was
+ingested, non-zero when the export was refused or the orchestrator rejected
+the bundle.
+
+Configure it in `.env`:
+
+| Variable | Side | Value |
+| --- | --- | --- |
+| `INVESTIGATION_ASSISTANT_DIR` | worker | Path to the clone of the investigation-assistant repository |
+| `INVESTIGATION_CASE` | worker | Case slug under `<clone>/cases` (default `demo_simulado`) |
+| `INVESTIGAR_ORCHESTRATOR_API_KEY` | worker | The worker's own API key. The producer reads it from the environment only: it is never in the image or on the command line |
+| `ORCHESTRATOR_API_KEY` | orchestrator | Comma-separated list that includes the worker's key. Removing that entry revokes the worker without touching the other keys |
+| `OPENCTI_ENABLED` | orchestrator | `true`: `POST /bundles` answers `409` while the OpenCTI sink is off |
+
+Compose refuses to start the overlay until `INVESTIGATION_ASSISTANT_DIR` and
+`INVESTIGAR_ORCHESTRATOR_API_KEY` are set. A worker key that is not in
+`ORCHESTRATOR_API_KEY` gets `401` and the worker exits non-zero.
+
+Case data never leaves the host except into OpenCTI. `<clone>/cases` is
+mounted read-only. The worker copies the selected case into a tmpfs, runs
+`investigar run` and then `investigar export-stix --ingest`, and the copy, the
+pipeline outputs and the bundle are discarded with the container. The case's
+`case.yaml` must set `stix.fecha_corte`, and `stix.mapeo_cuenta: text` when its
+accounts have no bank or country; the exporter refuses the case otherwise.
+
+Smoke path:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.engine.yml \
+  --profile opencti --profile engine up -d --build
+docker compose -f docker-compose.yml -f docker-compose.engine.yml \
+  logs investigation-engine          # ends with "Ingestado en el orquestador"
+```
+
+The orchestrator logs `OpenCTI ingest OK: work=investigation-assistant:<case>
+objects=<n>` once OpenCTI has accepted the bundle. In the OpenCTI UI the
+case's objects carry the case slug as a label, so filtering by that label
+lists them.
+
+`demo_simulado` holds fictitious data. Every other case holds real case data:
+ingest it only into your own OpenCTI, never into a shared or public instance
+such as the OpenCTI demo.
+
+Out of scope, each a separate decision: scheduled or streaming intake, and
+bundles from producers you do not trust ([ADR-011](adr/ADR-011-external-stix-producers.md)).
 
 Without OpenCTI: keep `OPENCTI_ENABLED=false` (the `.env.example` default) and
 use `docker compose up -d --build` without the `opencti` profile or
@@ -279,7 +333,7 @@ run id.
 | `alert_case_time_to_acknowledge_seconds` | — | Histogram: seconds from a case opening to its acknowledgement |
 | `evidence_chain_verify_total` | `target_id`, `outcome` | Evidence-chain verifications by outcome (`ok`, `broken`, `error`) |
 | `evidence_qualified_total` | `target_id`, `category` | Qualified evidence rows by category (`adverse_media`, `sanctions`, `litigation`, `regulatory_action`, `corporate_profile`, `unrelated`) |
-| `scheduled_jobs` | — | Cron jobs registered in the scheduler |
+| `scheduled_jobs` | — | Target cron jobs registered in the scheduler (the retention and retry workers are not counted) |
 | `build_info` | `version` | Build metadata |
 
 ```promql
@@ -427,7 +481,7 @@ Support SOP:
 | A SpiderFoot scan never finishes | Raise the target's `timeout_seconds`; check the module names are real `sfp_*` modules in that image |
 | Run is `partial` with `opencti-sink:` in `error` | The bundle never reached OpenCTI — check `osint_orchestrator_opencti_ingest_total{outcome="failure"}`, `OPENCTI_URL` and `OPENCTI_ADMIN_TOKEN`; the observables are re-reported as new next run |
 | Reports come out in the wrong language | `ORCHESTRATOR_LANGUAGE`, or the target's `language`; an unrecognised value is logged and ignored |
-| A run finishes with no finding / `synthesis_total{status="failed"}` grows | The LLM endpoint is unreachable — compose ships no Ollama service; check `LLM_BASE_URL` or switch `LLM_PROVIDER` |
+| A run finishes with no finding / `synthesis_total{status="failed"}` grows | The LLM endpoint is unreachable. Targets default to `llm: local`, which is Ollama, and compose ships no Ollama service: point `LLM_BASE_URL` at one, or set the target's `llm` to a cloud provider and configure its key. `LLM_PROVIDER` alone does not move a target off Ollama |
 | Synthesis always unavailable | Check startup logs for `LLM model not served by provider` and `osint_orchestrator_llm_model_available{...} == 0`; switch to an id listed by the provider `GET /models` |
 | Browser login loops or `502` on `:8002` with the auth overlay | Keycloak not healthy yet, or `AUTH_PROXY_PORT`/`AUTH_REDIRECT_URL` disagree — both must use the same port (`.env.example` ships 8002) |
 | `osint_orchestrator_scheduled_jobs` is lower than expected | A target is `enabled: false`, or its `cron` is not five fields — both are skipped, the second with an `ERROR` log |

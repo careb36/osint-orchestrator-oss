@@ -48,18 +48,29 @@ Defaults shown are the ones shipped in `.env.example` for Docker.
 
 ### LLM
 
+The provider a target talks to is decided per target, by the `llm` field in
+`targets.yaml` (see the target fields below). `local`, the default, sends the
+LLM prompts to the Ollama server at `LLM_BASE_URL` and never to a cloud LLM
+provider; the prompts stay on your infrastructure only if that server does.
+`anthropic`, `openai` and `nebius` need their key from this table.
+`LLM_PROVIDER` never makes a target use a different provider family than its
+`llm` names. It is a global switch with three effects: `none` turns synthesis off
+for every target, `nebius` routes `llm: openai` targets to Token Factory, and
+`openai` or `nebius` selects the provider whose model list the startup check
+queries.
+
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `LLM_PROVIDER` | `ollama` | `ollama` \| `anthropic` \| `openai` \| `nebius` \| `none` (synthesis off). |
+| `LLM_PROVIDER` | `ollama` | `ollama` \| `anthropic` \| `openai` \| `nebius` \| `none`. Global switch only (see above); it does not pick a target's provider. `none` disables synthesis for every target. |
 | `LLM_MODEL` | `llama3.2` | Model for the cloud providers; fallback for both routes. |
 | `LLM_MODEL_REASONING` | *(empty)* | Model for the synthesis call (reasoning route); falls back to `LLM_MODEL`. |
 | `LLM_MODEL_FAST` | *(empty)* | Model for evidence qualification (fast route); falls back to `LLM_MODEL`. |
 | `OLLAMA_MODEL` | `llama3.2` | Model Ollama serves for targets with `llm: local` (separate from `LLM_MODEL`, which names the cloud model). |
 | `LLM_BASE_URL` | `http://ollama:11434` | Ollama endpoint; ignored by the cloud providers. |
-| `ANTHROPIC_API_KEY` | *(empty)* | Required when `LLM_PROVIDER=anthropic`. |
-| `OPENAI_API_KEY` | *(empty)* | Required when `LLM_PROVIDER=openai`. |
+| `ANTHROPIC_API_KEY` | *(empty)* | Required by targets with `llm: anthropic`; without it they skip synthesis. |
+| `OPENAI_API_KEY` | *(empty)* | Required by targets with `llm: openai` (unless `LLM_PROVIDER=nebius`); without it they skip synthesis. |
 | `OPENAI_BASE_URL` | *(empty)* | Optional base URL for OpenAI-compatible endpoints. |
-| `NEBIUS_API_KEY` | *(empty)* | Required when `LLM_PROVIDER=nebius`. |
+| `NEBIUS_API_KEY` | *(empty)* | Required by targets with `llm: nebius`, and by `llm: openai` targets when `LLM_PROVIDER=nebius`; without it they skip synthesis. |
 | `NEBIUS_BASE_URL` | `https://api.tokenfactory.nebius.com/v1` | Nebius Token Factory OpenAI-compatible base URL. |
 | `LLM_TIMEOUT_SECONDS` | `120` | End-to-end timeout for a synthesis request. |
 | `LLM_MAX_TOKENS` | `2048` | Upper bound on the model reply. |
@@ -116,6 +127,12 @@ as the audit trail of why the collection happened. The file is re-read on each
 API and scheduler call; after editing `schedule.cron` or `enabled`, apply it
 with `POST /scheduler/reload`.
 
+Validation is strict: a key the schema does not know (a misspelt `enabeld:` or
+`schedual:`, at any level) makes that target invalid, and so does a second
+block reusing an `id` (the first block is kept). Invalid targets are skipped,
+logged with their id, and listed by `POST /scheduler/reload`; the rest of the
+file still loads.
+
 ```yaml
 targets:
   - id: my-domain
@@ -142,7 +159,7 @@ targets:
 | `authorization` | *required* | Who approved this target and when |
 | `purpose` | *required* | Why it is monitored |
 | `enabled` | `true` | `false` skips the cron job; a manual run returns `400` |
-| `llm` | `local` | `local` \| `anthropic` \| `openai` \| `nebius` — overrides `LLM_PROVIDER` |
+| `llm` | `local` | Provider for this target's synthesis and evidence qualification. `local` sends the prompts to the Ollama server at `LLM_BASE_URL`, never to a cloud LLM provider; `anthropic` \| `openai` \| `nebius` need their API key. Two global exceptions: `LLM_PROVIDER=none` disables synthesis even for `local`, and `LLM_PROVIDER=nebius` sends `openai` targets to Nebius (they then need `NEBIUS_API_KEY`) |
 | `language` | *(inherit)* | `es` \| `en` — overrides `ORCHESTRATOR_LANGUAGE` |
 | `report_dir` | `daily_reports` | Root directory for this target's artifacts |
 

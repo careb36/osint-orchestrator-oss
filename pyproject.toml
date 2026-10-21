@@ -72,9 +72,13 @@ dev = [
     "types-PyYAML>=6.0.12",
 ]
 # llm: SDKs of the cloud synthesis providers. Both are imported lazily, so the
-# unit tests run without them, but LLM_PROVIDER=openai|nebius needs `openai`
-# and LLM_PROVIDER=anthropic needs `anthropic` at runtime. The Docker image
-# installs this extra; a local install without it fails every synthesis.
+# unit tests run without them, but a target with `llm: openai` or `llm: nebius`
+# needs `openai` and one with `llm: anthropic` needs `anthropic` at runtime.
+# LLM_PROVIDER does not change which SDK a target needs (under
+# LLM_PROVIDER=nebius an `llm: openai` target goes to Nebius, still through
+# `openai`), except that LLM_PROVIDER=none makes no LLM call at all. The Docker
+# image installs this extra; a local install without it fails every synthesis
+# of those targets.
 llm = [
     "openai>=1.40.0",
     "anthropic>=0.34.0",

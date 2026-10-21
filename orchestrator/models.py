@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, ValidationInfo, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 from sqlalchemy import Index
 from sqlmodel import Column, DateTime, SQLModel
 from sqlmodel import Field as SQLField
@@ -136,6 +136,10 @@ class CollectorConfig(BaseModel):
     docs/configuration.md (targets.yaml).
     """
 
+    # A misspelt key (``modules:`` as ``modlues:``) is a configuration error
+    # the operator must see, not a silent fall-back to the default.
+    model_config = ConfigDict(extra="forbid")
+
     enabled: bool = True
     investigation_type: str = "domain"  # for openosint
     modules: list[str] = Field(default_factory=list)  # for spiderfoot
@@ -224,6 +228,8 @@ class CollectorSet(BaseModel):
     disabled with their timeout taken from the corresponding global settings.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     openosint: CollectorConfig = Field(default_factory=CollectorConfig)
     spiderfoot: CollectorConfig = Field(default_factory=CollectorConfig)
     socialosint: CollectorConfig = Field(
@@ -283,12 +289,18 @@ class ScheduleConfig(BaseModel):
     rather than fired late.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     cron: str = "0 8 * * *"
-    misfire_grace_time_seconds: int = 3600
+    # APScheduler accepts only a positive grace time; 0 would make add_job
+    # raise and abort the registration of every target after this one.
+    misfire_grace_time_seconds: int = Field(default=3600, ge=1)
 
 
 class AlertsConfig(BaseModel):
     """Per-target alert dispatch configuration."""
+
+    model_config = ConfigDict(extra="forbid")
 
     enabled: bool = True
     # Trigger an alert whenever there are new observables in a run.
@@ -319,6 +331,11 @@ class Target(BaseModel):
     written into every run report as the audit trail for why the collection
     happened (see the Authorised-use policy in README / SECURITY.md).
     """
+
+    # Unknown keys are rejected so that ``enabeld: false`` or ``schedual:``
+    # make the target invalid (and reported) instead of running it with the
+    # defaults. The nested blocks forbid extras for the same reason.
+    model_config = ConfigDict(extra="forbid")
 
     id: str
     enabled: bool = True
