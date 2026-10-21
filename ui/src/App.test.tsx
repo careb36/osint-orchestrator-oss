@@ -454,6 +454,8 @@ describe('App shell', () => {
     await user.click(screen.getByRole('tab', { name: /evidence/i }));
     const table = await within(screen.getByRole('tabpanel')).findByRole('table');
     const rowsOf = () => within(table).getAllByRole('row').slice(1);
+    // The fast route that qualified the rows is named once above the table.
+    expect(screen.getByTestId('evidence-qualified-by')).toHaveTextContent('Qualified by nebius · test-model');
     // Default: relevance descending.
     expect(rowsOf().map((row) => row.textContent)).toEqual([
       expect.stringContaining('Leaked credential pair'),
