@@ -11,6 +11,15 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- Showcase run: `python -m orchestrator.showcase` replays the two recorded runs
+  in `orchestrator/showcase_data/` (a fictitious entity, reserved names only)
+  through the real pipeline, so an empty deployment shows finished runs,
+  qualified evidence, a finding, a signed and chained manifest and an alert
+  case without a collector or an LLM key. The rows say provider `showcase`
+  and model `recorded-sample`; the `showcase-example` target in
+  `targets.example.yaml` ships disabled. `run_target_pipeline`,
+  `_qualification_client` and `synthesize` accept injected collectors and an
+  LLM client for it. See docs/operations.md (Showcase run).
 - README (both languages): the hackathon table now lists the work merged since the
   first dashboard, from alert cases and the external STIX intake to the threat model.
 - investigation-assistant worker (ADR-011, phase 3): `docker-compose.engine.yml`

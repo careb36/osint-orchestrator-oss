@@ -117,6 +117,31 @@ en `.env`.
 Después, ver [operación](docs/operations.md), [configuración](docs/configuration.md)
 y, para un servidor, [despliegue](docs/deploy.md) (en inglés).
 
+### Verlo primero: la corrida de muestra (sin claves de API)
+
+Antes de configurar un colector o un proveedor de modelos, reproduzca la
+muestra grabada con el pipeline real y abra la consola con dos corridas
+terminadas:
+
+```bash
+docker compose up -d --build              # la instalación ligera de arriba
+docker compose exec orchestrator python -m orchestrator.showcase
+# después, http://localhost:8000/console
+```
+
+La muestra reproduce [`orchestrator/showcase_data/`](orchestrator/showcase_data/):
+una entidad ficticia (nombres `.example` reservados, direcciones TEST-NET)
+evaluada dos veces; la segunda corrida añade una entrada en una lista de
+sanciones y una investigación sobre la propiedad. Solo están grabados la
+salida de los colectores y las respuestas del modelo; la normalización a STIX,
+el delta respecto de la primera corrida, el informe, `qualified_evidence.json`,
+el manifiesto firmado y encadenado y el caso de alerta los produce en su
+máquina el mismo código que usa una corrida programada. Las filas dicen
+proveedor `showcase` y modelo `recorded-sample`: la consola nunca atribuye a
+un modelo algo que no ejecutó. El objetivo `showcase-example` viene con
+`enabled: false`: el planificador no lo ejecuta y no cuesta ninguna llamada.
+Detalles en [operación](docs/operations.md#showcase-run) (en inglés).
+
 **Panel del operador:** <http://localhost:8000/console>, en español o inglés.
 Cifras clave, objetivos ordenados por lo que requiere atención, corridas
 activas, hallazgos, evidencia con búsqueda y filtros, y un botón para iniciar

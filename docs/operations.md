@@ -112,6 +112,55 @@ The orchestrator is single-instance by design (SQLite and an in-process
 scheduler): one replica, `Recreate` strategy, one `ReadWriteOnce` volume
 ([ADR-005](adr/ADR-005-api-auth-and-single-instance.md)).
 
+## Showcase run
+
+`python -m orchestrator.showcase` fills an empty deployment with two finished
+runs of a fictitious entity so the console, the reports and the evidence chain
+can be seen before any collector or model provider is configured. It needs no
+network and no API key.
+
+```bash
+docker compose exec orchestrator python -m orchestrator.showcase
+# bare metal, from the repository root:
+python -m orchestrator.showcase
+```
+
+What it does. Each recording in
+[`orchestrator/showcase_data/`](../orchestrator/showcase_data/) (`run-1.json`,
+`run-2.json`, replayed in that order) holds the output of the collectors
+(observables, relationships, notes, web evidence) and the answers of the
+model: one qualification per evidence item and one finding, both in Spanish
+and in English. The command hands them to the pipeline through a collector
+that returns the recorded `CollectorResult` and an LLM client that answers
+the qualification and synthesis prompts from the recording; everything else
+is the production code path (`orchestrator/pipeline.py`): STIX normalisation,
+`is_new` against the target's `seen_observables`, `RunObservable` rows, the
+synthesis validation, `report.md`, `bundle.stix.json`, `delta.json`,
+`report.pdf`, `qualified_evidence.json`, the manifest signed with
+`ORCHESTRATOR_SECRET_KEY` and chained to the previous run (ADR-007), the
+daily index and the alert case. The runs are ordinary rows: retention purges
+them after `ORCHESTRATOR_RETENTION_DAYS`, `GET /targets/showcase-example/chain/verify`
+verifies them, and a configured alert channel receives their alerts like any
+other run's.
+
+What it is honest about. The entity uses reserved names (`.example`
+domains, `203.0.113.0/24` addresses) and the texts are written, not model
+output: every `evidence_qualifications` and `findings` row says provider
+`showcase` and model `recorded-sample`. The target block in
+`targets.example.yaml` ships `enabled: false`, so the scheduler never runs it
+and `POST /targets/showcase-example/run` answers 400; the replay admits its
+runs directly. To turn the block into a real target, set `enabled: true`,
+replace `fqdn` and `search_terms` with an entity you are authorised to
+assess, and set `NEBIUS_API_KEY` and `TAVILY_API_KEY`.
+
+Preconditions, each reported with exit code 1: `OPENCTI_ENABLED=false`
+(the sample must not be ingested into a knowledge graph); the target
+`showcase-example` present in `targets.yaml` (copy the block from
+`targets.example.yaml`); no run of that target pending or running. The
+recordings' language follows the target's `language`, then
+`ORCHESTRATOR_LANGUAGE`. `--seed-dir` points the command at another
+directory of `run-*.json` files, for example a recording of your own.
+
 ## API
 
 Interactive reference: `/docs` (OpenAPI at `/openapi.json`). Public routes are

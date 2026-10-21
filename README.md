@@ -112,6 +112,29 @@ or set `COMPOSE_PROFILES=opencti` in `.env`.
 Then see [operations](docs/operations.md), [configuration](docs/configuration.md)
 and, for a server, [deploy](docs/deploy.md).
 
+### See it first: the showcase run (no API keys)
+
+Before configuring a collector or a model provider, replay the recorded sample
+through the real pipeline and open the console with two finished runs in it:
+
+```bash
+docker compose up -d --build              # the lightweight stack above
+docker compose exec orchestrator python -m orchestrator.showcase
+# then http://localhost:8000/console
+```
+
+The showcase replays [`orchestrator/showcase_data/`](orchestrator/showcase_data/): a fictitious entity
+(reserved `.example` names, TEST-NET addresses) assessed twice, the second run
+adding a sanctions-list entry and an ownership investigation. Only the
+collector output and the model's answers are recorded; normalisation to STIX,
+the delta against the first run, the report, `qualified_evidence.json`, the
+signed and chained manifest and the alert case are produced on your machine
+by the same code a scheduled run uses. The rows say provider `showcase` and
+model `recorded-sample`, so the console never credits a model that did not
+run. The target `showcase-example` ships `enabled: false`: the scheduler never
+runs it and it costs no API call. Details in
+[operations](docs/operations.md#showcase-run).
+
 **Operator dashboard:** <http://localhost:8000/console>, in Spanish or English.
 Key figures, targets ordered by what needs attention, active runs, findings,
 evidence with search and filters, and a Start-run action; it asks for
