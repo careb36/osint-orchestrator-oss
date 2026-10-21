@@ -1637,7 +1637,17 @@ TRIAGE: dict[str, dict[str, Response]] = {
     },
     # ── High ──
     "AA03": {  # Exploitation of Trusted Credentials
-        "sidecar": _NO_SESSIONS,
+        "sidecar": (
+            "accepted",
+            "Two sidecars hold credentials of their own: Amass the data-source keys mounted "
+            "read-only from amass/datasources.yaml, SocialOSINT its platform tokens and LLM key "
+            "in its environment. A compromised sidecar can reuse them against those services, "
+            "and a loopback-only listener does not contain that. Scope: each sidecar sees only "
+            "its own credentials, never the orchestrator's keys or another sidecar's, and "
+            "SpiderFoot and Ollama hold none. Hardening: least-privilege keys issued per "
+            "sidecar, rotation on a schedule, read-only root filesystems and network policies "
+            "that limit each sidecar to the services it needs.",
+        ),
         "vendor": (
             "accepted",
             "Static long-lived tokens are the integration contract with OpenCTI "
@@ -1982,9 +1992,12 @@ TRIAGE: dict[str, dict[str, Response]] = {
         "vendor": _VENDOR_INPUT,
         "store": (
             "accepted",
-            "Stores grow with runs: the scheduler's retention purge bounds SQLite rows and "
-            "daily_reports; asset.db and targets.yaml grow with the inventory only. Hardening: "
-            "disk quotas and monitoring on the volumes.",
+            "Stores grow with runs. The scheduler's retention purge bounds run rows and "
+            "daily_reports but keeps seen_observables on purpose (retention.py: the delta memory "
+            "between runs), so SQLite still grows with every new observable; asset.db is outside "
+            "the purge and grows with every Amass run; targets.yaml grows with the inventory "
+            "only. Hardening: disk quotas and monitoring on the volumes, and a prune of "
+            "seen_observables for retired targets.",
         ),
     },
     "DO01": {  # Flooding
