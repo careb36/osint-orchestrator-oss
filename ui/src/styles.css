@@ -800,7 +800,9 @@ code {
   background: var(--panel);
   border: 1px solid var(--hairline);
   border-radius: var(--r-card);
-  overflow: hidden;
+  /* clip, not hidden: hidden would make the table a scroll container and the
+     sticky headers would stick to it (it never scrolls) instead of the page. */
+  overflow: clip;
   font-size: 13px;
   line-height: 18px;
 }
