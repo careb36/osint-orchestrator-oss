@@ -29,9 +29,9 @@ A response is written per class: the same threat means something different on th
 
 Every finding carries a triage response:
 
-- **accepted**: 615 finding(s)
+- **accepted**: 631 finding(s)
 - **mitigated**: 21 finding(s)
-- **transferred**: 674 finding(s)
+- **transferred**: 658 finding(s)
 
 ## Triage summary by threat and element class
 
@@ -48,6 +48,7 @@ Every finding carries a triage response:
 | AA02 Principal Spoof | Medium | vendor | accepted | The orchestrator submits without SMTP AUTH unless ALERT_SMTP_USER is set (the modelled default): who may submit is then the relay's policy (a network restriction or mandatory AUTH on a submission relay), and STARTTLS with certificate verification authenticates the relay, not the sender. Hardening: ALERT_SMTP_USER and ALERT_SMTP_PASSWORD. |
 | AA02 Principal Spoof | Medium | vendor | transferred | Authentication and authorisation inside Keycloak, OpenCTI, MISP, Tavily, oauth2-proxy, connector-misp and the credentialed backing services (MinIO, RabbitMQ, MariaDB) are the vendor's. |
 | AA03 Exploitation of Trusted Credentials | High | sidecar | accepted | SpiderFoot, Amass, SocialOSINT and Ollama have no sessions and no authentication; they are reachable only on loopback or the compose bridge (ADR-005). Hardening for shared hosts: authentication in front of SpiderFoot and network policies between services. |
+| AA03 Exploitation of Trusted Credentials | High | vendor | accepted | Runs without authentication by the compose file's decision (xpack.security.enabled=false for Elasticsearch, no requirepass for Redis, none at all in misp-modules): reachable only on the compose network, never published on the host, and only its own platform talks to it (ADR-005). Hardening for shared hosts: enable the service's authentication (xpack security, requirepass) and TLS, or network policies that pin each backing service to its platform. |
 | AA03 Exploitation of Trusted Credentials | High | vendor | accepted | Static long-lived tokens are the integration contract with OpenCTI (OPENCTI_ADMIN_TOKEN), MISP (MISP_KEY), Tavily, the SMTP relay and the cloud LLM; they live only in .env and environment variables and rotate manually. Hardening: a dedicated least-privilege token per connector and periodic rotation. |
 | AA04 Exploiting Trust in Client | High | sidecar | accepted | Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current. |
 | AA04 Exploiting Trust in Client | High | vendor | transferred | Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves. |
@@ -73,6 +74,7 @@ Every finding carries a triage response:
 | AC09 Functionality Misuse | Medium | vendor | accepted | The orchestrator submits without SMTP AUTH unless ALERT_SMTP_USER is set (the modelled default): who may submit is then the relay's policy (a network restriction or mandatory AUTH on a submission relay), and STARTTLS with certificate verification authenticates the relay, not the sender. Hardening: ALERT_SMTP_USER and ALERT_SMTP_PASSWORD. |
 | AC09 Functionality Misuse | Medium | vendor | transferred | Authentication and authorisation inside Keycloak, OpenCTI, MISP, Tavily, oauth2-proxy, connector-misp and the credentialed backing services (MinIO, RabbitMQ, MariaDB) are the vendor's. |
 | AC11 Session Credential Falsification through Manipulation | Medium | sidecar | accepted | SpiderFoot, Amass, SocialOSINT and Ollama have no sessions and no authentication; they are reachable only on loopback or the compose bridge (ADR-005). Hardening for shared hosts: authentication in front of SpiderFoot and network policies between services. |
+| AC11 Session Credential Falsification through Manipulation | Medium | vendor | accepted | Runs without authentication by the compose file's decision (xpack.security.enabled=false for Elasticsearch, no requirepass for Redis, none at all in misp-modules): reachable only on the compose network, never published on the host, and only its own platform talks to it (ADR-005). Hardening for shared hosts: enable the service's authentication (xpack security, requirepass) and TLS, or network policies that pin each backing service to its platform. |
 | AC11 Session Credential Falsification through Manipulation | Medium | vendor | transferred | Session and credential handling inside Keycloak, OpenCTI, MISP, Tavily and the SMTP relay is the vendor's; the orchestrator presents only API tokens. |
 | AC12 Privilege Escalation | High | orchestrator | mitigated | No privilege separation exists inside the monolith (ADR-001): the container runs as uid 1000, targets.yaml is mounted read-only, and the API exposes a single operator role, so there is no higher privilege to escalate to. |
 | AC12 Privilege Escalation | High | vendor | transferred | oauth2-proxy, connector-misp, connector-opencti, connector-import-file-stix and the OpenCTI worker run as their pinned vendor images ship them; what happens inside them is upstream code. |
@@ -83,8 +85,10 @@ Every finding carries a triage response:
 | AC15 Schema Poisoning | High | orchestrator | mitigated | STIX 2.1 objects are built only in orchestrator/normalizer/stix.py with deterministic ids; inbound bundles are contract-validated (ADR-011) and model replies are JSON-schema validated before storage. |
 | AC15 Schema Poisoning | High | vendor | transferred | Schema handling inside oauth2-proxy and connector-misp is upstream's; the orchestrator validates everything it receives from either side. |
 | AC16 Session Credential Falsification through Prediction | High | sidecar | accepted | SpiderFoot, Amass, SocialOSINT and Ollama have no sessions and no authentication; they are reachable only on loopback or the compose bridge (ADR-005). Hardening for shared hosts: authentication in front of SpiderFoot and network policies between services. |
+| AC16 Session Credential Falsification through Prediction | High | vendor | accepted | Runs without authentication by the compose file's decision (xpack.security.enabled=false for Elasticsearch, no requirepass for Redis, none at all in misp-modules): reachable only on the compose network, never published on the host, and only its own platform talks to it (ADR-005). Hardening for shared hosts: enable the service's authentication (xpack security, requirepass) and TLS, or network policies that pin each backing service to its platform. |
 | AC16 Session Credential Falsification through Prediction | High | vendor | transferred | Session identifiers of Keycloak, OpenCTI, MISP and Tavily are generated by the vendor; the orchestrator's own secrets are CSPRNG material (openssl rand guidance in .env.example). |
 | AC17 Session Hijacking - ServerSide | Very High | sidecar | accepted | SpiderFoot, Amass, SocialOSINT and Ollama have no sessions and no authentication; they are reachable only on loopback or the compose bridge (ADR-005). Hardening for shared hosts: authentication in front of SpiderFoot and network policies between services. |
+| AC17 Session Hijacking - ServerSide | Very High | vendor | accepted | Runs without authentication by the compose file's decision (xpack.security.enabled=false for Elasticsearch, no requirepass for Redis, none at all in misp-modules): reachable only on the compose network, never published on the host, and only its own platform talks to it (ADR-005). Hardening for shared hosts: enable the service's authentication (xpack security, requirepass) and TLS, or network policies that pin each backing service to its platform. |
 | AC17 Session Hijacking - ServerSide | Very High | vendor | transferred | Session and credential handling inside Keycloak, OpenCTI, MISP, Tavily and the SMTP relay is the vendor's; the orchestrator presents only API tokens. |
 | AC18 Session Hijacking - ClientSide | Very High | vendor | transferred | Session and credential handling inside Keycloak, OpenCTI, MISP, Tavily and the SMTP relay is the vendor's; the orchestrator presents only API tokens. |
 | AC19 Reusing Session IDs (aka Session Replay) - ServerSide | High | vendor | transferred | Session and credential handling inside Keycloak, OpenCTI, MISP, Tavily and the SMTP relay is the vendor's; the orchestrator presents only API tokens. |
@@ -99,6 +103,7 @@ Every finding carries a triage response:
 | CR02 Cross Site Tracing | Very High | flow | transferred | TRACE handling on OpenCTI's web UI is the platform's; the UI is published on loopback only and nothing the orchestrator serves issues TRACE. Hardening: a TLS terminator in front of :8080 that drops TRACE. |
 | CR02 Cross Site Tracing | Very High | vendor | transferred | TRACE handling at Keycloak and OpenCTI is the vendor image's; both sit on the compose network or loopback (ADR-005) and nothing the orchestrator serves issues TRACE. Hardening: a TLS terminator in front of them that drops TRACE. |
 | CR03 Dictionary-based Password Attack | High | sidecar | accepted | SpiderFoot, Amass, SocialOSINT and Ollama have no sessions and no authentication; they are reachable only on loopback or the compose bridge (ADR-005). Hardening for shared hosts: authentication in front of SpiderFoot and network policies between services. |
+| CR03 Dictionary-based Password Attack | High | vendor | accepted | Runs without authentication by the compose file's decision (xpack.security.enabled=false for Elasticsearch, no requirepass for Redis, none at all in misp-modules): reachable only on the compose network, never published on the host, and only its own platform talks to it (ADR-005). Hardening for shared hosts: enable the service's authentication (xpack security, requirepass) and TLS, or network policies that pin each backing service to its platform. |
 | CR03 Dictionary-based Password Attack | High | vendor | transferred | Password policy and lockout belong to Keycloak, MISP, Tavily and the SMTP relay. |
 | CR04 Session Credential Falsification through Forging | Medium | vendor | transferred | Session and credential handling inside Keycloak, OpenCTI, MISP, Tavily and the SMTP relay is the vendor's; the orchestrator presents only API tokens. |
 | CR05 Encryption Brute Forcing | Low | sidecar | accepted | Nothing is encrypted at rest to brute-force (DR01); the orchestrator's keys and HMACs are 128-256-bit CSPRNG material. |
@@ -577,7 +582,7 @@ Every finding carries a triage response:
 #### F-541 — Session Hijacking - ServerSide  `AC17`
 
 - **Element:** Redis (MISP) (vendor)
-- **Response:** transferred — Session and credential handling inside Keycloak, OpenCTI, MISP, Tavily and the SMTP relay is the vendor's; the orchestrator presents only API tokens.
+- **Response:** accepted — Runs without authentication by the compose file's decision (xpack.security.enabled=false for Elasticsearch, no requirepass for Redis, none at all in misp-modules): reachable only on the compose network, never published on the host, and only its own platform talks to it (ADR-005). Hardening for shared hosts: enable the service's authentication (xpack security, requirepass) and TLS, or network policies that pin each backing service to its platform.
 - **pytm mitigations:** Properly encrypt and sign identity tokens in transit, and use industry standard session key generation mechanisms that utilize high amount of entropy to generate the session key. Many standard web and application servers will perform this task on your behalf. Utilize a session timeout for all sessions. If the user does not explicitly logout, terminate their session after this period of inactivity. If the user logs back in then a new session key should be generated.
 
 #### F-544 — Command Line Execution through SQL Injection  `INP05`
@@ -607,7 +612,7 @@ Every finding carries a triage response:
 #### F-586 — Session Hijacking - ServerSide  `AC17`
 
 - **Element:** misp-modules (vendor)
-- **Response:** transferred — Session and credential handling inside Keycloak, OpenCTI, MISP, Tavily and the SMTP relay is the vendor's; the orchestrator presents only API tokens.
+- **Response:** accepted — Runs without authentication by the compose file's decision (xpack.security.enabled=false for Elasticsearch, no requirepass for Redis, none at all in misp-modules): reachable only on the compose network, never published on the host, and only its own platform talks to it (ADR-005). Hardening for shared hosts: enable the service's authentication (xpack security, requirepass) and TLS, or network policies that pin each backing service to its platform.
 - **pytm mitigations:** Properly encrypt and sign identity tokens in transit, and use industry standard session key generation mechanisms that utilize high amount of entropy to generate the session key. Many standard web and application servers will perform this task on your behalf. Utilize a session timeout for all sessions. If the user does not explicitly logout, terminate their session after this period of inactivity. If the user logs back in then a new session key should be generated.
 
 #### F-590 — Cross Site Tracing  `CR02`
@@ -673,7 +678,7 @@ Every finding carries a triage response:
 #### F-677 — Session Hijacking - ServerSide  `AC17`
 
 - **Element:** Elasticsearch (vendor)
-- **Response:** transferred — Session and credential handling inside Keycloak, OpenCTI, MISP, Tavily and the SMTP relay is the vendor's; the orchestrator presents only API tokens.
+- **Response:** accepted — Runs without authentication by the compose file's decision (xpack.security.enabled=false for Elasticsearch, no requirepass for Redis, none at all in misp-modules): reachable only on the compose network, never published on the host, and only its own platform talks to it (ADR-005). Hardening for shared hosts: enable the service's authentication (xpack security, requirepass) and TLS, or network policies that pin each backing service to its platform.
 - **pytm mitigations:** Properly encrypt and sign identity tokens in transit, and use industry standard session key generation mechanisms that utilize high amount of entropy to generate the session key. Many standard web and application servers will perform this task on your behalf. Utilize a session timeout for all sessions. If the user does not explicitly logout, terminate their session after this period of inactivity. If the user logs back in then a new session key should be generated.
 
 #### F-679 — Command Line Execution through SQL Injection  `INP05`
@@ -703,7 +708,7 @@ Every finding carries a triage response:
 #### F-721 — Session Hijacking - ServerSide  `AC17`
 
 - **Element:** Redis (OpenCTI) (vendor)
-- **Response:** transferred — Session and credential handling inside Keycloak, OpenCTI, MISP, Tavily and the SMTP relay is the vendor's; the orchestrator presents only API tokens.
+- **Response:** accepted — Runs without authentication by the compose file's decision (xpack.security.enabled=false for Elasticsearch, no requirepass for Redis, none at all in misp-modules): reachable only on the compose network, never published on the host, and only its own platform talks to it (ADR-005). Hardening for shared hosts: enable the service's authentication (xpack security, requirepass) and TLS, or network policies that pin each backing service to its platform.
 - **pytm mitigations:** Properly encrypt and sign identity tokens in transit, and use industry standard session key generation mechanisms that utilize high amount of entropy to generate the session key. Many standard web and application servers will perform this task on your behalf. Utilize a session timeout for all sessions. If the user does not explicitly logout, terminate their session after this period of inactivity. If the user logs back in then a new session key should be generated.
 
 #### F-724 — Command Line Execution through SQL Injection  `INP05`
@@ -2199,7 +2204,7 @@ Every finding carries a triage response:
 #### F-512 — Dictionary-based Password Attack  `CR03`
 
 - **Element:** Redis (MISP) (vendor)
-- **Response:** transferred — Password policy and lockout belong to Keycloak, MISP, Tavily and the SMTP relay.
+- **Response:** accepted — Runs without authentication by the compose file's decision (xpack.security.enabled=false for Elasticsearch, no requirepass for Redis, none at all in misp-modules): reachable only on the compose network, never published on the host, and only its own platform talks to it (ADR-005). Hardening for shared hosts: enable the service's authentication (xpack security, requirepass) and TLS, or network policies that pin each backing service to its platform.
 - **pytm mitigations:** Create a strong password policy and ensure that your system enforces this policy.Implement an intelligent password throttling mechanism. Care must be taken to assure that these mechanisms do not excessively enable account lockout attacks such as CAPEC-02.
 
 #### F-518 — Embedding Scripts within Scripts  `SC03`
@@ -2229,7 +2234,7 @@ Every finding carries a triage response:
 #### F-527 — Exploitation of Trusted Credentials  `AA03`
 
 - **Element:** Redis (MISP) (vendor)
-- **Response:** accepted — Static long-lived tokens are the integration contract with OpenCTI (OPENCTI_ADMIN_TOKEN), MISP (MISP_KEY), Tavily, the SMTP relay and the cloud LLM; they live only in .env and environment variables and rotate manually. Hardening: a dedicated least-privilege token per connector and periodic rotation.
+- **Response:** accepted — Runs without authentication by the compose file's decision (xpack.security.enabled=false for Elasticsearch, no requirepass for Redis, none at all in misp-modules): reachable only on the compose network, never published on the host, and only its own platform talks to it (ADR-005). Hardening for shared hosts: enable the service's authentication (xpack security, requirepass) and TLS, or network policies that pin each backing service to its platform.
 - **pytm mitigations:** Design: utilize strong federated identity such as SAML to encrypt and sign identity tokens in transit.Implementation: Use industry standards session key generation mechanisms that utilize high amount of entropy to generate the session key. Many standard web and application servers will perform this task on your behalf.Implementation: If the session identifier is used for authentication, such as in the so-called single sign on use cases, then ensure that it is protected at the same level of assurance as authentication tokens.Implementation: If the web or application server supports it, then encrypting and/or signing the session ID (such as cookie) can protect the ID if intercepted.Design: Use strong session identifiers that are protected in transit and at rest.Implementation: Utilize a session timeout for all sessions, for example 20 minutes. If the user does not explicitly logout, the server terminates their session after this period of inactivity. If the user logs back in then a new session key is generated.Implementation: Verify of authenticity of all session IDs at runtime.
 
 #### F-530 — Exploiting Trust in Client  `AA04`
@@ -2265,7 +2270,7 @@ Every finding carries a triage response:
 #### F-540 — Session Credential Falsification through Prediction  `AC16`
 
 - **Element:** Redis (MISP) (vendor)
-- **Response:** transferred — Session identifiers of Keycloak, OpenCTI, MISP and Tavily are generated by the vendor; the orchestrator's own secrets are CSPRNG material (openssl rand guidance in .env.example).
+- **Response:** accepted — Runs without authentication by the compose file's decision (xpack.security.enabled=false for Elasticsearch, no requirepass for Redis, none at all in misp-modules): reachable only on the compose network, never published on the host, and only its own platform talks to it (ADR-005). Hardening for shared hosts: enable the service's authentication (xpack security, requirepass) and TLS, or network policies that pin each backing service to its platform.
 - **pytm mitigations:** Use a strong source of randomness to generate a session ID.Use adequate length session IDs. Do not use information available to the user in order to generate session ID (e.g., time).Ideas for creating random numbers are offered by Eastlake [RFC1750]. Encrypt the session ID if you expose it to the user. For instance session ID can be stored in a cookie in encrypted format.
 
 #### F-542 — Server Side Include (SSI) Injection  `INP03`
@@ -2301,7 +2306,7 @@ Every finding carries a triage response:
 #### F-557 — Dictionary-based Password Attack  `CR03`
 
 - **Element:** misp-modules (vendor)
-- **Response:** transferred — Password policy and lockout belong to Keycloak, MISP, Tavily and the SMTP relay.
+- **Response:** accepted — Runs without authentication by the compose file's decision (xpack.security.enabled=false for Elasticsearch, no requirepass for Redis, none at all in misp-modules): reachable only on the compose network, never published on the host, and only its own platform talks to it (ADR-005). Hardening for shared hosts: enable the service's authentication (xpack security, requirepass) and TLS, or network policies that pin each backing service to its platform.
 - **pytm mitigations:** Create a strong password policy and ensure that your system enforces this policy.Implement an intelligent password throttling mechanism. Care must be taken to assure that these mechanisms do not excessively enable account lockout attacks such as CAPEC-02.
 
 #### F-563 — Embedding Scripts within Scripts  `SC03`
@@ -2331,7 +2336,7 @@ Every finding carries a triage response:
 #### F-572 — Exploitation of Trusted Credentials  `AA03`
 
 - **Element:** misp-modules (vendor)
-- **Response:** accepted — Static long-lived tokens are the integration contract with OpenCTI (OPENCTI_ADMIN_TOKEN), MISP (MISP_KEY), Tavily, the SMTP relay and the cloud LLM; they live only in .env and environment variables and rotate manually. Hardening: a dedicated least-privilege token per connector and periodic rotation.
+- **Response:** accepted — Runs without authentication by the compose file's decision (xpack.security.enabled=false for Elasticsearch, no requirepass for Redis, none at all in misp-modules): reachable only on the compose network, never published on the host, and only its own platform talks to it (ADR-005). Hardening for shared hosts: enable the service's authentication (xpack security, requirepass) and TLS, or network policies that pin each backing service to its platform.
 - **pytm mitigations:** Design: utilize strong federated identity such as SAML to encrypt and sign identity tokens in transit.Implementation: Use industry standards session key generation mechanisms that utilize high amount of entropy to generate the session key. Many standard web and application servers will perform this task on your behalf.Implementation: If the session identifier is used for authentication, such as in the so-called single sign on use cases, then ensure that it is protected at the same level of assurance as authentication tokens.Implementation: If the web or application server supports it, then encrypting and/or signing the session ID (such as cookie) can protect the ID if intercepted.Design: Use strong session identifiers that are protected in transit and at rest.Implementation: Utilize a session timeout for all sessions, for example 20 minutes. If the user does not explicitly logout, the server terminates their session after this period of inactivity. If the user logs back in then a new session key is generated.Implementation: Verify of authenticity of all session IDs at runtime.
 
 #### F-575 — Exploiting Trust in Client  `AA04`
@@ -2367,7 +2372,7 @@ Every finding carries a triage response:
 #### F-585 — Session Credential Falsification through Prediction  `AC16`
 
 - **Element:** misp-modules (vendor)
-- **Response:** transferred — Session identifiers of Keycloak, OpenCTI, MISP and Tavily are generated by the vendor; the orchestrator's own secrets are CSPRNG material (openssl rand guidance in .env.example).
+- **Response:** accepted — Runs without authentication by the compose file's decision (xpack.security.enabled=false for Elasticsearch, no requirepass for Redis, none at all in misp-modules): reachable only on the compose network, never published on the host, and only its own platform talks to it (ADR-005). Hardening for shared hosts: enable the service's authentication (xpack security, requirepass) and TLS, or network policies that pin each backing service to its platform.
 - **pytm mitigations:** Use a strong source of randomness to generate a session ID.Use adequate length session IDs. Do not use information available to the user in order to generate session ID (e.g., time).Ideas for creating random numbers are offered by Eastlake [RFC1750]. Encrypt the session ID if you expose it to the user. For instance session ID can be stored in a cookie in encrypted format.
 
 #### F-587 — Server Side Include (SSI) Injection  `INP03`
@@ -2511,7 +2516,7 @@ Every finding carries a triage response:
 #### F-648 — Dictionary-based Password Attack  `CR03`
 
 - **Element:** Elasticsearch (vendor)
-- **Response:** transferred — Password policy and lockout belong to Keycloak, MISP, Tavily and the SMTP relay.
+- **Response:** accepted — Runs without authentication by the compose file's decision (xpack.security.enabled=false for Elasticsearch, no requirepass for Redis, none at all in misp-modules): reachable only on the compose network, never published on the host, and only its own platform talks to it (ADR-005). Hardening for shared hosts: enable the service's authentication (xpack security, requirepass) and TLS, or network policies that pin each backing service to its platform.
 - **pytm mitigations:** Create a strong password policy and ensure that your system enforces this policy.Implement an intelligent password throttling mechanism. Care must be taken to assure that these mechanisms do not excessively enable account lockout attacks such as CAPEC-02.
 
 #### F-654 — Embedding Scripts within Scripts  `SC03`
@@ -2541,7 +2546,7 @@ Every finding carries a triage response:
 #### F-663 — Exploitation of Trusted Credentials  `AA03`
 
 - **Element:** Elasticsearch (vendor)
-- **Response:** accepted — Static long-lived tokens are the integration contract with OpenCTI (OPENCTI_ADMIN_TOKEN), MISP (MISP_KEY), Tavily, the SMTP relay and the cloud LLM; they live only in .env and environment variables and rotate manually. Hardening: a dedicated least-privilege token per connector and periodic rotation.
+- **Response:** accepted — Runs without authentication by the compose file's decision (xpack.security.enabled=false for Elasticsearch, no requirepass for Redis, none at all in misp-modules): reachable only on the compose network, never published on the host, and only its own platform talks to it (ADR-005). Hardening for shared hosts: enable the service's authentication (xpack security, requirepass) and TLS, or network policies that pin each backing service to its platform.
 - **pytm mitigations:** Design: utilize strong federated identity such as SAML to encrypt and sign identity tokens in transit.Implementation: Use industry standards session key generation mechanisms that utilize high amount of entropy to generate the session key. Many standard web and application servers will perform this task on your behalf.Implementation: If the session identifier is used for authentication, such as in the so-called single sign on use cases, then ensure that it is protected at the same level of assurance as authentication tokens.Implementation: If the web or application server supports it, then encrypting and/or signing the session ID (such as cookie) can protect the ID if intercepted.Design: Use strong session identifiers that are protected in transit and at rest.Implementation: Utilize a session timeout for all sessions, for example 20 minutes. If the user does not explicitly logout, the server terminates their session after this period of inactivity. If the user logs back in then a new session key is generated.Implementation: Verify of authenticity of all session IDs at runtime.
 
 #### F-666 — Exploiting Trust in Client  `AA04`
@@ -2577,7 +2582,7 @@ Every finding carries a triage response:
 #### F-676 — Session Credential Falsification through Prediction  `AC16`
 
 - **Element:** Elasticsearch (vendor)
-- **Response:** transferred — Session identifiers of Keycloak, OpenCTI, MISP and Tavily are generated by the vendor; the orchestrator's own secrets are CSPRNG material (openssl rand guidance in .env.example).
+- **Response:** accepted — Runs without authentication by the compose file's decision (xpack.security.enabled=false for Elasticsearch, no requirepass for Redis, none at all in misp-modules): reachable only on the compose network, never published on the host, and only its own platform talks to it (ADR-005). Hardening for shared hosts: enable the service's authentication (xpack security, requirepass) and TLS, or network policies that pin each backing service to its platform.
 - **pytm mitigations:** Use a strong source of randomness to generate a session ID.Use adequate length session IDs. Do not use information available to the user in order to generate session ID (e.g., time).Ideas for creating random numbers are offered by Eastlake [RFC1750]. Encrypt the session ID if you expose it to the user. For instance session ID can be stored in a cookie in encrypted format.
 
 #### F-678 — Server Side Include (SSI) Injection  `INP03`
@@ -2607,7 +2612,7 @@ Every finding carries a triage response:
 #### F-692 — Dictionary-based Password Attack  `CR03`
 
 - **Element:** Redis (OpenCTI) (vendor)
-- **Response:** transferred — Password policy and lockout belong to Keycloak, MISP, Tavily and the SMTP relay.
+- **Response:** accepted — Runs without authentication by the compose file's decision (xpack.security.enabled=false for Elasticsearch, no requirepass for Redis, none at all in misp-modules): reachable only on the compose network, never published on the host, and only its own platform talks to it (ADR-005). Hardening for shared hosts: enable the service's authentication (xpack security, requirepass) and TLS, or network policies that pin each backing service to its platform.
 - **pytm mitigations:** Create a strong password policy and ensure that your system enforces this policy.Implement an intelligent password throttling mechanism. Care must be taken to assure that these mechanisms do not excessively enable account lockout attacks such as CAPEC-02.
 
 #### F-698 — Embedding Scripts within Scripts  `SC03`
@@ -2637,7 +2642,7 @@ Every finding carries a triage response:
 #### F-707 — Exploitation of Trusted Credentials  `AA03`
 
 - **Element:** Redis (OpenCTI) (vendor)
-- **Response:** accepted — Static long-lived tokens are the integration contract with OpenCTI (OPENCTI_ADMIN_TOKEN), MISP (MISP_KEY), Tavily, the SMTP relay and the cloud LLM; they live only in .env and environment variables and rotate manually. Hardening: a dedicated least-privilege token per connector and periodic rotation.
+- **Response:** accepted — Runs without authentication by the compose file's decision (xpack.security.enabled=false for Elasticsearch, no requirepass for Redis, none at all in misp-modules): reachable only on the compose network, never published on the host, and only its own platform talks to it (ADR-005). Hardening for shared hosts: enable the service's authentication (xpack security, requirepass) and TLS, or network policies that pin each backing service to its platform.
 - **pytm mitigations:** Design: utilize strong federated identity such as SAML to encrypt and sign identity tokens in transit.Implementation: Use industry standards session key generation mechanisms that utilize high amount of entropy to generate the session key. Many standard web and application servers will perform this task on your behalf.Implementation: If the session identifier is used for authentication, such as in the so-called single sign on use cases, then ensure that it is protected at the same level of assurance as authentication tokens.Implementation: If the web or application server supports it, then encrypting and/or signing the session ID (such as cookie) can protect the ID if intercepted.Design: Use strong session identifiers that are protected in transit and at rest.Implementation: Utilize a session timeout for all sessions, for example 20 minutes. If the user does not explicitly logout, the server terminates their session after this period of inactivity. If the user logs back in then a new session key is generated.Implementation: Verify of authenticity of all session IDs at runtime.
 
 #### F-710 — Exploiting Trust in Client  `AA04`
@@ -2673,7 +2678,7 @@ Every finding carries a triage response:
 #### F-720 — Session Credential Falsification through Prediction  `AC16`
 
 - **Element:** Redis (OpenCTI) (vendor)
-- **Response:** transferred — Session identifiers of Keycloak, OpenCTI, MISP and Tavily are generated by the vendor; the orchestrator's own secrets are CSPRNG material (openssl rand guidance in .env.example).
+- **Response:** accepted — Runs without authentication by the compose file's decision (xpack.security.enabled=false for Elasticsearch, no requirepass for Redis, none at all in misp-modules): reachable only on the compose network, never published on the host, and only its own platform talks to it (ADR-005). Hardening for shared hosts: enable the service's authentication (xpack security, requirepass) and TLS, or network policies that pin each backing service to its platform.
 - **pytm mitigations:** Use a strong source of randomness to generate a session ID.Use adequate length session IDs. Do not use information available to the user in order to generate session ID (e.g., time).Ideas for creating random numbers are offered by Eastlake [RFC1750]. Encrypt the session ID if you expose it to the user. For instance session ID can be stored in a cookie in encrypted format.
 
 #### F-722 — Server Side Include (SSI) Injection  `INP03`
@@ -5387,7 +5392,7 @@ Every finding carries a triage response:
 #### F-532 — Session Credential Falsification through Manipulation  `AC11`
 
 - **Element:** Redis (MISP) (vendor)
-- **Response:** transferred — Session and credential handling inside Keycloak, OpenCTI, MISP, Tavily and the SMTP relay is the vendor's; the orchestrator presents only API tokens.
+- **Response:** accepted — Runs without authentication by the compose file's decision (xpack.security.enabled=false for Elasticsearch, no requirepass for Redis, none at all in misp-modules): reachable only on the compose network, never published on the host, and only its own platform talks to it (ADR-005). Hardening for shared hosts: enable the service's authentication (xpack security, requirepass) and TLS, or network policies that pin each backing service to its platform.
 - **pytm mitigations:** Implementation: Use session IDs that are difficult to guess or brute-force: One way for the attackers to obtain valid session IDs is by brute-forcing or guessing them. By choosing session identifiers that are sufficiently random, brute-forcing or guessing becomes very difficult. Implementation: Regenerate and destroy session identifiers when there is a change in the level of privilege: This ensures that even though a potential victim may have followed a link with a fixated identifier, a new one is issued when the level of privilege changes.
 
 #### F-533 — DTD Injection  `INP21`
@@ -5501,7 +5506,7 @@ Every finding carries a triage response:
 #### F-577 — Session Credential Falsification through Manipulation  `AC11`
 
 - **Element:** misp-modules (vendor)
-- **Response:** transferred — Session and credential handling inside Keycloak, OpenCTI, MISP, Tavily and the SMTP relay is the vendor's; the orchestrator presents only API tokens.
+- **Response:** accepted — Runs without authentication by the compose file's decision (xpack.security.enabled=false for Elasticsearch, no requirepass for Redis, none at all in misp-modules): reachable only on the compose network, never published on the host, and only its own platform talks to it (ADR-005). Hardening for shared hosts: enable the service's authentication (xpack security, requirepass) and TLS, or network policies that pin each backing service to its platform.
 - **pytm mitigations:** Implementation: Use session IDs that are difficult to guess or brute-force: One way for the attackers to obtain valid session IDs is by brute-forcing or guessing them. By choosing session identifiers that are sufficiently random, brute-forcing or guessing becomes very difficult. Implementation: Regenerate and destroy session identifiers when there is a change in the level of privilege: This ensures that even though a potential victim may have followed a link with a fixated identifier, a new one is issued when the level of privilege changes.
 
 #### F-578 — DTD Injection  `INP21`
@@ -5723,7 +5728,7 @@ Every finding carries a triage response:
 #### F-668 — Session Credential Falsification through Manipulation  `AC11`
 
 - **Element:** Elasticsearch (vendor)
-- **Response:** transferred — Session and credential handling inside Keycloak, OpenCTI, MISP, Tavily and the SMTP relay is the vendor's; the orchestrator presents only API tokens.
+- **Response:** accepted — Runs without authentication by the compose file's decision (xpack.security.enabled=false for Elasticsearch, no requirepass for Redis, none at all in misp-modules): reachable only on the compose network, never published on the host, and only its own platform talks to it (ADR-005). Hardening for shared hosts: enable the service's authentication (xpack security, requirepass) and TLS, or network policies that pin each backing service to its platform.
 - **pytm mitigations:** Implementation: Use session IDs that are difficult to guess or brute-force: One way for the attackers to obtain valid session IDs is by brute-forcing or guessing them. By choosing session identifiers that are sufficiently random, brute-forcing or guessing becomes very difficult. Implementation: Regenerate and destroy session identifiers when there is a change in the level of privilege: This ensures that even though a potential victim may have followed a link with a fixated identifier, a new one is issued when the level of privilege changes.
 
 #### F-669 — DTD Injection  `INP21`
@@ -5837,7 +5842,7 @@ Every finding carries a triage response:
 #### F-712 — Session Credential Falsification through Manipulation  `AC11`
 
 - **Element:** Redis (OpenCTI) (vendor)
-- **Response:** transferred — Session and credential handling inside Keycloak, OpenCTI, MISP, Tavily and the SMTP relay is the vendor's; the orchestrator presents only API tokens.
+- **Response:** accepted — Runs without authentication by the compose file's decision (xpack.security.enabled=false for Elasticsearch, no requirepass for Redis, none at all in misp-modules): reachable only on the compose network, never published on the host, and only its own platform talks to it (ADR-005). Hardening for shared hosts: enable the service's authentication (xpack security, requirepass) and TLS, or network policies that pin each backing service to its platform.
 - **pytm mitigations:** Implementation: Use session IDs that are difficult to guess or brute-force: One way for the attackers to obtain valid session IDs is by brute-forcing or guessing them. By choosing session identifiers that are sufficiently random, brute-forcing or guessing becomes very difficult. Implementation: Regenerate and destroy session identifiers when there is a change in the level of privilege: This ensures that even though a potential victim may have followed a link with a fixated identifier, a new one is issued when the level of privilege changes.
 
 #### F-713 — DTD Injection  `INP21`

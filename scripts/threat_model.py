@@ -883,12 +883,14 @@ flow(
     controls=Controls(isEncrypted=False, authenticatesSource=True),
 )
 flow(
-    anonymous,
     orchestrator,
+    anonymous,
     "GET /health, /metrics",
     protocol="HTTP",
     tlsVersion=TLSVersion.NONE,
-    data=[metrics_exposition],  # served without an API key: scrapers are not API clients
+    # The exposition leaves the API for whoever asks: served without an API key, scrapers
+    # are not API clients (api.py prometheus_metrics).
+    data=[metrics_exposition],
     controls=Controls(isEncrypted=False, authenticatesSource=False, hasAccessControl=False),
 )
 flow(
@@ -935,8 +937,8 @@ flow(
     controls=Controls(isEncrypted=False),
 )
 flow(
-    orchestrator,
     amass_db,
+    orchestrator,
     "Read discovered names (oam_subs, shared volume)",
     protocol="file",
     data=[evidence],
@@ -2012,7 +2014,7 @@ OVERRIDES: dict[tuple[str, str], Response] = {
 # Authentication is disabled by this repository's compose files, not by the vendor: every
 # authentication, access-control and misuse threat on these services is the deployment's.
 for _element in ("Elasticsearch", "Redis (OpenCTI)", "Redis (MISP)", "misp-modules"):
-    for _threat in ("AA01", "AA02", "AC01", "AC07", "AC09"):
+    for _threat in ("AA01", "AA02", "AA03", "AC01", "AC07", "AC09", "AC11", "AC16", "AC17", "CR03"):
         OVERRIDES[(_element, _threat)] = _UNAUTHENTICATED_BACKING
 _SMTP_NO_AUTH: Response = (
     "accepted",
