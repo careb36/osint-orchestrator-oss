@@ -426,6 +426,55 @@ Rollback steps:
 4. Capture the browser console telemetry and the failing API response in the
    incident log so the underlying cause is fixed before a new rollout.
 
+## Threat model
+
+The repository carries an OWASP pytm model of this architecture
+(`scripts/threat_model.py`) and its generated report
+(`docs/threat-model.md`). The model mirrors `docs/architecture.md`, the ADRs,
+the compose files and the Dockerfiles: four trust boundaries (public internet,
+optional OIDC edge, compose network, OpenCTI platform), the orchestrator, its
+sidecars, the vendor services it talks to (Tavily, the cloud LLM, Keycloak,
+oauth2-proxy, OpenCTI and its MISP connector, the alert webhook and SMTP
+relay), the data stores and every flow with its protocol, TLS version and the
+credentials it carries. Each component asserts only the controls its own code
+or image ships: the orchestrator's validation, CSP or non-root user never
+count for a sidecar or a vendor service. Each endpoint declares the protocol
+it serves and the highest classification it is entrusted with, and each flow
+what its transport may carry, so pytm's data-leak rules fire only on the
+transfers the model means to flag: the target name reaching a public source,
+credentials crossing the host boundary in clear.
+
+pytm is a modelling tool, not a runtime dependency: it lives in a throwaway
+virtualenv, pinned, and never in `pyproject.toml`.
+
+    python3 -m venv .venv-pytm
+    .venv-pytm/bin/pip install pytm==1.4.0
+    .venv-pytm/bin/python scripts/threat_model.py
+
+The script resolves the 114-threat library against the model and writes
+`docs/threat-model.md`. Two checks make it fail instead of writing a report
+with a gap in it:
+
+- **Every finding needs a response for its threat and element class**
+  (orchestrator, sidecar, vendor, store or flow), or an explicit
+  `(element, threat)` override. The response is `mitigated` (a control of that
+  element, cited), `transferred` (vendor or upstream code consumed as shipped)
+  or `accepted` (a documented decision with its production hardening note).
+- **Every `(threat, element)` pair must be listed in
+  `scripts/threat_model_findings.txt`.** A pair that appears (a new element,
+  a new flow, a control removed) or vanishes fails the run until a reviewer
+  runs `scripts/threat_model.py --accept`, which rewrites the ledger; its diff
+  is reviewed with the pull request.
+
+Regenerate the report after changing the model, the architecture or a triage
+rationale, and review the diff: an accepted finding is a decision on record,
+never a silence. The accepted set is deliberate — plaintext host-internal
+flows and stores on a single trusted host (ADR-005), the shipped OIDC overlay
+without TLS termination, static API keys and tokens (ADR-005), the
+loopback-only unauthenticated sidecars, the unsigned webhook by default, and
+the residual risk that a schema-valid model reply skews a risk level — each
+with the hardening step a shared-infrastructure deployment must add.
+
 ## Release checklist and support SOP
 
 A release is a `vX.Y.Z` tag on `main`: the image workflow publishes
