@@ -11,6 +11,7 @@ Modular monolith (ADR-001): one FastAPI process with an in-process APScheduler a
 - Alert channels are modelled with their defaults: SMTP with STARTTLS (ALERT_SMTP_STARTTLS=true) and the webhook over the operator's URL with the optional HMAC signature (ALERT_WEBHOOK_SECRET) unset.
 - Collectors only query targets authorised in targets.yaml (operator attestation per target).
 - OpenCTI, MISP, Amass, SocialOSINT and the OIDC overlay are optional deployments; the model covers them when enabled.
+- ORCHESTRATOR_SECRET_KEY is a private, randomly generated value. The default insecure-dev-key only earns a startup warning (auth.py); with it, or with an empty key, anyone can forge a manifest, and the integrity claims of this model do not hold.
 
 ## Element classes
 
@@ -22,12 +23,12 @@ A response is written per class: the same threat means something different on th
 - **store**: SQLite run store, targets.yaml, daily_reports (sealed runs), Amass asset database (shared volume)
 - **flow**: every dataflow, named by what it carries
 
-## Findings: 633 across 84 distinct threats
+## Findings: 678 across 84 distinct threats
 
 Every finding carries a triage response:
 
-- **accepted**: 321 finding(s)
-- **mitigated**: 22 finding(s)
+- **accepted**: 367 finding(s)
+- **mitigated**: 21 finding(s)
 - **transferred**: 290 finding(s)
 
 ## Triage summary by threat and element class
@@ -47,6 +48,7 @@ Every finding carries a triage response:
 | AC01 Privilege Abuse | Medium | sidecar | accepted | No roles on the sidecars: every caller can do everything they do (AA01). |
 | AC01 Privilege Abuse | Medium | store | accepted | One process owns each volume (uid 1000 for the orchestrator's stores, the engine for asset.db); there is no finer privilege to abuse. Hardening: volume permissions and read-only mounts where possible. |
 | AC01 Privilege Abuse | Medium | vendor | transferred | Authentication and authorisation inside Keycloak, OpenCTI, MISP, Tavily, oauth2-proxy and connector-misp are the vendor's. |
+| AC02 Shared Data Manipulation | Medium | store | accepted | The Amass asset database is shared between the engine and the orchestrator on one volume of the trusted host (ADR-005); oam_subs output is parsed as untrusted text. |
 | AC02 Shared Data Manipulation | Medium | vendor | transferred | OpenCTI's backing stores (Elasticsearch, MinIO, RabbitMQ, Redis) are owned and hardened by the OpenCTI platform deployment. |
 | AC05 Content Spoofing | Medium | flow | accepted | Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). |
 | AC06 Using Malicious Files | Very High | sidecar | accepted | The orchestrator never executes what a sidecar produces: SpiderFoot, Amass and SocialOSINT output is parsed into CollectorResult inside the collector module (docs/architecture.md). The sidecars' own file handling is upstream code running loopback-only from pinned images. Hardening: read-only root filesystems and dropped capabilities for the sidecars. |
@@ -88,12 +90,12 @@ Every finding carries a triage response:
 | CR05 Encryption Brute Forcing | Low | store | accepted | Nothing is encrypted at rest to brute-force (DR01). |
 | CR05 Encryption Brute Forcing | Low | vendor | transferred | Cryptography inside vendor services is the vendor's. |
 | CR06 Communication Channel Manipulation | High | flow | accepted | Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. |
-| CR08 Client-Server Protocol Manipulation | Medium | flow | accepted | The orchestrator validates protocol, headers and content type on everything it serves and sends well-formed requests; manipulating a host-internal plaintext hop needs a position on the host (DS06). |
+| CR08 Client-Server Protocol Manipulation | Medium | flow | accepted | The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). |
 | DE01 Interception | Medium | flow | accepted | Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS. |
 | DE02 Double Encoding | Medium | sidecar | accepted | Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current. |
 | DE02 Double Encoding | Medium | vendor | transferred | Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves. |
 | DE03 Sniffing Attacks | Medium | flow | accepted | Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope. |
-| DE04 Audit Log Manipulation | High | store | mitigated | Run artefacts are HMAC-signed and chained per target (ADR-007): tampering with daily_reports is detectable through /targets/{id}/chain/verify, and a SQLite row that disagrees with the sealed manifest is detectable the same way. targets.yaml is mounted read-only. The Amass asset database carries collector input, not audit data. Application logs are stdout for the operator's shipper. |
+| DE04 Audit Log Manipulation | High | store | accepted | Run rows are outside the manifest chain: /targets/{id}/chain/verify checks the manifest hash, signature, chain link and artefact files (evidence.py), not a row's status, collectors or timestamps, so an edit to those fields with the manifest intact goes undetected. Hardening: database file permissions, backups and disk encryption. |
 | DE04 Audit Log Manipulation | High | vendor | transferred | OpenCTI's own audit trail lives in its backing stores and is the platform's. |
 | DO01 Flooding | Medium | orchestrator | accepted | No rate limiting in the service; concurrency is bounded (409 on an active run, retry budgets, per-run call caps) and the API is loopback-only by default. Hardening: rate limiting at the proxy or TLS terminator. |
 | DO01 Flooding | Medium | sidecar | accepted | The sidecars can be flooded by anything on the compose network; the orchestrator bounds its own use with timeouts and per-run caps. |
@@ -182,7 +184,7 @@ Every finding carries a triage response:
 
 ## Full findings
 
-### Severity: Very High (80)
+### Severity: Very High (86)
 
 #### F-2 — Command Line Execution through SQL Injection  `INP05`
 
@@ -334,337 +336,373 @@ Every finding carries a triage response:
 - **Response:** mitigated — Data routes authenticate with the X-API-Key/Bearer header, never cookies, so there is no ambient credential to forge cross-site; the console CSP sets form-action 'none'; the scheduler has no HTTP surface. The OIDC overlay adds oauth2-proxy's CSRF token.
 - **pytm mitigations:** Use cryptographic tokens to associate a request with a specific action. The token can be regenerated at every request so that if a request with an invalid token is encountered, it can be reliably discarded. The token is considered invalid if it arrived with a request other than the action it was supposed to be associated with.Although less reliable, the use of the optional HTTP Referrer header can also be used to determine whether an incoming request was actually one that the user is authorized for, in the current context.Additionally, the user can also be prompted to confirm an action every time an action concerning potentially sensitive data is invoked. This way, even if the attacker manages to get the user to click on a malicious link and request the desired action, the user has a chance to recover by denying confirmation. This solution is also implicitly tied to using a second factor of authentication before performing such actions.In general, every request must be checked for the appropriate authentication token as well as authorization in the current session context.
 
-#### F-202 — Command Line Execution through SQL Injection  `INP05`
+#### F-203 — Command Line Execution through SQL Injection  `INP05`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Disable MSSQL xp_cmdshell directive on the databaseProperly validate the data (syntactically and semantically) before writing it to the database. Do not implicitly trust the data stored in the database. Re-validate it prior to usage to make sure that it is safe to use in a given context (e.g. as a command line argument).
 
-#### F-208 — Path Traversal  `HA01`
+#### F-209 — Path Traversal  `HA01`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Design: Configure the access control correctly. Design: Enforce principle of least privilege. Design: Execute programs with constrained privileges, so parent process does not open up further vulnerabilities. Ensure that all directories, temporary directories and files, and memory are executing with limited privileges to protect against remote execution. Design: Input validation. Assume that user inputs are malicious. Utilize strict type, character, and encoding enforcement. Design: Proxy communication to host, so that communications are terminated at the proxy, sanitizing the requests before forwarding to server host. 6. Design: Run server interfaces with a non-root account and/or utilize chroot jails or other configuration techniques to constrain privileges even if attacker gains some limited access to commands. Implementation: Host integrity monitoring for critical files, directories, and processes. The goal of host integrity monitoring is to be aware when a security issue has occurred so that incident response and other forensic activities can begin. Implementation: Perform input validation for all remote content, including remote and user-generated content. Implementation: Perform testing such as pen-testing and vulnerability scanning to identify directories, programs, and interfaces that grant direct access to executables. Implementation: Use indirect references rather than actual file names. Implementation: Use possible permissions on file access when developing and deploying web applications. Implementation: Validate user input by only accepting known good. Ensure all content that is delivered to client is sanitized against an acceptable content specification -- whitelisting approach.
 
-#### F-217 — Using Malicious Files  `AC06`
+#### F-218 — Using Malicious Files  `AC06`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — The orchestrator never executes what a sidecar produces: SpiderFoot, Amass and SocialOSINT output is parsed into CollectorResult inside the collector module (docs/architecture.md). The sidecars' own file handling is upstream code running loopback-only from pinned images. Hardening: read-only root filesystems and dropped capabilities for the sidecars.
 - **pytm mitigations:** Design: Enforce principle of least privilegeDesign: Run server interfaces with a non-root account and/or utilize chroot jails or other configuration techniques to constrain privileges even if attacker gains some limited access to commands.Implementation: Perform testing such as pen-testing and vulnerability scanning to identify directories, programs, and interfaces that grant direct access to executables.
 
-#### F-219 — XSS Targeting Non-Script Elements  `SC02`
+#### F-220 — XSS Targeting Non-Script Elements  `SC02`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** In addition to the traditional input fields, all other user controllable inputs, such as image tags within messages or the likes, must also be subjected to input validation. Such validation should ensure that content that can be potentially interpreted as script by the browser is appropriately filtered.All output displayed to clients must be properly escaped. Escaping ensures that the browser interprets special scripting characters literally and not as script to be executed.
 
-#### F-244 — Session Hijacking - ServerSide  `AC17`
+#### F-245 — Session Hijacking - ServerSide  `AC17`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — SpiderFoot, Amass, SocialOSINT and Ollama have no sessions and no authentication; they are reachable only on loopback or the compose bridge (ADR-005). Hardening for shared hosts: authentication in front of SpiderFoot and network policies between services.
 - **pytm mitigations:** Properly encrypt and sign identity tokens in transit, and use industry standard session key generation mechanisms that utilize high amount of entropy to generate the session key. Many standard web and application servers will perform this task on your behalf. Utilize a session timeout for all sessions. If the user does not explicitly logout, terminate their session after this period of inactivity. If the user logs back in then a new session key should be generated.
 
-#### F-246 — Command Line Execution through SQL Injection  `INP05`
+#### F-247 — Command Line Execution through SQL Injection  `INP05`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Disable MSSQL xp_cmdshell directive on the databaseProperly validate the data (syntactically and semantically) before writing it to the database. Do not implicitly trust the data stored in the database. Re-validate it prior to usage to make sure that it is safe to use in a given context (e.g. as a command line argument).
 
-#### F-252 — Path Traversal  `HA01`
+#### F-253 — Path Traversal  `HA01`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Design: Configure the access control correctly. Design: Enforce principle of least privilege. Design: Execute programs with constrained privileges, so parent process does not open up further vulnerabilities. Ensure that all directories, temporary directories and files, and memory are executing with limited privileges to protect against remote execution. Design: Input validation. Assume that user inputs are malicious. Utilize strict type, character, and encoding enforcement. Design: Proxy communication to host, so that communications are terminated at the proxy, sanitizing the requests before forwarding to server host. 6. Design: Run server interfaces with a non-root account and/or utilize chroot jails or other configuration techniques to constrain privileges even if attacker gains some limited access to commands. Implementation: Host integrity monitoring for critical files, directories, and processes. The goal of host integrity monitoring is to be aware when a security issue has occurred so that incident response and other forensic activities can begin. Implementation: Perform input validation for all remote content, including remote and user-generated content. Implementation: Perform testing such as pen-testing and vulnerability scanning to identify directories, programs, and interfaces that grant direct access to executables. Implementation: Use indirect references rather than actual file names. Implementation: Use possible permissions on file access when developing and deploying web applications. Implementation: Validate user input by only accepting known good. Ensure all content that is delivered to client is sanitized against an acceptable content specification -- whitelisting approach.
 
-#### F-261 — Using Malicious Files  `AC06`
+#### F-262 — Using Malicious Files  `AC06`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — The orchestrator never executes what a sidecar produces: SpiderFoot, Amass and SocialOSINT output is parsed into CollectorResult inside the collector module (docs/architecture.md). The sidecars' own file handling is upstream code running loopback-only from pinned images. Hardening: read-only root filesystems and dropped capabilities for the sidecars.
 - **pytm mitigations:** Design: Enforce principle of least privilegeDesign: Run server interfaces with a non-root account and/or utilize chroot jails or other configuration techniques to constrain privileges even if attacker gains some limited access to commands.Implementation: Perform testing such as pen-testing and vulnerability scanning to identify directories, programs, and interfaces that grant direct access to executables.
 
-#### F-263 — XSS Targeting Non-Script Elements  `SC02`
+#### F-264 — XSS Targeting Non-Script Elements  `SC02`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** In addition to the traditional input fields, all other user controllable inputs, such as image tags within messages or the likes, must also be subjected to input validation. Such validation should ensure that content that can be potentially interpreted as script by the browser is appropriately filtered.All output displayed to clients must be properly escaped. Escaping ensures that the browser interprets special scripting characters literally and not as script to be executed.
 
-#### F-288 — Session Hijacking - ServerSide  `AC17`
+#### F-289 — Session Hijacking - ServerSide  `AC17`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — SpiderFoot, Amass, SocialOSINT and Ollama have no sessions and no authentication; they are reachable only on loopback or the compose bridge (ADR-005). Hardening for shared hosts: authentication in front of SpiderFoot and network policies between services.
 - **pytm mitigations:** Properly encrypt and sign identity tokens in transit, and use industry standard session key generation mechanisms that utilize high amount of entropy to generate the session key. Many standard web and application servers will perform this task on your behalf. Utilize a session timeout for all sessions. If the user does not explicitly logout, terminate their session after this period of inactivity. If the user logs back in then a new session key should be generated.
 
-#### F-290 — Command Line Execution through SQL Injection  `INP05`
+#### F-291 — Command Line Execution through SQL Injection  `INP05`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Disable MSSQL xp_cmdshell directive on the databaseProperly validate the data (syntactically and semantically) before writing it to the database. Do not implicitly trust the data stored in the database. Re-validate it prior to usage to make sure that it is safe to use in a given context (e.g. as a command line argument).
 
-#### F-296 — Path Traversal  `HA01`
+#### F-297 — Path Traversal  `HA01`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Design: Configure the access control correctly. Design: Enforce principle of least privilege. Design: Execute programs with constrained privileges, so parent process does not open up further vulnerabilities. Ensure that all directories, temporary directories and files, and memory are executing with limited privileges to protect against remote execution. Design: Input validation. Assume that user inputs are malicious. Utilize strict type, character, and encoding enforcement. Design: Proxy communication to host, so that communications are terminated at the proxy, sanitizing the requests before forwarding to server host. 6. Design: Run server interfaces with a non-root account and/or utilize chroot jails or other configuration techniques to constrain privileges even if attacker gains some limited access to commands. Implementation: Host integrity monitoring for critical files, directories, and processes. The goal of host integrity monitoring is to be aware when a security issue has occurred so that incident response and other forensic activities can begin. Implementation: Perform input validation for all remote content, including remote and user-generated content. Implementation: Perform testing such as pen-testing and vulnerability scanning to identify directories, programs, and interfaces that grant direct access to executables. Implementation: Use indirect references rather than actual file names. Implementation: Use possible permissions on file access when developing and deploying web applications. Implementation: Validate user input by only accepting known good. Ensure all content that is delivered to client is sanitized against an acceptable content specification -- whitelisting approach.
 
-#### F-305 — Using Malicious Files  `AC06`
+#### F-306 — Using Malicious Files  `AC06`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — The orchestrator never executes what a sidecar produces: SpiderFoot, Amass and SocialOSINT output is parsed into CollectorResult inside the collector module (docs/architecture.md). The sidecars' own file handling is upstream code running loopback-only from pinned images. Hardening: read-only root filesystems and dropped capabilities for the sidecars.
 - **pytm mitigations:** Design: Enforce principle of least privilegeDesign: Run server interfaces with a non-root account and/or utilize chroot jails or other configuration techniques to constrain privileges even if attacker gains some limited access to commands.Implementation: Perform testing such as pen-testing and vulnerability scanning to identify directories, programs, and interfaces that grant direct access to executables.
 
-#### F-307 — XSS Targeting Non-Script Elements  `SC02`
+#### F-308 — XSS Targeting Non-Script Elements  `SC02`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** In addition to the traditional input fields, all other user controllable inputs, such as image tags within messages or the likes, must also be subjected to input validation. Such validation should ensure that content that can be potentially interpreted as script by the browser is appropriately filtered.All output displayed to clients must be properly escaped. Escaping ensures that the browser interprets special scripting characters literally and not as script to be executed.
 
-#### F-332 — Session Hijacking - ServerSide  `AC17`
+#### F-333 — Session Hijacking - ServerSide  `AC17`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — SpiderFoot, Amass, SocialOSINT and Ollama have no sessions and no authentication; they are reachable only on loopback or the compose bridge (ADR-005). Hardening for shared hosts: authentication in front of SpiderFoot and network policies between services.
 - **pytm mitigations:** Properly encrypt and sign identity tokens in transit, and use industry standard session key generation mechanisms that utilize high amount of entropy to generate the session key. Many standard web and application servers will perform this task on your behalf. Utilize a session timeout for all sessions. If the user does not explicitly logout, terminate their session after this period of inactivity. If the user logs back in then a new session key should be generated.
 
-#### F-336 — Command Line Execution through SQL Injection  `INP05`
+#### F-337 — Command Line Execution through SQL Injection  `INP05`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Disable MSSQL xp_cmdshell directive on the databaseProperly validate the data (syntactically and semantically) before writing it to the database. Do not implicitly trust the data stored in the database. Re-validate it prior to usage to make sure that it is safe to use in a given context (e.g. as a command line argument).
 
-#### F-341 — Path Traversal  `HA01`
+#### F-342 — Path Traversal  `HA01`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Design: Configure the access control correctly. Design: Enforce principle of least privilege. Design: Execute programs with constrained privileges, so parent process does not open up further vulnerabilities. Ensure that all directories, temporary directories and files, and memory are executing with limited privileges to protect against remote execution. Design: Input validation. Assume that user inputs are malicious. Utilize strict type, character, and encoding enforcement. Design: Proxy communication to host, so that communications are terminated at the proxy, sanitizing the requests before forwarding to server host. 6. Design: Run server interfaces with a non-root account and/or utilize chroot jails or other configuration techniques to constrain privileges even if attacker gains some limited access to commands. Implementation: Host integrity monitoring for critical files, directories, and processes. The goal of host integrity monitoring is to be aware when a security issue has occurred so that incident response and other forensic activities can begin. Implementation: Perform input validation for all remote content, including remote and user-generated content. Implementation: Perform testing such as pen-testing and vulnerability scanning to identify directories, programs, and interfaces that grant direct access to executables. Implementation: Use indirect references rather than actual file names. Implementation: Use possible permissions on file access when developing and deploying web applications. Implementation: Validate user input by only accepting known good. Ensure all content that is delivered to client is sanitized against an acceptable content specification -- whitelisting approach.
 
-#### F-350 — Using Malicious Files  `AC06`
+#### F-351 — Using Malicious Files  `AC06`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — Keycloak, MISP, Tavily and the SMTP relay own their file-handling surface; the orchestrator uploads no files to them and renders nothing they serve.
 - **pytm mitigations:** Design: Enforce principle of least privilegeDesign: Run server interfaces with a non-root account and/or utilize chroot jails or other configuration techniques to constrain privileges even if attacker gains some limited access to commands.Implementation: Perform testing such as pen-testing and vulnerability scanning to identify directories, programs, and interfaces that grant direct access to executables.
 
-#### F-352 — XSS Targeting Non-Script Elements  `SC02`
+#### F-353 — XSS Targeting Non-Script Elements  `SC02`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** In addition to the traditional input fields, all other user controllable inputs, such as image tags within messages or the likes, must also be subjected to input validation. Such validation should ensure that content that can be potentially interpreted as script by the browser is appropriately filtered.All output displayed to clients must be properly escaped. Escaping ensures that the browser interprets special scripting characters literally and not as script to be executed.
 
-#### F-376 — Session Hijacking - ServerSide  `AC17`
+#### F-377 — Session Hijacking - ServerSide  `AC17`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — Session and credential handling inside Keycloak, OpenCTI, MISP, Tavily and the SMTP relay is the vendor's; the orchestrator presents only API tokens.
 - **pytm mitigations:** Properly encrypt and sign identity tokens in transit, and use industry standard session key generation mechanisms that utilize high amount of entropy to generate the session key. Many standard web and application servers will perform this task on your behalf. Utilize a session timeout for all sessions. If the user does not explicitly logout, terminate their session after this period of inactivity. If the user logs back in then a new session key should be generated.
 
-#### F-379 — Command Line Execution through SQL Injection  `INP05`
+#### F-380 — Command Line Execution through SQL Injection  `INP05`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Disable MSSQL xp_cmdshell directive on the databaseProperly validate the data (syntactically and semantically) before writing it to the database. Do not implicitly trust the data stored in the database. Re-validate it prior to usage to make sure that it is safe to use in a given context (e.g. as a command line argument).
 
-#### F-385 — Path Traversal  `HA01`
+#### F-386 — Path Traversal  `HA01`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Design: Configure the access control correctly. Design: Enforce principle of least privilege. Design: Execute programs with constrained privileges, so parent process does not open up further vulnerabilities. Ensure that all directories, temporary directories and files, and memory are executing with limited privileges to protect against remote execution. Design: Input validation. Assume that user inputs are malicious. Utilize strict type, character, and encoding enforcement. Design: Proxy communication to host, so that communications are terminated at the proxy, sanitizing the requests before forwarding to server host. 6. Design: Run server interfaces with a non-root account and/or utilize chroot jails or other configuration techniques to constrain privileges even if attacker gains some limited access to commands. Implementation: Host integrity monitoring for critical files, directories, and processes. The goal of host integrity monitoring is to be aware when a security issue has occurred so that incident response and other forensic activities can begin. Implementation: Perform input validation for all remote content, including remote and user-generated content. Implementation: Perform testing such as pen-testing and vulnerability scanning to identify directories, programs, and interfaces that grant direct access to executables. Implementation: Use indirect references rather than actual file names. Implementation: Use possible permissions on file access when developing and deploying web applications. Implementation: Validate user input by only accepting known good. Ensure all content that is delivered to client is sanitized against an acceptable content specification -- whitelisting approach.
 
-#### F-393 — Using Malicious Files  `AC06`
+#### F-394 — Using Malicious Files  `AC06`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Keycloak, MISP, Tavily and the SMTP relay own their file-handling surface; the orchestrator uploads no files to them and renders nothing they serve.
 - **pytm mitigations:** Design: Enforce principle of least privilegeDesign: Run server interfaces with a non-root account and/or utilize chroot jails or other configuration techniques to constrain privileges even if attacker gains some limited access to commands.Implementation: Perform testing such as pen-testing and vulnerability scanning to identify directories, programs, and interfaces that grant direct access to executables.
 
-#### F-395 — XSS Targeting Non-Script Elements  `SC02`
+#### F-396 — XSS Targeting Non-Script Elements  `SC02`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** In addition to the traditional input fields, all other user controllable inputs, such as image tags within messages or the likes, must also be subjected to input validation. Such validation should ensure that content that can be potentially interpreted as script by the browser is appropriately filtered.All output displayed to clients must be properly escaped. Escaping ensures that the browser interprets special scripting characters literally and not as script to be executed.
 
-#### F-419 — Session Hijacking - ServerSide  `AC17`
+#### F-420 — Session Hijacking - ServerSide  `AC17`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Session and credential handling inside Keycloak, OpenCTI, MISP, Tavily and the SMTP relay is the vendor's; the orchestrator presents only API tokens.
 - **pytm mitigations:** Properly encrypt and sign identity tokens in transit, and use industry standard session key generation mechanisms that utilize high amount of entropy to generate the session key. Many standard web and application servers will perform this task on your behalf. Utilize a session timeout for all sessions. If the user does not explicitly logout, terminate their session after this period of inactivity. If the user logs back in then a new session key should be generated.
 
-#### F-426 — Overflow Buffers  `INP02`
+#### F-427 — Overflow Buffers  `INP02`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — oauth2-proxy and connector-misp run as their pinned vendor images ship them; what happens inside them is upstream code.
 - **pytm mitigations:** Use a language or compiler that performs automatic bounds checking. Use secure functions not vulnerable to buffer overflow. If you have to use dangerous functions, make sure that you do boundary checking. Compiler-based canary mechanisms such as StackGuard, ProPolice and the Microsoft Visual Studio /GS flag. Unless this provides automatic bounds checking, it is not a complete solution. Use OS-level preventative functionality. Not a complete solution. Utilize static source code analysis tools to identify potential buffer overflow weaknesses in the software.
 
-#### F-430 — Buffer Manipulation  `INP07`
+#### F-431 — Buffer Manipulation  `INP07`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** To help protect an application from buffer manipulation attacks, a number of potential mitigations can be leveraged. Before starting the development of the application, consider using a code language (e.g., Java) or compiler that limits the ability of developers to act beyond the bounds of a buffer. If the chosen language is susceptible to buffer related issues (e.g., C) then consider using secure functions instead of those vulnerable to buffer manipulations. If a potentially dangerous function must be used, make sure that proper boundary checking is performed. Additionally, there are often a number of compiler-based mechanisms (e.g., StackGuard, ProPolice and the Microsoft Visual Studio /GS flag) that can help identify and protect against potential buffer issues. Finally, there may be operating system level preventative functionality that can be applied.
 
-#### F-440 — File Content Injection  `INP23`
+#### F-441 — File Content Injection  `INP23`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Design: Enforce principle of least privilegeDesign: Validate all input for content including files. Ensure that if files and remote content must be accepted that once accepted, they are placed in a sandbox type location so that lower assurance clients cannot write up to higher assurance processes (like Web server processes for example)Design: Execute programs with constrained privileges, so parent process does not open up further vulnerabilities. Ensure that all directories, temporary directories and files, and memory are executing with limited privileges to protect against remote execution.Design: Proxy communication to host, so that communications are terminated at the proxy, sanitizing the requests before forwarding to server host.Implementation: Virus scanning on hostImplementation: Host integrity monitoring for critical files, directories, and processes. The goal of host integrity monitoring is to be aware when a security issue has occurred so that incident response and other forensic activities can begin.
 
-#### F-443 — Catching exception throw/signal from privileged block  `AC14`
+#### F-444 — Catching exception throw/signal from privileged block  `AC14`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — oauth2-proxy and connector-misp run as their pinned vendor images ship them; what happens inside them is upstream code.
 - **pytm mitigations:** Application Architects must be careful to design callback, signal, and similar asynchronous constructs such that they shed excess privilege prior to handing control to user-written (thus untrusted) code.Application Architects must be careful to design privileged code blocks such that upon return (successful, failed, or unpredicted) that privilege is shed prior to leaving the block/scope.
 
-#### F-456 — Session Hijacking - ClientSide  `AC18`
+#### F-457 — Session Hijacking - ClientSide  `AC18`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — Session and credential handling inside Keycloak, OpenCTI, MISP, Tavily and the SMTP relay is the vendor's; the orchestrator presents only API tokens.
 - **pytm mitigations:** Properly encrypt and sign identity tokens in transit, and use industry standard session key generation mechanisms that utilize high amount of entropy to generate the session key. Many standard web and application servers will perform this task on your behalf. Utilize a session timeout for all sessions. If the user does not explicitly logout, terminate their session after this period of inactivity. If the user logs back in then a new session key should be generated.
 
-#### F-459 — Cross Site Request Forgery  `AC21`
+#### F-460 — Cross Site Request Forgery  `AC21`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — connector-misp has no browser-facing surface; CSRF on vendor UIs is the vendor's (oauth2-proxy implements its own CSRF token).
 - **pytm mitigations:** Use cryptographic tokens to associate a request with a specific action. The token can be regenerated at every request so that if a request with an invalid token is encountered, it can be reliably discarded. The token is considered invalid if it arrived with a request other than the action it was supposed to be associated with.Although less reliable, the use of the optional HTTP Referrer header can also be used to determine whether an incoming request was actually one that the user is authorized for, in the current context.Additionally, the user can also be prompted to confirm an action every time an action concerning potentially sensitive data is invoked. This way, even if the attacker manages to get the user to click on a malicious link and request the desired action, the user has a chance to recover by denying confirmation. This solution is also implicitly tied to using a second factor of authentication before performing such actions.In general, every request must be checked for the appropriate authentication token as well as authorization in the current session context.
 
-#### F-461 — Cross Site Tracing  `CR02`
+#### F-462 — Cross Site Tracing  `CR02`
 
 - **Element:** Operator session (OIDC, shipped overlay) (flow)
 - **Response:** accepted — FastAPI answers TRACE with 405 and the console ships no inline script that could read reflected headers; the plaintext proxied hop itself is the DS06 decision (shipped overlay without TLS). Hardening: TLS terminator that drops TRACE.
 - **pytm mitigations:** Administrators should disable support for HTTP TRACE at the destination's web server. Vendors should disable TRACE by default. Patch web browser against known security origin policy bypass exploits.
 
-#### F-467 — Data Leak  `DS06`
+#### F-468 — Data Leak  `DS06`
 
 - **Element:** Operator session (OIDC, shipped overlay) (flow)
 - **Response:** accepted — Flows that leave the host use TLS 1.2+ (Tavily, cloud LLM, public web, MISP poll, SMTP with STARTTLS, webhook over HTTPS). Host-internal hops are plaintext by decision ADR-005: loopback console/API, the compose bridge to sidecars, Ollama, OpenCTI, Keycloak, SQLite and files; the shipped OIDC overlay terminates no TLS, so the operator session is a host-local plaintext hop too. Hardening for shared infrastructure: a TLS terminator in front of :8000/:8002, TLS between services, disk encryption.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-471 — Cross Site Tracing  `CR02`
+#### F-472 — Cross Site Tracing  `CR02`
 
 - **Element:** Proxied console/API calls (flow)
 - **Response:** accepted — FastAPI answers TRACE with 405 and the console ships no inline script that could read reflected headers; the plaintext proxied hop itself is the DS06 decision (shipped overlay without TLS). Hardening: TLS terminator that drops TRACE.
 - **pytm mitigations:** Administrators should disable support for HTTP TRACE at the destination's web server. Vendors should disable TRACE by default. Patch web browser against known security origin policy bypass exploits.
 
-#### F-477 — Data Leak  `DS06`
+#### F-478 — Data Leak  `DS06`
 
 - **Element:** Proxied console/API calls (flow)
 - **Response:** accepted — Flows that leave the host use TLS 1.2+ (Tavily, cloud LLM, public web, MISP poll, SMTP with STARTTLS, webhook over HTTPS). Host-internal hops are plaintext by decision ADR-005: loopback console/API, the compose bridge to sidecars, Ollama, OpenCTI, Keycloak, SQLite and files; the shipped OIDC overlay terminates no TLS, so the operator session is a host-local plaintext hop too. Hardening for shared infrastructure: a TLS terminator in front of :8000/:8002, TLS between services, disk encryption.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-485 — Data Leak  `DS06`
+#### F-486 — Data Leak  `DS06`
 
 - **Element:** Token redeem / userinfo (flow)
 - **Response:** accepted — Flows that leave the host use TLS 1.2+ (Tavily, cloud LLM, public web, MISP poll, SMTP with STARTTLS, webhook over HTTPS). Host-internal hops are plaintext by decision ADR-005: loopback console/API, the compose bridge to sidecars, Ollama, OpenCTI, Keycloak, SQLite and files; the shipped OIDC overlay terminates no TLS, so the operator session is a host-local plaintext hop too. Hardening for shared infrastructure: a TLS terminator in front of :8000/:8002, TLS between services, disk encryption.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-492 — Data Leak  `DS06`
+#### F-494 — Data Leak  `DS06`
+
+- **Element:** Operator login (Keycloak authorization endpoint, shipped overlay) (flow)
+- **Response:** accepted — Flows that leave the host use TLS 1.2+ (Tavily, cloud LLM, public web, MISP poll, SMTP with STARTTLS, webhook over HTTPS). Host-internal hops are plaintext by decision ADR-005: loopback console/API, the compose bridge to sidecars, Ollama, OpenCTI, Keycloak, SQLite and files; the shipped OIDC overlay terminates no TLS, so the operator session is a host-local plaintext hop too. Hardening for shared infrastructure: a TLS terminator in front of :8000/:8002, TLS between services, disk encryption.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-502 — Data Leak  `DS06`
 
 - **Element:** Direct loopback API/console (no overlay) (flow)
 - **Response:** accepted — Flows that leave the host use TLS 1.2+ (Tavily, cloud LLM, public web, MISP poll, SMTP with STARTTLS, webhook over HTTPS). Host-internal hops are plaintext by decision ADR-005: loopback console/API, the compose bridge to sidecars, Ollama, OpenCTI, Keycloak, SQLite and files; the shipped OIDC overlay terminates no TLS, so the operator session is a host-local plaintext hop too. Hardening for shared infrastructure: a TLS terminator in front of :8000/:8002, TLS between services, disk encryption.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-505 — Data Leak  `DS06`
+#### F-515 — Data Leak  `DS06`
 
 - **Element:** POST /bundles (STIX intake) (flow)
 - **Response:** accepted — Flows that leave the host use TLS 1.2+ (Tavily, cloud LLM, public web, MISP poll, SMTP with STARTTLS, webhook over HTTPS). Host-internal hops are plaintext by decision ADR-005: loopback console/API, the compose bridge to sidecars, Ollama, OpenCTI, Keycloak, SQLite and files; the shipped OIDC overlay terminates no TLS, so the operator session is a host-local plaintext hop too. Hardening for shared infrastructure: a TLS terminator in front of :8000/:8002, TLS between services, disk encryption.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-518 — Data Leak  `DS06`
+#### F-528 — Data Leak  `DS06`
 
 - **Element:** Scan control & results (flow)
 - **Response:** accepted — Flows that leave the host use TLS 1.2+ (Tavily, cloud LLM, public web, MISP poll, SMTP with STARTTLS, webhook over HTTPS). Host-internal hops are plaintext by decision ADR-005: loopback console/API, the compose bridge to sidecars, Ollama, OpenCTI, Keycloak, SQLite and files; the shipped OIDC overlay terminates no TLS, so the operator session is a host-local plaintext hop too. Hardening for shared infrastructure: a TLS terminator in front of :8000/:8002, TLS between services, disk encryption.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-530 — Data Leak  `DS06`
+#### F-540 — Data Leak  `DS06`
 
 - **Element:** Engine writes asset.db (flow)
 - **Response:** accepted — Flows that leave the host use TLS 1.2+ (Tavily, cloud LLM, public web, MISP poll, SMTP with STARTTLS, webhook over HTTPS). Host-internal hops are plaintext by decision ADR-005: loopback console/API, the compose bridge to sidecars, Ollama, OpenCTI, Keycloak, SQLite and files; the shipped OIDC overlay terminates no TLS, so the operator session is a host-local plaintext hop too. Hardening for shared infrastructure: a TLS terminator in front of :8000/:8002, TLS between services, disk encryption.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-537 — Data Leak  `DS06`
+#### F-547 — Data Leak  `DS06`
 
 - **Element:** Read discovered names (oam_subs, shared volume) (flow)
 - **Response:** accepted — Flows that leave the host use TLS 1.2+ (Tavily, cloud LLM, public web, MISP poll, SMTP with STARTTLS, webhook over HTTPS). Host-internal hops are plaintext by decision ADR-005: loopback console/API, the compose bridge to sidecars, Ollama, OpenCTI, Keycloak, SQLite and files; the shipped OIDC overlay terminates no TLS, so the operator session is a host-local plaintext hop too. Hardening for shared infrastructure: a TLS terminator in front of :8000/:8002, TLS between services, disk encryption.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-544 — Data Leak  `DS06`
+#### F-554 — Data Leak  `DS06`
 
 - **Element:** Platform collection jobs (flow)
 - **Response:** accepted — Flows that leave the host use TLS 1.2+ (Tavily, cloud LLM, public web, MISP poll, SMTP with STARTTLS, webhook over HTTPS). Host-internal hops are plaintext by decision ADR-005: loopback console/API, the compose bridge to sidecars, Ollama, OpenCTI, Keycloak, SQLite and files; the shipped OIDC overlay terminates no TLS, so the operator session is a host-local plaintext hop too. Hardening for shared infrastructure: a TLS terminator in front of :8000/:8002, TLS between services, disk encryption.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-550 — Data Leak  `DS06`
+#### F-560 — Data Leak  `DS06`
+
+- **Element:** SocialOSINT text and vision prompts (own endpoint and key) (flow)
+- **Response:** accepted — Flows that leave the host use TLS 1.2+ (Tavily, cloud LLM, public web, MISP poll, SMTP with STARTTLS, webhook over HTTPS). Host-internal hops are plaintext by decision ADR-005: loopback console/API, the compose bridge to sidecars, Ollama, OpenCTI, Keycloak, SQLite and files; the shipped OIDC overlay terminates no TLS, so the operator session is a host-local plaintext hop too. Hardening for shared infrastructure: a TLS terminator in front of :8000/:8002, TLS between services, disk encryption.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-566 — Data Leak  `DS06`
+
+- **Element:** Platform collection (operator's API tokens) (flow)
+- **Response:** accepted — Flows that leave the host use TLS 1.2+ (Tavily, cloud LLM, public web, MISP poll, SMTP with STARTTLS, webhook over HTTPS). Host-internal hops are plaintext by decision ADR-005: loopback console/API, the compose bridge to sidecars, Ollama, OpenCTI, Keycloak, SQLite and files; the shipped OIDC overlay terminates no TLS, so the operator session is a host-local plaintext hop too. Hardening for shared infrastructure: a TLS terminator in front of :8000/:8002, TLS between services, disk encryption.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-572 — Data Leak  `DS06`
 
 - **Element:** Due-diligence queries (flow)
 - **Response:** accepted — Flows that leave the host use TLS 1.2+ (Tavily, cloud LLM, public web, MISP poll, SMTP with STARTTLS, webhook over HTTPS). Host-internal hops are plaintext by decision ADR-005: loopback console/API, the compose bridge to sidecars, Ollama, OpenCTI, Keycloak, SQLite and files; the shipped OIDC overlay terminates no TLS, so the operator session is a host-local plaintext hop too. Hardening for shared infrastructure: a TLS terminator in front of :8000/:8002, TLS between services, disk encryption.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-556 — Data Leak  `DS06`
+#### F-578 — Data Leak  `DS06`
 
 - **Element:** Active reconnaissance (flow)
 - **Response:** accepted — Flows that leave the host use TLS 1.2+ (Tavily, cloud LLM, public web, MISP poll, SMTP with STARTTLS, webhook over HTTPS). Host-internal hops are plaintext by decision ADR-005: loopback console/API, the compose bridge to sidecars, Ollama, OpenCTI, Keycloak, SQLite and files; the shipped OIDC overlay terminates no TLS, so the operator session is a host-local plaintext hop too. Hardening for shared infrastructure: a TLS terminator in front of :8000/:8002, TLS between services, disk encryption.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-561 — Data Leak  `DS06`
+#### F-583 — Data Leak  `DS06`
 
 - **Element:** Passive collection (OpenOSINT) (flow)
 - **Response:** accepted — Flows that leave the host use TLS 1.2+ (Tavily, cloud LLM, public web, MISP poll, SMTP with STARTTLS, webhook over HTTPS). Host-internal hops are plaintext by decision ADR-005: loopback console/API, the compose bridge to sidecars, Ollama, OpenCTI, Keycloak, SQLite and files; the shipped OIDC overlay terminates no TLS, so the operator session is a host-local plaintext hop too. Hardening for shared infrastructure: a TLS terminator in front of :8000/:8002, TLS between services, disk encryption.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-567 — Data Leak  `DS06`
+#### F-589 — Data Leak  `DS06`
 
 - **Element:** Qualification & synthesis prompts (local) (flow)
 - **Response:** accepted — Flows that leave the host use TLS 1.2+ (Tavily, cloud LLM, public web, MISP poll, SMTP with STARTTLS, webhook over HTTPS). Host-internal hops are plaintext by decision ADR-005: loopback console/API, the compose bridge to sidecars, Ollama, OpenCTI, Keycloak, SQLite and files; the shipped OIDC overlay terminates no TLS, so the operator session is a host-local plaintext hop too. Hardening for shared infrastructure: a TLS terminator in front of :8000/:8002, TLS between services, disk encryption.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-573 — Data Leak  `DS06`
+#### F-595 — Data Leak  `DS06`
 
 - **Element:** Qualification & synthesis prompts (cloud) (flow)
 - **Response:** accepted — Flows that leave the host use TLS 1.2+ (Tavily, cloud LLM, public web, MISP poll, SMTP with STARTTLS, webhook over HTTPS). Host-internal hops are plaintext by decision ADR-005: loopback console/API, the compose bridge to sidecars, Ollama, OpenCTI, Keycloak, SQLite and files; the shipped OIDC overlay terminates no TLS, so the operator session is a host-local plaintext hop too. Hardening for shared infrastructure: a TLS terminator in front of :8000/:8002, TLS between services, disk encryption.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-580 — Data Leak  `DS06`
+#### F-602 — Data Leak  `DS06`
 
 - **Element:** Run/state SQL (flow)
 - **Response:** accepted — Flows that leave the host use TLS 1.2+ (Tavily, cloud LLM, public web, MISP poll, SMTP with STARTTLS, webhook over HTTPS). Host-internal hops are plaintext by decision ADR-005: loopback console/API, the compose bridge to sidecars, Ollama, OpenCTI, Keycloak, SQLite and files; the shipped OIDC overlay terminates no TLS, so the operator session is a host-local plaintext hop too. Hardening for shared infrastructure: a TLS terminator in front of :8000/:8002, TLS between services, disk encryption.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-587 — Data Leak  `DS06`
+#### F-609 — Data Leak  `DS06`
 
 - **Element:** Seal run artefacts + manifest (flow)
 - **Response:** accepted — Flows that leave the host use TLS 1.2+ (Tavily, cloud LLM, public web, MISP poll, SMTP with STARTTLS, webhook over HTTPS). Host-internal hops are plaintext by decision ADR-005: loopback console/API, the compose bridge to sidecars, Ollama, OpenCTI, Keycloak, SQLite and files; the shipped OIDC overlay terminates no TLS, so the operator session is a host-local plaintext hop too. Hardening for shared infrastructure: a TLS terminator in front of :8000/:8002, TLS between services, disk encryption.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-599 — Data Leak  `DS06`
+#### F-621 — Data Leak  `DS06`
 
 - **Element:** STIX ingest (pycti, outbox retries) (flow)
 - **Response:** accepted — Flows that leave the host use TLS 1.2+ (Tavily, cloud LLM, public web, MISP poll, SMTP with STARTTLS, webhook over HTTPS). Host-internal hops are plaintext by decision ADR-005: loopback console/API, the compose bridge to sidecars, Ollama, OpenCTI, Keycloak, SQLite and files; the shipped OIDC overlay terminates no TLS, so the operator session is a host-local plaintext hop too. Hardening for shared infrastructure: a TLS terminator in front of :8000/:8002, TLS between services, disk encryption.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-607 — Data Leak  `DS06`
+#### F-629 — Data Leak  `DS06`
 
-- **Element:** Index/object/queue traffic (flow)
+- **Element:** Elasticsearch indices (flow)
 - **Response:** accepted — Flows that leave the host use TLS 1.2+ (Tavily, cloud LLM, public web, MISP poll, SMTP with STARTTLS, webhook over HTTPS). Host-internal hops are plaintext by decision ADR-005: loopback console/API, the compose bridge to sidecars, Ollama, OpenCTI, Keycloak, SQLite and files; the shipped OIDC overlay terminates no TLS, so the operator session is a host-local plaintext hop too. Hardening for shared infrastructure: a TLS terminator in front of :8000/:8002, TLS between services, disk encryption.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-613 — Data Leak  `DS06`
+#### F-636 — Data Leak  `DS06`
+
+- **Element:** MinIO objects (flow)
+- **Response:** accepted — Flows that leave the host use TLS 1.2+ (Tavily, cloud LLM, public web, MISP poll, SMTP with STARTTLS, webhook over HTTPS). Host-internal hops are plaintext by decision ADR-005: loopback console/API, the compose bridge to sidecars, Ollama, OpenCTI, Keycloak, SQLite and files; the shipped OIDC overlay terminates no TLS, so the operator session is a host-local plaintext hop too. Hardening for shared infrastructure: a TLS terminator in front of :8000/:8002, TLS between services, disk encryption.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-644 — Data Leak  `DS06`
+
+- **Element:** RabbitMQ queues (flow)
+- **Response:** accepted — Flows that leave the host use TLS 1.2+ (Tavily, cloud LLM, public web, MISP poll, SMTP with STARTTLS, webhook over HTTPS). Host-internal hops are plaintext by decision ADR-005: loopback console/API, the compose bridge to sidecars, Ollama, OpenCTI, Keycloak, SQLite and files; the shipped OIDC overlay terminates no TLS, so the operator session is a host-local plaintext hop too. Hardening for shared infrastructure: a TLS terminator in front of :8000/:8002, TLS between services, disk encryption.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-652 — Data Leak  `DS06`
+
+- **Element:** Redis cache (no authentication) (flow)
+- **Response:** accepted — Flows that leave the host use TLS 1.2+ (Tavily, cloud LLM, public web, MISP poll, SMTP with STARTTLS, webhook over HTTPS). Host-internal hops are plaintext by decision ADR-005: loopback console/API, the compose bridge to sidecars, Ollama, OpenCTI, Keycloak, SQLite and files; the shipped OIDC overlay terminates no TLS, so the operator session is a host-local plaintext hop too. Hardening for shared infrastructure: a TLS terminator in front of :8000/:8002, TLS between services, disk encryption.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-658 — Data Leak  `DS06`
 
 - **Element:** connector-misp polls MISP events (flow)
 - **Response:** accepted — Flows that leave the host use TLS 1.2+ (Tavily, cloud LLM, public web, MISP poll, SMTP with STARTTLS, webhook over HTTPS). Host-internal hops are plaintext by decision ADR-005: loopback console/API, the compose bridge to sidecars, Ollama, OpenCTI, Keycloak, SQLite and files; the shipped OIDC overlay terminates no TLS, so the operator session is a host-local plaintext hop too. Hardening for shared infrastructure: a TLS terminator in front of :8000/:8002, TLS between services, disk encryption.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-620 — Data Leak  `DS06`
+#### F-665 — Data Leak  `DS06`
 
 - **Element:** connector-misp writes to OpenCTI (flow)
 - **Response:** accepted — Flows that leave the host use TLS 1.2+ (Tavily, cloud LLM, public web, MISP poll, SMTP with STARTTLS, webhook over HTTPS). Host-internal hops are plaintext by decision ADR-005: loopback console/API, the compose bridge to sidecars, Ollama, OpenCTI, Keycloak, SQLite and files; the shipped OIDC overlay terminates no TLS, so the operator session is a host-local plaintext hop too. Hardening for shared infrastructure: a TLS terminator in front of :8000/:8002, TLS between services, disk encryption.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-627 — Data Leak  `DS06`
+#### F-672 — Data Leak  `DS06`
 
 - **Element:** Alert webhook (ALERT_WEBHOOK_URL) (flow)
 - **Response:** accepted — Flows that leave the host use TLS 1.2+ (Tavily, cloud LLM, public web, MISP poll, SMTP with STARTTLS, webhook over HTTPS). Host-internal hops are plaintext by decision ADR-005: loopback console/API, the compose bridge to sidecars, Ollama, OpenCTI, Keycloak, SQLite and files; the shipped OIDC overlay terminates no TLS, so the operator session is a host-local plaintext hop too. Hardening for shared infrastructure: a TLS terminator in front of :8000/:8002, TLS between services, disk encryption.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-632 — Data Leak  `DS06`
+#### F-677 — Data Leak  `DS06`
 
 - **Element:** Alert e-mail (SMTP, STARTTLS by default) (flow)
 - **Response:** accepted — Flows that leave the host use TLS 1.2+ (Tavily, cloud LLM, public web, MISP poll, SMTP with STARTTLS, webhook over HTTPS). Host-internal hops are plaintext by decision ADR-005: loopback console/API, the compose bridge to sidecars, Ollama, OpenCTI, Keycloak, SQLite and files; the shipped OIDC overlay terminates no TLS, so the operator session is a host-local plaintext hop too. Hardening for shared infrastructure: a TLS terminator in front of :8000/:8002, TLS between services, disk encryption.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-### Severity: High (232)
+### Severity: High (248)
 
 #### F-1 — Server Side Include (SSI) Injection  `INP03`
 
@@ -1113,952 +1151,1048 @@ Every finding carries a triage response:
 #### F-188 — Audit Log Manipulation  `DE04`
 
 - **Element:** SQLite run store (store)
-- **Response:** mitigated — Run artefacts are HMAC-signed and chained per target (ADR-007): tampering with daily_reports is detectable through /targets/{id}/chain/verify, and a SQLite row that disagrees with the sealed manifest is detectable the same way. targets.yaml is mounted read-only. The Amass asset database carries collector input, not audit data. Application logs are stdout for the operator's shipper.
+- **Response:** accepted — Run rows are outside the manifest chain: /targets/{id}/chain/verify checks the manifest hash, signature, chain link and artefact files (evidence.py), not a row's status, collectors or timestamps, so an edit to those fields with the manifest intact goes undetected. Hardening: database file permissions, backups and disk encryption.
 - **pytm mitigations:** Use Principle of Least Privilege to avoid unauthorized access to log files leading to manipulation/injection on those files. Do not allow tainted data to be written in the log file without prior input validation. Whitelisting may be used to properly validate the data. Use synchronization to control the flow of execution. Use static analysis tool to identify log forging vulnerabilities. Avoid viewing logs with tools that may interpret control characters in the file, such as command-line shells.
 
 #### F-192 — Audit Log Manipulation  `DE04`
 
 - **Element:** targets.yaml (store)
-- **Response:** mitigated — Run artefacts are HMAC-signed and chained per target (ADR-007): tampering with daily_reports is detectable through /targets/{id}/chain/verify, and a SQLite row that disagrees with the sealed manifest is detectable the same way. targets.yaml is mounted read-only. The Amass asset database carries collector input, not audit data. Application logs are stdout for the operator's shipper.
+- **Response:** mitigated — Run artefacts are HMAC-signed and chained per target (ADR-007): tampering with daily_reports is detectable through /targets/{id}/chain/verify. targets.yaml is mounted read-only. The Amass asset database carries collector input, not audit data. Application logs are stdout for the operator's shipper.
 - **pytm mitigations:** Use Principle of Least Privilege to avoid unauthorized access to log files leading to manipulation/injection on those files. Do not allow tainted data to be written in the log file without prior input validation. Whitelisting may be used to properly validate the data. Use synchronization to control the flow of execution. Use static analysis tool to identify log forging vulnerabilities. Avoid viewing logs with tools that may interpret control characters in the file, such as command-line shells.
 
 #### F-196 — Audit Log Manipulation  `DE04`
 
 - **Element:** daily_reports (sealed runs) (store)
-- **Response:** mitigated — Run artefacts are HMAC-signed and chained per target (ADR-007): tampering with daily_reports is detectable through /targets/{id}/chain/verify, and a SQLite row that disagrees with the sealed manifest is detectable the same way. targets.yaml is mounted read-only. The Amass asset database carries collector input, not audit data. Application logs are stdout for the operator's shipper.
+- **Response:** mitigated — Run artefacts are HMAC-signed and chained per target (ADR-007): tampering with daily_reports is detectable through /targets/{id}/chain/verify. targets.yaml is mounted read-only. The Amass asset database carries collector input, not audit data. Application logs are stdout for the operator's shipper.
 - **pytm mitigations:** Use Principle of Least Privilege to avoid unauthorized access to log files leading to manipulation/injection on those files. Do not allow tainted data to be written in the log file without prior input validation. Whitelisting may be used to properly validate the data. Use synchronization to control the flow of execution. Use static analysis tool to identify log forging vulnerabilities. Avoid viewing logs with tools that may interpret control characters in the file, such as command-line shells.
 
-#### F-200 — Audit Log Manipulation  `DE04`
+#### F-201 — Audit Log Manipulation  `DE04`
 
 - **Element:** Amass asset database (shared volume) (store)
-- **Response:** mitigated — Run artefacts are HMAC-signed and chained per target (ADR-007): tampering with daily_reports is detectable through /targets/{id}/chain/verify, and a SQLite row that disagrees with the sealed manifest is detectable the same way. targets.yaml is mounted read-only. The Amass asset database carries collector input, not audit data. Application logs are stdout for the operator's shipper.
+- **Response:** mitigated — Run artefacts are HMAC-signed and chained per target (ADR-007): tampering with daily_reports is detectable through /targets/{id}/chain/verify. targets.yaml is mounted read-only. The Amass asset database carries collector input, not audit data. Application logs are stdout for the operator's shipper.
 - **pytm mitigations:** Use Principle of Least Privilege to avoid unauthorized access to log files leading to manipulation/injection on those files. Do not allow tainted data to be written in the log file without prior input validation. Whitelisting may be used to properly validate the data. Use synchronization to control the flow of execution. Use static analysis tool to identify log forging vulnerabilities. Avoid viewing logs with tools that may interpret control characters in the file, such as command-line shells.
 
-#### F-201 — Server Side Include (SSI) Injection  `INP03`
+#### F-202 — Server Side Include (SSI) Injection  `INP03`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Set the OPTIONS IncludesNOEXEC in the global access.conf file or local .htaccess (Apache) file to deny SSI execution in directories that do not need them. All user controllable input must be appropriately sanitized before use in the application. This includes omitting, or encoding, certain characters or strings that have the potential of being interpreted as part of an SSI directive. Server Side Includes must be enabled only if there is a strong business reason to do so. Every additional component enabled on the web server increases the attack surface as well as administrative overhead.
 
-#### F-210 — Format String Injection  `INP08`
+#### F-211 — Format String Injection  `INP08`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Limit the usage of formatting string functions. Strong input validation - All user-controllable input must be validated and filtered for illegal formatting characters.
 
-#### F-211 — LDAP Injection  `INP09`
+#### F-212 — LDAP Injection  `INP09`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Strong input validation - All user-controllable input must be validated and filtered for illegal characters as well as LDAP content. Use of custom error pages - Attackers can glean information about the nature of queries from descriptive error messages. Input validation must be coupled with customized error pages that inform about an error without disclosing information about the LDAP or application.
 
-#### F-213 — Relative Path Traversal  `INP11`
+#### F-214 — Relative Path Traversal  `INP11`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Design: Input validation. Assume that user inputs are malicious. Utilize strict type, character, and encoding enforcement. Implementation: Perform input validation for all remote content, including remote and user-generated content. Implementation: Validate user input by only accepting known good. Ensure all content that is delivered to client is sanitized against an acceptable content specification -- whitelisting approach. Implementation: Prefer working without user input when using file system calls. Implementation: Use indirect references rather than actual file names. Implementation: Use possible permissions on file access when developing and deploying web applications.
 
-#### F-215 — Dictionary-based Password Attack  `CR03`
+#### F-216 — Dictionary-based Password Attack  `CR03`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — SpiderFoot, Amass, SocialOSINT and Ollama have no sessions and no authentication; they are reachable only on loopback or the compose bridge (ADR-005). Hardening for shared hosts: authentication in front of SpiderFoot and network policies between services.
 - **pytm mitigations:** Create a strong password policy and ensure that your system enforces this policy.Implement an intelligent password throttling mechanism. Care must be taken to assure that these mechanisms do not excessively enable account lockout attacks such as CAPEC-02.
 
-#### F-221 — Embedding Scripts within Scripts  `SC03`
+#### F-222 — Embedding Scripts within Scripts  `SC03`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — The orchestrator renders nothing from the sidecars; its own console is CSP-locked (default-src 'none', no inline script). SpiderFoot's web UI is loopback-only.
 - **pytm mitigations:** Use browser technologies that do not allow client side scripting.Utilize strict type, character, and encoding enforcement.Server side developers should not proxy content via XHR or other means. If a HTTP proxy for remote content is setup on the server side, the client's browser has no way of discerning where the data is originating from.Ensure all content that is delivered to client is sanitized against an acceptable content specification.Perform input validation for all remote content.Perform output validation for all remote content.Disable scripting languages such as JavaScript in browserSession tokens for specific hostPatching software. There are many attack vectors for XSS on the client side and the server side. Many vulnerabilities are fixed in service packs for browser, web servers, and plug in technologies, staying current on patch release that deal with XSS countermeasures mitigates this.Privileges are constrained, if a script is loaded, ensure system runs in chroot jail or other limited authority mode
 
-#### F-222 — PHP Remote File Inclusion  `INP16`
+#### F-223 — PHP Remote File Inclusion  `INP16`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Implementation: Perform input validation for all remote content, including remote and user-generated contentImplementation: Only allow known files to be included (whitelist)Implementation: Make use of indirect references passed in URL parameters instead of file namesConfiguration: Ensure that remote scripts cannot be include in the include or require PHP directives
 
-#### F-225 — XSS Using Alternate Syntax  `SC04`
+#### F-226 — XSS Using Alternate Syntax  `SC04`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Design: Use browser technologies that do not allow client side scripting.Design: Utilize strict type, character, and encoding enforcementImplementation: Ensure all content that is delivered to client is sanitized against an acceptable content specification.Implementation: Ensure all content coming from the client is using the same encoding; if not, the server-side application must canonicalize the data before applying any filtering.Implementation: Perform input validation for all remote content, including remote and user-generated contentImplementation: Perform output validation for all remote content.Implementation: Disable scripting languages such as JavaScript in browserImplementation: Patching software. There are many attack vectors for XSS on the client side and the server side. Many vulnerabilities are fixed in service packs for browser, web servers, and plug in technologies, staying current on patch release that deal with XSS countermeasures mitigates this.
 
-#### F-228 — Removing Important Client Functionality  `SC05`
+#### F-229 — Removing Important Client Functionality  `SC05`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — No security decision of the orchestrator lives in a sidecar's client code; SpiderFoot's UI is loopback-only.
 - **pytm mitigations:** Design: For any security checks that are performed on the client side, ensure that these checks are duplicated on the server side.Design: Ship client-side application with integrity checks (code signing) when possible.Design: Use obfuscation and other techniques to prevent reverse engineering the client code.
 
-#### F-230 — Exploitation of Trusted Credentials  `AA03`
+#### F-231 — Exploitation of Trusted Credentials  `AA03`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — SpiderFoot, Amass, SocialOSINT and Ollama have no sessions and no authentication; they are reachable only on loopback or the compose bridge (ADR-005). Hardening for shared hosts: authentication in front of SpiderFoot and network policies between services.
 - **pytm mitigations:** Design: utilize strong federated identity such as SAML to encrypt and sign identity tokens in transit.Implementation: Use industry standards session key generation mechanisms that utilize high amount of entropy to generate the session key. Many standard web and application servers will perform this task on your behalf.Implementation: If the session identifier is used for authentication, such as in the so-called single sign on use cases, then ensure that it is protected at the same level of assurance as authentication tokens.Implementation: If the web or application server supports it, then encrypting and/or signing the session ID (such as cookie) can protect the ID if intercepted.Design: Use strong session identifiers that are protected in transit and at rest.Implementation: Utilize a session timeout for all sessions, for example 20 minutes. If the user does not explicitly logout, the server terminates their session after this period of inactivity. If the user logs back in then a new session key is generated.Implementation: Verify of authenticity of all session IDs at runtime.
 
-#### F-233 — Exploiting Trust in Client  `AA04`
+#### F-234 — Exploiting Trust in Client  `AA04`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Design: Ensure that client process and/or message is authenticated so that anonymous communications and/or messages are not accepted by the system.Design: Do not rely on client validation or encoding for security purposes.Design: Utilize digital signatures to increase authentication assurance.Design: Utilize two factor authentication to increase authentication assurance.Implementation: Perform input validation for all remote content.
 
-#### F-237 — XML Attribute Blowup  `INP22`
+#### F-238 — XML Attribute Blowup  `INP22`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** transferred — The orchestrator's contracts are JSON and CLI text; it parses no XML, SOAP or DTD. Any XML handling lives inside the sidecar or vendor service and is upstream code.
 - **pytm mitigations:** This attack may be mitigated completely by using a parser that is not using a vulnerable container. Mitigation may also limit the number of attributes per XML element.
 
-#### F-238 — XSS Targeting URI Placeholders  `INP28`
+#### F-239 — XSS Targeting URI Placeholders  `INP28`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Design: Use browser technologies that do not allow client side scripting.Design: Utilize strict type, character, and encoding enforcement.Implementation: Ensure all content that is delivered to client is sanitized against an acceptable content specification.Implementation: Ensure all content coming from the client is using the same encoding; if not, the server-side application must canonicalize the data before applying any filtering.Implementation: Perform input validation for all remote content, including remote and user-generated contentImplementation: Perform output validation for all remote content.Implementation: Disable scripting languages such as JavaScript in browserImplementation: Patching software. There are many attack vectors for XSS on the client side and the server side. Many vulnerabilities are fixed in service packs for browser, web servers, and plug in technologies, staying current on patch release that deal with XSS countermeasures mitigates this.
 
-#### F-240 — SOAP Array Overflow  `INP34`
+#### F-241 — SOAP Array Overflow  `INP34`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** transferred — The orchestrator's contracts are JSON and CLI text; it parses no XML, SOAP or DTD. Any XML handling lives inside the sidecar or vendor service and is upstream code.
 - **pytm mitigations:** If the server either verifies the correctness of the stated array size or if the server stops processing an array once the stated number of elements have been read, regardless of the actual array size, then this attack will fail. The former detects the malformed SOAP message while the latter ensures that the server does not attempt to load more data than was allocated for.
 
-#### F-242 — HTTP Request Smuggling  `INP37`
+#### F-243 — HTTP Request Smuggling  `INP37`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — No proxy is chained in front of the sidecars: the orchestrator reaches them directly on the compose bridge, so smuggling needs a position on the host (ADR-005).
 - **pytm mitigations:** HTTP Request Smuggling is usually targeted at web servers. Therefore, in such cases, careful analysis of the entities must occur during system design prior to deployment. If there are known differences in the way the entities parse HTTP requests, the choice of entities needs consideration.Employing an application firewall can help. However, there are instances of the firewalls being susceptible to HTTP Request Smuggling as well.
 
-#### F-243 — Session Credential Falsification through Prediction  `AC16`
+#### F-244 — Session Credential Falsification through Prediction  `AC16`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — SpiderFoot, Amass, SocialOSINT and Ollama have no sessions and no authentication; they are reachable only on loopback or the compose bridge (ADR-005). Hardening for shared hosts: authentication in front of SpiderFoot and network policies between services.
 - **pytm mitigations:** Use a strong source of randomness to generate a session ID.Use adequate length session IDs. Do not use information available to the user in order to generate session ID (e.g., time).Ideas for creating random numbers are offered by Eastlake [RFC1750]. Encrypt the session ID if you expose it to the user. For instance session ID can be stored in a cookie in encrypted format.
 
-#### F-245 — Server Side Include (SSI) Injection  `INP03`
+#### F-246 — Server Side Include (SSI) Injection  `INP03`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Set the OPTIONS IncludesNOEXEC in the global access.conf file or local .htaccess (Apache) file to deny SSI execution in directories that do not need them. All user controllable input must be appropriately sanitized before use in the application. This includes omitting, or encoding, certain characters or strings that have the potential of being interpreted as part of an SSI directive. Server Side Includes must be enabled only if there is a strong business reason to do so. Every additional component enabled on the web server increases the attack surface as well as administrative overhead.
 
-#### F-254 — Format String Injection  `INP08`
+#### F-255 — Format String Injection  `INP08`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Limit the usage of formatting string functions. Strong input validation - All user-controllable input must be validated and filtered for illegal formatting characters.
 
-#### F-255 — LDAP Injection  `INP09`
+#### F-256 — LDAP Injection  `INP09`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Strong input validation - All user-controllable input must be validated and filtered for illegal characters as well as LDAP content. Use of custom error pages - Attackers can glean information about the nature of queries from descriptive error messages. Input validation must be coupled with customized error pages that inform about an error without disclosing information about the LDAP or application.
 
-#### F-257 — Relative Path Traversal  `INP11`
+#### F-258 — Relative Path Traversal  `INP11`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Design: Input validation. Assume that user inputs are malicious. Utilize strict type, character, and encoding enforcement. Implementation: Perform input validation for all remote content, including remote and user-generated content. Implementation: Validate user input by only accepting known good. Ensure all content that is delivered to client is sanitized against an acceptable content specification -- whitelisting approach. Implementation: Prefer working without user input when using file system calls. Implementation: Use indirect references rather than actual file names. Implementation: Use possible permissions on file access when developing and deploying web applications.
 
-#### F-259 — Dictionary-based Password Attack  `CR03`
+#### F-260 — Dictionary-based Password Attack  `CR03`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — SpiderFoot, Amass, SocialOSINT and Ollama have no sessions and no authentication; they are reachable only on loopback or the compose bridge (ADR-005). Hardening for shared hosts: authentication in front of SpiderFoot and network policies between services.
 - **pytm mitigations:** Create a strong password policy and ensure that your system enforces this policy.Implement an intelligent password throttling mechanism. Care must be taken to assure that these mechanisms do not excessively enable account lockout attacks such as CAPEC-02.
 
-#### F-265 — Embedding Scripts within Scripts  `SC03`
+#### F-266 — Embedding Scripts within Scripts  `SC03`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — The orchestrator renders nothing from the sidecars; its own console is CSP-locked (default-src 'none', no inline script). SpiderFoot's web UI is loopback-only.
 - **pytm mitigations:** Use browser technologies that do not allow client side scripting.Utilize strict type, character, and encoding enforcement.Server side developers should not proxy content via XHR or other means. If a HTTP proxy for remote content is setup on the server side, the client's browser has no way of discerning where the data is originating from.Ensure all content that is delivered to client is sanitized against an acceptable content specification.Perform input validation for all remote content.Perform output validation for all remote content.Disable scripting languages such as JavaScript in browserSession tokens for specific hostPatching software. There are many attack vectors for XSS on the client side and the server side. Many vulnerabilities are fixed in service packs for browser, web servers, and plug in technologies, staying current on patch release that deal with XSS countermeasures mitigates this.Privileges are constrained, if a script is loaded, ensure system runs in chroot jail or other limited authority mode
 
-#### F-266 — PHP Remote File Inclusion  `INP16`
+#### F-267 — PHP Remote File Inclusion  `INP16`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Implementation: Perform input validation for all remote content, including remote and user-generated contentImplementation: Only allow known files to be included (whitelist)Implementation: Make use of indirect references passed in URL parameters instead of file namesConfiguration: Ensure that remote scripts cannot be include in the include or require PHP directives
 
-#### F-269 — XSS Using Alternate Syntax  `SC04`
+#### F-270 — XSS Using Alternate Syntax  `SC04`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Design: Use browser technologies that do not allow client side scripting.Design: Utilize strict type, character, and encoding enforcementImplementation: Ensure all content that is delivered to client is sanitized against an acceptable content specification.Implementation: Ensure all content coming from the client is using the same encoding; if not, the server-side application must canonicalize the data before applying any filtering.Implementation: Perform input validation for all remote content, including remote and user-generated contentImplementation: Perform output validation for all remote content.Implementation: Disable scripting languages such as JavaScript in browserImplementation: Patching software. There are many attack vectors for XSS on the client side and the server side. Many vulnerabilities are fixed in service packs for browser, web servers, and plug in technologies, staying current on patch release that deal with XSS countermeasures mitigates this.
 
-#### F-272 — Removing Important Client Functionality  `SC05`
+#### F-273 — Removing Important Client Functionality  `SC05`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — No security decision of the orchestrator lives in a sidecar's client code; SpiderFoot's UI is loopback-only.
 - **pytm mitigations:** Design: For any security checks that are performed on the client side, ensure that these checks are duplicated on the server side.Design: Ship client-side application with integrity checks (code signing) when possible.Design: Use obfuscation and other techniques to prevent reverse engineering the client code.
 
-#### F-274 — Exploitation of Trusted Credentials  `AA03`
+#### F-275 — Exploitation of Trusted Credentials  `AA03`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — SpiderFoot, Amass, SocialOSINT and Ollama have no sessions and no authentication; they are reachable only on loopback or the compose bridge (ADR-005). Hardening for shared hosts: authentication in front of SpiderFoot and network policies between services.
 - **pytm mitigations:** Design: utilize strong federated identity such as SAML to encrypt and sign identity tokens in transit.Implementation: Use industry standards session key generation mechanisms that utilize high amount of entropy to generate the session key. Many standard web and application servers will perform this task on your behalf.Implementation: If the session identifier is used for authentication, such as in the so-called single sign on use cases, then ensure that it is protected at the same level of assurance as authentication tokens.Implementation: If the web or application server supports it, then encrypting and/or signing the session ID (such as cookie) can protect the ID if intercepted.Design: Use strong session identifiers that are protected in transit and at rest.Implementation: Utilize a session timeout for all sessions, for example 20 minutes. If the user does not explicitly logout, the server terminates their session after this period of inactivity. If the user logs back in then a new session key is generated.Implementation: Verify of authenticity of all session IDs at runtime.
 
-#### F-277 — Exploiting Trust in Client  `AA04`
+#### F-278 — Exploiting Trust in Client  `AA04`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Design: Ensure that client process and/or message is authenticated so that anonymous communications and/or messages are not accepted by the system.Design: Do not rely on client validation or encoding for security purposes.Design: Utilize digital signatures to increase authentication assurance.Design: Utilize two factor authentication to increase authentication assurance.Implementation: Perform input validation for all remote content.
 
-#### F-281 — XML Attribute Blowup  `INP22`
+#### F-282 — XML Attribute Blowup  `INP22`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** transferred — The orchestrator's contracts are JSON and CLI text; it parses no XML, SOAP or DTD. Any XML handling lives inside the sidecar or vendor service and is upstream code.
 - **pytm mitigations:** This attack may be mitigated completely by using a parser that is not using a vulnerable container. Mitigation may also limit the number of attributes per XML element.
 
-#### F-282 — XSS Targeting URI Placeholders  `INP28`
+#### F-283 — XSS Targeting URI Placeholders  `INP28`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Design: Use browser technologies that do not allow client side scripting.Design: Utilize strict type, character, and encoding enforcement.Implementation: Ensure all content that is delivered to client is sanitized against an acceptable content specification.Implementation: Ensure all content coming from the client is using the same encoding; if not, the server-side application must canonicalize the data before applying any filtering.Implementation: Perform input validation for all remote content, including remote and user-generated contentImplementation: Perform output validation for all remote content.Implementation: Disable scripting languages such as JavaScript in browserImplementation: Patching software. There are many attack vectors for XSS on the client side and the server side. Many vulnerabilities are fixed in service packs for browser, web servers, and plug in technologies, staying current on patch release that deal with XSS countermeasures mitigates this.
 
-#### F-284 — SOAP Array Overflow  `INP34`
+#### F-285 — SOAP Array Overflow  `INP34`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** transferred — The orchestrator's contracts are JSON and CLI text; it parses no XML, SOAP or DTD. Any XML handling lives inside the sidecar or vendor service and is upstream code.
 - **pytm mitigations:** If the server either verifies the correctness of the stated array size or if the server stops processing an array once the stated number of elements have been read, regardless of the actual array size, then this attack will fail. The former detects the malformed SOAP message while the latter ensures that the server does not attempt to load more data than was allocated for.
 
-#### F-286 — HTTP Request Smuggling  `INP37`
+#### F-287 — HTTP Request Smuggling  `INP37`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — No proxy is chained in front of the sidecars: the orchestrator reaches them directly on the compose bridge, so smuggling needs a position on the host (ADR-005).
 - **pytm mitigations:** HTTP Request Smuggling is usually targeted at web servers. Therefore, in such cases, careful analysis of the entities must occur during system design prior to deployment. If there are known differences in the way the entities parse HTTP requests, the choice of entities needs consideration.Employing an application firewall can help. However, there are instances of the firewalls being susceptible to HTTP Request Smuggling as well.
 
-#### F-287 — Session Credential Falsification through Prediction  `AC16`
+#### F-288 — Session Credential Falsification through Prediction  `AC16`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — SpiderFoot, Amass, SocialOSINT and Ollama have no sessions and no authentication; they are reachable only on loopback or the compose bridge (ADR-005). Hardening for shared hosts: authentication in front of SpiderFoot and network policies between services.
 - **pytm mitigations:** Use a strong source of randomness to generate a session ID.Use adequate length session IDs. Do not use information available to the user in order to generate session ID (e.g., time).Ideas for creating random numbers are offered by Eastlake [RFC1750]. Encrypt the session ID if you expose it to the user. For instance session ID can be stored in a cookie in encrypted format.
 
-#### F-289 — Server Side Include (SSI) Injection  `INP03`
+#### F-290 — Server Side Include (SSI) Injection  `INP03`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Set the OPTIONS IncludesNOEXEC in the global access.conf file or local .htaccess (Apache) file to deny SSI execution in directories that do not need them. All user controllable input must be appropriately sanitized before use in the application. This includes omitting, or encoding, certain characters or strings that have the potential of being interpreted as part of an SSI directive. Server Side Includes must be enabled only if there is a strong business reason to do so. Every additional component enabled on the web server increases the attack surface as well as administrative overhead.
 
-#### F-298 — Format String Injection  `INP08`
+#### F-299 — Format String Injection  `INP08`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Limit the usage of formatting string functions. Strong input validation - All user-controllable input must be validated and filtered for illegal formatting characters.
 
-#### F-299 — LDAP Injection  `INP09`
+#### F-300 — LDAP Injection  `INP09`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Strong input validation - All user-controllable input must be validated and filtered for illegal characters as well as LDAP content. Use of custom error pages - Attackers can glean information about the nature of queries from descriptive error messages. Input validation must be coupled with customized error pages that inform about an error without disclosing information about the LDAP or application.
 
-#### F-301 — Relative Path Traversal  `INP11`
+#### F-302 — Relative Path Traversal  `INP11`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Design: Input validation. Assume that user inputs are malicious. Utilize strict type, character, and encoding enforcement. Implementation: Perform input validation for all remote content, including remote and user-generated content. Implementation: Validate user input by only accepting known good. Ensure all content that is delivered to client is sanitized against an acceptable content specification -- whitelisting approach. Implementation: Prefer working without user input when using file system calls. Implementation: Use indirect references rather than actual file names. Implementation: Use possible permissions on file access when developing and deploying web applications.
 
-#### F-303 — Dictionary-based Password Attack  `CR03`
+#### F-304 — Dictionary-based Password Attack  `CR03`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — SpiderFoot, Amass, SocialOSINT and Ollama have no sessions and no authentication; they are reachable only on loopback or the compose bridge (ADR-005). Hardening for shared hosts: authentication in front of SpiderFoot and network policies between services.
 - **pytm mitigations:** Create a strong password policy and ensure that your system enforces this policy.Implement an intelligent password throttling mechanism. Care must be taken to assure that these mechanisms do not excessively enable account lockout attacks such as CAPEC-02.
 
-#### F-309 — Embedding Scripts within Scripts  `SC03`
+#### F-310 — Embedding Scripts within Scripts  `SC03`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — The orchestrator renders nothing from the sidecars; its own console is CSP-locked (default-src 'none', no inline script). SpiderFoot's web UI is loopback-only.
 - **pytm mitigations:** Use browser technologies that do not allow client side scripting.Utilize strict type, character, and encoding enforcement.Server side developers should not proxy content via XHR or other means. If a HTTP proxy for remote content is setup on the server side, the client's browser has no way of discerning where the data is originating from.Ensure all content that is delivered to client is sanitized against an acceptable content specification.Perform input validation for all remote content.Perform output validation for all remote content.Disable scripting languages such as JavaScript in browserSession tokens for specific hostPatching software. There are many attack vectors for XSS on the client side and the server side. Many vulnerabilities are fixed in service packs for browser, web servers, and plug in technologies, staying current on patch release that deal with XSS countermeasures mitigates this.Privileges are constrained, if a script is loaded, ensure system runs in chroot jail or other limited authority mode
 
-#### F-310 — PHP Remote File Inclusion  `INP16`
+#### F-311 — PHP Remote File Inclusion  `INP16`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Implementation: Perform input validation for all remote content, including remote and user-generated contentImplementation: Only allow known files to be included (whitelist)Implementation: Make use of indirect references passed in URL parameters instead of file namesConfiguration: Ensure that remote scripts cannot be include in the include or require PHP directives
 
-#### F-313 — XSS Using Alternate Syntax  `SC04`
+#### F-314 — XSS Using Alternate Syntax  `SC04`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Design: Use browser technologies that do not allow client side scripting.Design: Utilize strict type, character, and encoding enforcementImplementation: Ensure all content that is delivered to client is sanitized against an acceptable content specification.Implementation: Ensure all content coming from the client is using the same encoding; if not, the server-side application must canonicalize the data before applying any filtering.Implementation: Perform input validation for all remote content, including remote and user-generated contentImplementation: Perform output validation for all remote content.Implementation: Disable scripting languages such as JavaScript in browserImplementation: Patching software. There are many attack vectors for XSS on the client side and the server side. Many vulnerabilities are fixed in service packs for browser, web servers, and plug in technologies, staying current on patch release that deal with XSS countermeasures mitigates this.
 
-#### F-316 — Removing Important Client Functionality  `SC05`
+#### F-317 — Removing Important Client Functionality  `SC05`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — No security decision of the orchestrator lives in a sidecar's client code; SpiderFoot's UI is loopback-only.
 - **pytm mitigations:** Design: For any security checks that are performed on the client side, ensure that these checks are duplicated on the server side.Design: Ship client-side application with integrity checks (code signing) when possible.Design: Use obfuscation and other techniques to prevent reverse engineering the client code.
 
-#### F-318 — Exploitation of Trusted Credentials  `AA03`
+#### F-319 — Exploitation of Trusted Credentials  `AA03`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — SpiderFoot, Amass, SocialOSINT and Ollama have no sessions and no authentication; they are reachable only on loopback or the compose bridge (ADR-005). Hardening for shared hosts: authentication in front of SpiderFoot and network policies between services.
 - **pytm mitigations:** Design: utilize strong federated identity such as SAML to encrypt and sign identity tokens in transit.Implementation: Use industry standards session key generation mechanisms that utilize high amount of entropy to generate the session key. Many standard web and application servers will perform this task on your behalf.Implementation: If the session identifier is used for authentication, such as in the so-called single sign on use cases, then ensure that it is protected at the same level of assurance as authentication tokens.Implementation: If the web or application server supports it, then encrypting and/or signing the session ID (such as cookie) can protect the ID if intercepted.Design: Use strong session identifiers that are protected in transit and at rest.Implementation: Utilize a session timeout for all sessions, for example 20 minutes. If the user does not explicitly logout, the server terminates their session after this period of inactivity. If the user logs back in then a new session key is generated.Implementation: Verify of authenticity of all session IDs at runtime.
 
-#### F-321 — Exploiting Trust in Client  `AA04`
+#### F-322 — Exploiting Trust in Client  `AA04`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Design: Ensure that client process and/or message is authenticated so that anonymous communications and/or messages are not accepted by the system.Design: Do not rely on client validation or encoding for security purposes.Design: Utilize digital signatures to increase authentication assurance.Design: Utilize two factor authentication to increase authentication assurance.Implementation: Perform input validation for all remote content.
 
-#### F-325 — XML Attribute Blowup  `INP22`
+#### F-326 — XML Attribute Blowup  `INP22`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** transferred — The orchestrator's contracts are JSON and CLI text; it parses no XML, SOAP or DTD. Any XML handling lives inside the sidecar or vendor service and is upstream code.
 - **pytm mitigations:** This attack may be mitigated completely by using a parser that is not using a vulnerable container. Mitigation may also limit the number of attributes per XML element.
 
-#### F-326 — XSS Targeting URI Placeholders  `INP28`
+#### F-327 — XSS Targeting URI Placeholders  `INP28`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Design: Use browser technologies that do not allow client side scripting.Design: Utilize strict type, character, and encoding enforcement.Implementation: Ensure all content that is delivered to client is sanitized against an acceptable content specification.Implementation: Ensure all content coming from the client is using the same encoding; if not, the server-side application must canonicalize the data before applying any filtering.Implementation: Perform input validation for all remote content, including remote and user-generated contentImplementation: Perform output validation for all remote content.Implementation: Disable scripting languages such as JavaScript in browserImplementation: Patching software. There are many attack vectors for XSS on the client side and the server side. Many vulnerabilities are fixed in service packs for browser, web servers, and plug in technologies, staying current on patch release that deal with XSS countermeasures mitigates this.
 
-#### F-328 — SOAP Array Overflow  `INP34`
+#### F-329 — SOAP Array Overflow  `INP34`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** transferred — The orchestrator's contracts are JSON and CLI text; it parses no XML, SOAP or DTD. Any XML handling lives inside the sidecar or vendor service and is upstream code.
 - **pytm mitigations:** If the server either verifies the correctness of the stated array size or if the server stops processing an array once the stated number of elements have been read, regardless of the actual array size, then this attack will fail. The former detects the malformed SOAP message while the latter ensures that the server does not attempt to load more data than was allocated for.
 
-#### F-330 — HTTP Request Smuggling  `INP37`
+#### F-331 — HTTP Request Smuggling  `INP37`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — No proxy is chained in front of the sidecars: the orchestrator reaches them directly on the compose bridge, so smuggling needs a position on the host (ADR-005).
 - **pytm mitigations:** HTTP Request Smuggling is usually targeted at web servers. Therefore, in such cases, careful analysis of the entities must occur during system design prior to deployment. If there are known differences in the way the entities parse HTTP requests, the choice of entities needs consideration.Employing an application firewall can help. However, there are instances of the firewalls being susceptible to HTTP Request Smuggling as well.
 
-#### F-331 — Session Credential Falsification through Prediction  `AC16`
+#### F-332 — Session Credential Falsification through Prediction  `AC16`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — SpiderFoot, Amass, SocialOSINT and Ollama have no sessions and no authentication; they are reachable only on loopback or the compose bridge (ADR-005). Hardening for shared hosts: authentication in front of SpiderFoot and network policies between services.
 - **pytm mitigations:** Use a strong source of randomness to generate a session ID.Use adequate length session IDs. Do not use information available to the user in order to generate session ID (e.g., time).Ideas for creating random numbers are offered by Eastlake [RFC1750]. Encrypt the session ID if you expose it to the user. For instance session ID can be stored in a cookie in encrypted format.
 
-#### F-333 — Direct Prompt Injection  `LLM01`
+#### F-334 — Direct Prompt Injection  `LLM01`
 
 - **Element:** Ollama (local models) (sidecar)
 - **Response:** accepted — Collected text reaches the model delimited and flattened, replies are JSON-schema validated, and the model has no tools, so an injected instruction cannot execute anything. It can still skew the assessment: a schema-valid risk level feeds alert_case_reason (pipeline.py, alerts/__init__.py) and can raise or suppress a risk-threshold alert. Residual risk accepted: the new-observables rule fires independently of the model, the evidence and rationale stay visible to the analyst, and model output is an aid, not a determination (README, Responsible use).
 - **pytm mitigations:** Implement input content filtering and guardrails. Use prompt engineering techniques to make the system prompt more robust against injection. Apply output validation to detect and block manipulated responses. Monitor and log prompts for anomalous patterns.
 
-#### F-334 — Jailbreaking and Safety Bypass  `LLM07`
+#### F-335 — Jailbreaking and Safety Bypass  `LLM07`
 
 - **Element:** Ollama (local models) (sidecar)
 - **Response:** accepted — Same as LLM01: a jailbroken reply is either rejected by the schema or lands as a plausible-looking but wrong assessment that an analyst must review; it drives no action beyond the alert-threshold comparison.
 - **pytm mitigations:** Implement layered defense with both system prompts and content filtering. Use output filtering to detect and block policy-violating responses. Regularly test with adversarial prompts and update defenses. Consider using classifier models to detect jailbreaking attempts.
 
-#### F-335 — Server Side Include (SSI) Injection  `INP03`
+#### F-336 — Server Side Include (SSI) Injection  `INP03`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Set the OPTIONS IncludesNOEXEC in the global access.conf file or local .htaccess (Apache) file to deny SSI execution in directories that do not need them. All user controllable input must be appropriately sanitized before use in the application. This includes omitting, or encoding, certain characters or strings that have the potential of being interpreted as part of an SSI directive. Server Side Includes must be enabled only if there is a strong business reason to do so. Every additional component enabled on the web server increases the attack surface as well as administrative overhead.
 
-#### F-343 — Format String Injection  `INP08`
+#### F-344 — Format String Injection  `INP08`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Limit the usage of formatting string functions. Strong input validation - All user-controllable input must be validated and filtered for illegal formatting characters.
 
-#### F-344 — LDAP Injection  `INP09`
+#### F-345 — LDAP Injection  `INP09`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Strong input validation - All user-controllable input must be validated and filtered for illegal characters as well as LDAP content. Use of custom error pages - Attackers can glean information about the nature of queries from descriptive error messages. Input validation must be coupled with customized error pages that inform about an error without disclosing information about the LDAP or application.
 
-#### F-346 — Relative Path Traversal  `INP11`
+#### F-347 — Relative Path Traversal  `INP11`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Design: Input validation. Assume that user inputs are malicious. Utilize strict type, character, and encoding enforcement. Implementation: Perform input validation for all remote content, including remote and user-generated content. Implementation: Validate user input by only accepting known good. Ensure all content that is delivered to client is sanitized against an acceptable content specification -- whitelisting approach. Implementation: Prefer working without user input when using file system calls. Implementation: Use indirect references rather than actual file names. Implementation: Use possible permissions on file access when developing and deploying web applications.
 
-#### F-348 — Dictionary-based Password Attack  `CR03`
+#### F-349 — Dictionary-based Password Attack  `CR03`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — Password policy and lockout belong to Keycloak, MISP, Tavily and the SMTP relay.
 - **pytm mitigations:** Create a strong password policy and ensure that your system enforces this policy.Implement an intelligent password throttling mechanism. Care must be taken to assure that these mechanisms do not excessively enable account lockout attacks such as CAPEC-02.
 
-#### F-354 — Embedding Scripts within Scripts  `SC03`
+#### F-355 — Embedding Scripts within Scripts  `SC03`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — The web surfaces of Keycloak, MISP, Tavily and the SMTP relay are the vendor's.
 - **pytm mitigations:** Use browser technologies that do not allow client side scripting.Utilize strict type, character, and encoding enforcement.Server side developers should not proxy content via XHR or other means. If a HTTP proxy for remote content is setup on the server side, the client's browser has no way of discerning where the data is originating from.Ensure all content that is delivered to client is sanitized against an acceptable content specification.Perform input validation for all remote content.Perform output validation for all remote content.Disable scripting languages such as JavaScript in browserSession tokens for specific hostPatching software. There are many attack vectors for XSS on the client side and the server side. Many vulnerabilities are fixed in service packs for browser, web servers, and plug in technologies, staying current on patch release that deal with XSS countermeasures mitigates this.Privileges are constrained, if a script is loaded, ensure system runs in chroot jail or other limited authority mode
 
-#### F-355 — PHP Remote File Inclusion  `INP16`
+#### F-356 — PHP Remote File Inclusion  `INP16`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Implementation: Perform input validation for all remote content, including remote and user-generated contentImplementation: Only allow known files to be included (whitelist)Implementation: Make use of indirect references passed in URL parameters instead of file namesConfiguration: Ensure that remote scripts cannot be include in the include or require PHP directives
 
-#### F-357 — XSS Using Alternate Syntax  `SC04`
+#### F-358 — XSS Using Alternate Syntax  `SC04`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Design: Use browser technologies that do not allow client side scripting.Design: Utilize strict type, character, and encoding enforcementImplementation: Ensure all content that is delivered to client is sanitized against an acceptable content specification.Implementation: Ensure all content coming from the client is using the same encoding; if not, the server-side application must canonicalize the data before applying any filtering.Implementation: Perform input validation for all remote content, including remote and user-generated contentImplementation: Perform output validation for all remote content.Implementation: Disable scripting languages such as JavaScript in browserImplementation: Patching software. There are many attack vectors for XSS on the client side and the server side. Many vulnerabilities are fixed in service packs for browser, web servers, and plug in technologies, staying current on patch release that deal with XSS countermeasures mitigates this.
 
-#### F-360 — Removing Important Client Functionality  `SC05`
+#### F-361 — Removing Important Client Functionality  `SC05`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — Client-side functionality of vendor UIs is the vendor's.
 - **pytm mitigations:** Design: For any security checks that are performed on the client side, ensure that these checks are duplicated on the server side.Design: Ship client-side application with integrity checks (code signing) when possible.Design: Use obfuscation and other techniques to prevent reverse engineering the client code.
 
-#### F-362 — Exploitation of Trusted Credentials  `AA03`
+#### F-363 — Exploitation of Trusted Credentials  `AA03`
 
 - **Element:** MISP (vendor)
 - **Response:** accepted — Static long-lived tokens are the integration contract with OpenCTI (OPENCTI_ADMIN_TOKEN), MISP (MISP_KEY), Tavily, the SMTP relay and the cloud LLM; they live only in .env and environment variables and rotate manually. Hardening: a dedicated least-privilege token per connector and periodic rotation.
 - **pytm mitigations:** Design: utilize strong federated identity such as SAML to encrypt and sign identity tokens in transit.Implementation: Use industry standards session key generation mechanisms that utilize high amount of entropy to generate the session key. Many standard web and application servers will perform this task on your behalf.Implementation: If the session identifier is used for authentication, such as in the so-called single sign on use cases, then ensure that it is protected at the same level of assurance as authentication tokens.Implementation: If the web or application server supports it, then encrypting and/or signing the session ID (such as cookie) can protect the ID if intercepted.Design: Use strong session identifiers that are protected in transit and at rest.Implementation: Utilize a session timeout for all sessions, for example 20 minutes. If the user does not explicitly logout, the server terminates their session after this period of inactivity. If the user logs back in then a new session key is generated.Implementation: Verify of authenticity of all session IDs at runtime.
 
-#### F-365 — Exploiting Trust in Client  `AA04`
+#### F-366 — Exploiting Trust in Client  `AA04`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Design: Ensure that client process and/or message is authenticated so that anonymous communications and/or messages are not accepted by the system.Design: Do not rely on client validation or encoding for security purposes.Design: Utilize digital signatures to increase authentication assurance.Design: Utilize two factor authentication to increase authentication assurance.Implementation: Perform input validation for all remote content.
 
-#### F-369 — XML Attribute Blowup  `INP22`
+#### F-370 — XML Attribute Blowup  `INP22`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — The orchestrator's contracts are JSON and CLI text; it parses no XML, SOAP or DTD. Any XML handling lives inside the sidecar or vendor service and is upstream code.
 - **pytm mitigations:** This attack may be mitigated completely by using a parser that is not using a vulnerable container. Mitigation may also limit the number of attributes per XML element.
 
-#### F-370 — XSS Targeting URI Placeholders  `INP28`
+#### F-371 — XSS Targeting URI Placeholders  `INP28`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Design: Use browser technologies that do not allow client side scripting.Design: Utilize strict type, character, and encoding enforcement.Implementation: Ensure all content that is delivered to client is sanitized against an acceptable content specification.Implementation: Ensure all content coming from the client is using the same encoding; if not, the server-side application must canonicalize the data before applying any filtering.Implementation: Perform input validation for all remote content, including remote and user-generated contentImplementation: Perform output validation for all remote content.Implementation: Disable scripting languages such as JavaScript in browserImplementation: Patching software. There are many attack vectors for XSS on the client side and the server side. Many vulnerabilities are fixed in service packs for browser, web servers, and plug in technologies, staying current on patch release that deal with XSS countermeasures mitigates this.
 
-#### F-372 — SOAP Array Overflow  `INP34`
+#### F-373 — SOAP Array Overflow  `INP34`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — The orchestrator's contracts are JSON and CLI text; it parses no XML, SOAP or DTD. Any XML handling lives inside the sidecar or vendor service and is upstream code.
 - **pytm mitigations:** If the server either verifies the correctness of the stated array size or if the server stops processing an array once the stated number of elements have been read, regardless of the actual array size, then this attack will fail. The former detects the malformed SOAP message while the latter ensures that the server does not attempt to load more data than was allocated for.
 
-#### F-374 — HTTP Request Smuggling  `INP37`
+#### F-375 — HTTP Request Smuggling  `INP37`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — HTTP parsing of Keycloak, OpenCTI, MISP, Tavily and the SMTP relay is the vendor's; the orchestrator sends well-formed requests from httpx, pycti and smtplib.
 - **pytm mitigations:** HTTP Request Smuggling is usually targeted at web servers. Therefore, in such cases, careful analysis of the entities must occur during system design prior to deployment. If there are known differences in the way the entities parse HTTP requests, the choice of entities needs consideration.Employing an application firewall can help. However, there are instances of the firewalls being susceptible to HTTP Request Smuggling as well.
 
-#### F-375 — Session Credential Falsification through Prediction  `AC16`
+#### F-376 — Session Credential Falsification through Prediction  `AC16`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — Session identifiers of Keycloak, OpenCTI, MISP and Tavily are generated by the vendor; the orchestrator's own secrets are CSPRNG material (openssl rand guidance in .env.example).
 - **pytm mitigations:** Use a strong source of randomness to generate a session ID.Use adequate length session IDs. Do not use information available to the user in order to generate session ID (e.g., time).Ideas for creating random numbers are offered by Eastlake [RFC1750]. Encrypt the session ID if you expose it to the user. For instance session ID can be stored in a cookie in encrypted format.
 
-#### F-377 — Server Side Include (SSI) Injection  `INP03`
+#### F-378 — Server Side Include (SSI) Injection  `INP03`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Set the OPTIONS IncludesNOEXEC in the global access.conf file or local .htaccess (Apache) file to deny SSI execution in directories that do not need them. All user controllable input must be appropriately sanitized before use in the application. This includes omitting, or encoding, certain characters or strings that have the potential of being interpreted as part of an SSI directive. Server Side Includes must be enabled only if there is a strong business reason to do so. Every additional component enabled on the web server increases the attack surface as well as administrative overhead.
 
-#### F-378 — Session Sidejacking  `CR01`
+#### F-379 — Session Sidejacking  `CR01`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Session and credential handling inside Keycloak, OpenCTI, MISP, Tavily and the SMTP relay is the vendor's; the orchestrator presents only API tokens.
 - **pytm mitigations:** Make sure that HTTPS is used to communicate with the target system. Alternatively, use VPN if possible. It is important to ensure that all communication between the client and the server happens via an encrypted secure channel. Modify the session token with each transmission and protect it with cryptography. Add the idea of request sequencing that gives the server an ability to detect replay attacks.
 
-#### F-387 — Format String Injection  `INP08`
+#### F-388 — Format String Injection  `INP08`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Limit the usage of formatting string functions. Strong input validation - All user-controllable input must be validated and filtered for illegal formatting characters.
 
-#### F-388 — LDAP Injection  `INP09`
+#### F-389 — LDAP Injection  `INP09`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Strong input validation - All user-controllable input must be validated and filtered for illegal characters as well as LDAP content. Use of custom error pages - Attackers can glean information about the nature of queries from descriptive error messages. Input validation must be coupled with customized error pages that inform about an error without disclosing information about the LDAP or application.
 
-#### F-390 — Relative Path Traversal  `INP11`
+#### F-391 — Relative Path Traversal  `INP11`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Design: Input validation. Assume that user inputs are malicious. Utilize strict type, character, and encoding enforcement. Implementation: Perform input validation for all remote content, including remote and user-generated content. Implementation: Validate user input by only accepting known good. Ensure all content that is delivered to client is sanitized against an acceptable content specification -- whitelisting approach. Implementation: Prefer working without user input when using file system calls. Implementation: Use indirect references rather than actual file names. Implementation: Use possible permissions on file access when developing and deploying web applications.
 
-#### F-396 — Embedding Scripts within Scripts  `SC03`
+#### F-397 — Embedding Scripts within Scripts  `SC03`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — The web surfaces of Keycloak, MISP, Tavily and the SMTP relay are the vendor's.
 - **pytm mitigations:** Use browser technologies that do not allow client side scripting.Utilize strict type, character, and encoding enforcement.Server side developers should not proxy content via XHR or other means. If a HTTP proxy for remote content is setup on the server side, the client's browser has no way of discerning where the data is originating from.Ensure all content that is delivered to client is sanitized against an acceptable content specification.Perform input validation for all remote content.Perform output validation for all remote content.Disable scripting languages such as JavaScript in browserSession tokens for specific hostPatching software. There are many attack vectors for XSS on the client side and the server side. Many vulnerabilities are fixed in service packs for browser, web servers, and plug in technologies, staying current on patch release that deal with XSS countermeasures mitigates this.Privileges are constrained, if a script is loaded, ensure system runs in chroot jail or other limited authority mode
 
-#### F-397 — PHP Remote File Inclusion  `INP16`
+#### F-398 — PHP Remote File Inclusion  `INP16`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Implementation: Perform input validation for all remote content, including remote and user-generated contentImplementation: Only allow known files to be included (whitelist)Implementation: Make use of indirect references passed in URL parameters instead of file namesConfiguration: Ensure that remote scripts cannot be include in the include or require PHP directives
 
-#### F-401 — XSS Using Alternate Syntax  `SC04`
+#### F-402 — XSS Using Alternate Syntax  `SC04`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Design: Use browser technologies that do not allow client side scripting.Design: Utilize strict type, character, and encoding enforcementImplementation: Ensure all content that is delivered to client is sanitized against an acceptable content specification.Implementation: Ensure all content coming from the client is using the same encoding; if not, the server-side application must canonicalize the data before applying any filtering.Implementation: Perform input validation for all remote content, including remote and user-generated contentImplementation: Perform output validation for all remote content.Implementation: Disable scripting languages such as JavaScript in browserImplementation: Patching software. There are many attack vectors for XSS on the client side and the server side. Many vulnerabilities are fixed in service packs for browser, web servers, and plug in technologies, staying current on patch release that deal with XSS countermeasures mitigates this.
 
-#### F-403 — Removing Important Client Functionality  `SC05`
+#### F-404 — Removing Important Client Functionality  `SC05`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Client-side functionality of vendor UIs is the vendor's.
 - **pytm mitigations:** Design: For any security checks that are performed on the client side, ensure that these checks are duplicated on the server side.Design: Ship client-side application with integrity checks (code signing) when possible.Design: Use obfuscation and other techniques to prevent reverse engineering the client code.
 
-#### F-405 — Exploitation of Trusted Credentials  `AA03`
+#### F-406 — Exploitation of Trusted Credentials  `AA03`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** accepted — Static long-lived tokens are the integration contract with OpenCTI (OPENCTI_ADMIN_TOKEN), MISP (MISP_KEY), Tavily, the SMTP relay and the cloud LLM; they live only in .env and environment variables and rotate manually. Hardening: a dedicated least-privilege token per connector and periodic rotation.
 - **pytm mitigations:** Design: utilize strong federated identity such as SAML to encrypt and sign identity tokens in transit.Implementation: Use industry standards session key generation mechanisms that utilize high amount of entropy to generate the session key. Many standard web and application servers will perform this task on your behalf.Implementation: If the session identifier is used for authentication, such as in the so-called single sign on use cases, then ensure that it is protected at the same level of assurance as authentication tokens.Implementation: If the web or application server supports it, then encrypting and/or signing the session ID (such as cookie) can protect the ID if intercepted.Design: Use strong session identifiers that are protected in transit and at rest.Implementation: Utilize a session timeout for all sessions, for example 20 minutes. If the user does not explicitly logout, the server terminates their session after this period of inactivity. If the user logs back in then a new session key is generated.Implementation: Verify of authenticity of all session IDs at runtime.
 
-#### F-408 — Exploiting Trust in Client  `AA04`
+#### F-409 — Exploiting Trust in Client  `AA04`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Design: Ensure that client process and/or message is authenticated so that anonymous communications and/or messages are not accepted by the system.Design: Do not rely on client validation or encoding for security purposes.Design: Utilize digital signatures to increase authentication assurance.Design: Utilize two factor authentication to increase authentication assurance.Implementation: Perform input validation for all remote content.
 
-#### F-412 — XML Attribute Blowup  `INP22`
+#### F-413 — XML Attribute Blowup  `INP22`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — The orchestrator's contracts are JSON and CLI text; it parses no XML, SOAP or DTD. Any XML handling lives inside the sidecar or vendor service and is upstream code.
 - **pytm mitigations:** This attack may be mitigated completely by using a parser that is not using a vulnerable container. Mitigation may also limit the number of attributes per XML element.
 
-#### F-413 — XSS Targeting URI Placeholders  `INP28`
+#### F-414 — XSS Targeting URI Placeholders  `INP28`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Design: Use browser technologies that do not allow client side scripting.Design: Utilize strict type, character, and encoding enforcement.Implementation: Ensure all content that is delivered to client is sanitized against an acceptable content specification.Implementation: Ensure all content coming from the client is using the same encoding; if not, the server-side application must canonicalize the data before applying any filtering.Implementation: Perform input validation for all remote content, including remote and user-generated contentImplementation: Perform output validation for all remote content.Implementation: Disable scripting languages such as JavaScript in browserImplementation: Patching software. There are many attack vectors for XSS on the client side and the server side. Many vulnerabilities are fixed in service packs for browser, web servers, and plug in technologies, staying current on patch release that deal with XSS countermeasures mitigates this.
 
-#### F-415 — SOAP Array Overflow  `INP34`
+#### F-416 — SOAP Array Overflow  `INP34`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — The orchestrator's contracts are JSON and CLI text; it parses no XML, SOAP or DTD. Any XML handling lives inside the sidecar or vendor service and is upstream code.
 - **pytm mitigations:** If the server either verifies the correctness of the stated array size or if the server stops processing an array once the stated number of elements have been read, regardless of the actual array size, then this attack will fail. The former detects the malformed SOAP message while the latter ensures that the server does not attempt to load more data than was allocated for.
 
-#### F-417 — HTTP Request Smuggling  `INP37`
+#### F-418 — HTTP Request Smuggling  `INP37`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — HTTP parsing of Keycloak, OpenCTI, MISP, Tavily and the SMTP relay is the vendor's; the orchestrator sends well-formed requests from httpx, pycti and smtplib.
 - **pytm mitigations:** HTTP Request Smuggling is usually targeted at web servers. Therefore, in such cases, careful analysis of the entities must occur during system design prior to deployment. If there are known differences in the way the entities parse HTTP requests, the choice of entities needs consideration.Employing an application firewall can help. However, there are instances of the firewalls being susceptible to HTTP Request Smuggling as well.
 
-#### F-418 — Session Credential Falsification through Prediction  `AC16`
+#### F-419 — Session Credential Falsification through Prediction  `AC16`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Session identifiers of Keycloak, OpenCTI, MISP and Tavily are generated by the vendor; the orchestrator's own secrets are CSPRNG material (openssl rand guidance in .env.example).
 - **pytm mitigations:** Use a strong source of randomness to generate a session ID.Use adequate length session IDs. Do not use information available to the user in order to generate session ID (e.g., time).Ideas for creating random numbers are offered by Eastlake [RFC1750]. Encrypt the session ID if you expose it to the user. For instance session ID can be stored in a cookie in encrypted format.
 
-#### F-420 — Reusing Session IDs (aka Session Replay) - ServerSide  `AC19`
+#### F-421 — Reusing Session IDs (aka Session Replay) - ServerSide  `AC19`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Session and credential handling inside Keycloak, OpenCTI, MISP, Tavily and the SMTP relay is the vendor's; the orchestrator presents only API tokens.
 - **pytm mitigations:** Always invalidate a session ID after the user logout.Setup a session time out for the session IDs.Protect the communication between the client and server. For instance it is best practice to use SSL to mitigate man in the middle attack.Do not code send session ID with GET method, otherwise the session ID will be copied to the URL. In general avoid writing session IDs in the URLs. URLs can get logged in log files, which are vulnerable to an attacker.Encrypt the session data associated with the session ID.Use multifactor authentication.
 
-#### F-425 — Audit Log Manipulation  `DE04`
+#### F-426 — Audit Log Manipulation  `DE04`
 
 - **Element:** OpenCTI backing stores (vendor)
 - **Response:** transferred — OpenCTI's own audit trail lives in its backing stores and is the platform's.
 - **pytm mitigations:** Use Principle of Least Privilege to avoid unauthorized access to log files leading to manipulation/injection on those files. Do not allow tainted data to be written in the log file without prior input validation. Whitelisting may be used to properly validate the data. Use synchronization to control the flow of execution. Use static analysis tool to identify log forging vulnerabilities. Avoid viewing logs with tools that may interpret control characters in the file, such as command-line shells.
 
-#### F-433 — Format String Injection  `INP08`
+#### F-434 — Format String Injection  `INP08`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Limit the usage of formatting string functions. Strong input validation - All user-controllable input must be validated and filtered for illegal formatting characters.
 
-#### F-434 — Client-side Injection-induced Buffer Overflow  `INP12`
+#### F-435 — Client-side Injection-induced Buffer Overflow  `INP12`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** The client software should not install untrusted code from a non-authenticated server. The client software should have the latest patches and should be audited for vulnerabilities before being used to communicate with potentially hostile servers. Perform input validation for length of buffer inputs. Use a language or compiler that performs automatic bounds checking. Use an abstraction library to abstract away risky APIs. Not a complete solution. Compiler-based canary mechanisms such as StackGuard, ProPolice and the Microsoft Visual Studio /GS flag. Unless this provides automatic bounds checking, it is not a complete solution. Ensure all buffer uses are consistently bounds-checked. Use OS-level preventative functionality. Not a complete solution.
 
-#### F-435 — Command Delimiters  `INP13`
+#### F-436 — Command Delimiters  `INP13`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Design: Perform whitelist validation against a positive specification for command length, type, and parameters.Design: Limit program privileges, so if commands circumvent program input validation or filter routines then commands do not running under a privileged accountImplementation: Perform input validation for all remote content.Implementation: Use type conversions such as JDBC prepared statements.
 
-#### F-437 — Dictionary-based Password Attack  `CR03`
+#### F-438 — Dictionary-based Password Attack  `CR03`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — Password policy and lockout belong to Keycloak, MISP, Tavily and the SMTP relay.
 - **pytm mitigations:** Create a strong password policy and ensure that your system enforces this policy.Implement an intelligent password throttling mechanism. Care must be taken to assure that these mechanisms do not excessively enable account lockout attacks such as CAPEC-02.
 
-#### F-439 — iFrame Overlay  `INP20`
+#### F-440 — iFrame Overlay  `INP20`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Configuration: Disable iFrames in the Web browser.Operation: When maintaining an authenticated session with a privileged target system, do not use the same browser to navigate to unfamiliar sites to perform other activities. Finish working with the target system and logout first before proceeding to other tasks.Operation: If using the Firefox browser, use the NoScript plug-in that will help forbid iFrames.
 
-#### F-441 — Privilege Escalation  `AC12`
+#### F-442 — Privilege Escalation  `AC12`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — oauth2-proxy and connector-misp run as their pinned vendor images ship them; what happens inside them is upstream code.
 - **pytm mitigations:** Very carefully manage the setting, management, and handling of privileges. Explicitly manage trust zones in the software. Follow the principle of least privilege when assigning access rights to entities in a software system. Implement separation of privilege - Require multiple conditions to be met before permitting access to a system resource.
 
-#### F-444 — Filter Failure through Buffer Overflow  `INP24`
+#### F-445 — Filter Failure through Buffer Overflow  `INP24`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — oauth2-proxy and connector-misp run as their pinned vendor images ship them; what happens inside them is upstream code.
 - **pytm mitigations:** Make sure that ANY failure occurring in the filtering or input validation routine is properly handled and that offending input is NOT allowed to go through. Basically make sure that the vault is closed when failure occurs.Pre-design: Use a language or compiler that performs automatic bounds checking.Pre-design through Build: Compiler-based canary mechanisms such as StackGuard, ProPolice and the Microsoft Visual Studio /GS flag. Unless this provides automatic bounds checking, it is not a complete solution.Operational: Use OS-level preventative functionality. Not a complete solution.Design: Use an abstraction library to abstract away risky APIs. Not a complete solution.
 
-#### F-445 — Resource Injection  `INP25`
+#### F-446 — Resource Injection  `INP25`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Ensure all input content that is delivered to client is sanitized against an acceptable content specification.Perform input validation for all content.Enforce regular patching of software.
 
-#### F-446 — Code Injection  `INP26`
+#### F-447 — Code Injection  `INP26`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Utilize strict type, character, and encoding enforcementEnsure all input content that is delivered to client is sanitized against an acceptable content specification.Perform input validation for all content.Enforce regular patching of software.
 
-#### F-448 — XSS Targeting URI Placeholders  `INP28`
+#### F-449 — XSS Targeting URI Placeholders  `INP28`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Design: Use browser technologies that do not allow client side scripting.Design: Utilize strict type, character, and encoding enforcement.Implementation: Ensure all content that is delivered to client is sanitized against an acceptable content specification.Implementation: Ensure all content coming from the client is using the same encoding; if not, the server-side application must canonicalize the data before applying any filtering.Implementation: Perform input validation for all remote content, including remote and user-generated contentImplementation: Perform output validation for all remote content.Implementation: Disable scripting languages such as JavaScript in browserImplementation: Patching software. There are many attack vectors for XSS on the client side and the server side. Many vulnerabilities are fixed in service packs for browser, web servers, and plug in technologies, staying current on patch release that deal with XSS countermeasures mitigates this.
 
-#### F-451 — Command Injection  `INP31`
+#### F-452 — Command Injection  `INP31`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** All user-controllable input should be validated and filtered for potentially unwanted characters. Whitelisting input is desired, but if a blacklisting approach is necessary, then focusing on command related terms and delimiters is necessary.Input should be encoded prior to use in commands to make sure command related characters are not treated as part of the command. For example, quotation characters may need to be encoded so that the application does not treat the quotation as a delimiter.Input should be parameterized, or restricted to data sections of a command, thus removing the chance that the input will be treated as part of the command itself.
 
-#### F-452 — XML Injection  `INP32`
+#### F-453 — XML Injection  `INP32`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Strong input validation - All user-controllable input must be validated and filtered for illegal characters as well as content that can be interpreted in the context of an XML data or a query. Use of custom error pages - Attackers can glean information about the nature of queries from descriptive error messages. Input validation must be coupled with customized error pages that inform about an error without disclosing information about the database or application.
 
-#### F-453 — Remote Code Inclusion  `INP33`
+#### F-454 — Remote Code Inclusion  `INP33`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Minimize attacks by input validation and sanitization of any user data that will be used by the target application to locate a remote file to be included.
 
-#### F-454 — Leverage Alternate Encoding  `INP35`
+#### F-455 — Leverage Alternate Encoding  `INP35`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Assume all input might use an improper representation. Use canonicalized data inside the application; all data must be converted into the representation used inside the application (UTF-8, UTF-16, etc.)Assume all input is malicious. Create a white list that defines all valid input to the software system based on the requirements specifications. Input that does not match against the white list should not be permitted to enter into the system. Test your decoding process against malicious input.
 
-#### F-455 — Schema Poisoning  `AC15`
+#### F-456 — Schema Poisoning  `AC15`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — Schema handling inside oauth2-proxy and connector-misp is upstream's; the orchestrator validates everything it receives from either side.
 - **pytm mitigations:** Design: Protect the schema against unauthorized modification.Implementation: For applications that use a known schema, use a local copy or a known good repository instead of the schema reference supplied in the schema document.Implementation: For applications that leverage remote schemas, use the HTTPS protocol to prevent modification of traffic in transit and to avoid unauthorized modification.
 
-#### F-457 — Argument Injection  `INP41`
+#### F-458 — Argument Injection  `INP41`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Design: Do not program input values directly on command shell, instead treat user input as guilty until proven innocent. Build a function that takes user input and converts it to applications specific types and values, stripping or filtering out all unauthorized commands and characters in the process.Design: Limit program privileges, so if metacharacters or other methods circumvent program input validation routines and shell access is attained then it is not running under a privileged account. chroot jails create a sandbox for the application to execute in, making it more difficult for an attacker to elevate privilege even in the case that a compromise has occurred.Implementation: Implement an audit log that is written to a separate host, in the event of a compromise the audit log may be able to provide evidence and details of the compromise.
 
-#### F-458 — Reusing Session IDs (aka Session Replay) - ClientSide  `AC20`
+#### F-459 — Reusing Session IDs (aka Session Replay) - ClientSide  `AC20`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — Session and credential handling inside Keycloak, OpenCTI, MISP, Tavily and the SMTP relay is the vendor's; the orchestrator presents only API tokens.
 - **pytm mitigations:** Always invalidate a session ID after the user logout.Setup a session time out for the session IDs.Protect the communication between the client and server. For instance it is best practice to use SSL to mitigate man in the middle attack.Do not code send session ID with GET method, otherwise the session ID will be copied to the URL. In general avoid writing session IDs in the URLs. URLs can get logged in log files, which are vulnerable to an attacker.Encrypt the session data associated with the session ID.Use multifactor authentication.
 
-#### F-460 — Session Sidejacking  `CR01`
+#### F-461 — Session Sidejacking  `CR01`
 
 - **Element:** Operator session (OIDC, shipped overlay) (flow)
 - **Response:** accepted — The shipped OIDC overlay runs oauth2-proxy on plain HTTP on loopback with AUTH_PROXY_COOKIE_SECURE=false: the session cookie is exposed to anything on the host, which ADR-005 trusts. Production: a TLS terminator in front of the proxy and AUTH_PROXY_COOKIE_SECURE=true.
 - **pytm mitigations:** Make sure that HTTPS is used to communicate with the target system. Alternatively, use VPN if possible. It is important to ensure that all communication between the client and the server happens via an encrypted secure channel. Modify the session token with each transmission and protect it with cryptography. Add the idea of request sequencing that gives the server an ability to detect replay attacks.
 
-#### F-465 — Communication Channel Manipulation  `CR06`
+#### F-466 — Communication Channel Manipulation  `CR06`
 
 - **Element:** Operator session (OIDC, shipped overlay) (flow)
 - **Response:** accepted — Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-468 — Unprotected Sensitive Data  `DR01`
+#### F-469 — Unprotected Sensitive Data  `DR01`
 
 - **Element:** Operator session (OIDC, shipped overlay) (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, OpenCTI stores) and host-internal hops carry it in clear (DS06). Hardening: encrypted volumes or disk encryption, TLS between services.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-469 — Credentials Disclosure  `AC23`
+#### F-470 — Credentials Disclosure  `AC23`
 
 - **Element:** Operator session (OIDC, shipped overlay) (flow)
 - **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000/:8002 and TLS to OpenCTI.
 - **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
 
-#### F-470 — Session Sidejacking  `CR01`
+#### F-471 — Session Sidejacking  `CR01`
 
 - **Element:** Proxied console/API calls (flow)
 - **Response:** accepted — The shipped OIDC overlay runs oauth2-proxy on plain HTTP on loopback with AUTH_PROXY_COOKIE_SECURE=false: the session cookie is exposed to anything on the host, which ADR-005 trusts. Production: a TLS terminator in front of the proxy and AUTH_PROXY_COOKIE_SECURE=true.
 - **pytm mitigations:** Make sure that HTTPS is used to communicate with the target system. Alternatively, use VPN if possible. It is important to ensure that all communication between the client and the server happens via an encrypted secure channel. Modify the session token with each transmission and protect it with cryptography. Add the idea of request sequencing that gives the server an ability to detect replay attacks.
 
-#### F-475 — Communication Channel Manipulation  `CR06`
+#### F-476 — Communication Channel Manipulation  `CR06`
 
 - **Element:** Proxied console/API calls (flow)
 - **Response:** accepted — Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-478 — Unprotected Sensitive Data  `DR01`
+#### F-479 — Unprotected Sensitive Data  `DR01`
 
 - **Element:** Proxied console/API calls (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, OpenCTI stores) and host-internal hops carry it in clear (DS06). Hardening: encrypted volumes or disk encryption, TLS between services.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-479 — Credentials Disclosure  `AC23`
+#### F-480 — Credentials Disclosure  `AC23`
 
 - **Element:** Proxied console/API calls (flow)
 - **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000/:8002 and TLS to OpenCTI.
 - **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
 
-#### F-483 — Communication Channel Manipulation  `CR06`
+#### F-484 — Communication Channel Manipulation  `CR06`
 
 - **Element:** Token redeem / userinfo (flow)
 - **Response:** accepted — Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-486 — Unprotected Sensitive Data  `DR01`
+#### F-487 — Unprotected Sensitive Data  `DR01`
 
 - **Element:** Token redeem / userinfo (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, OpenCTI stores) and host-internal hops carry it in clear (DS06). Hardening: encrypted volumes or disk encryption, TLS between services.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-490 — Communication Channel Manipulation  `CR06`
+#### F-488 — Credentials Disclosure  `AC23`
+
+- **Element:** Token redeem / userinfo (flow)
+- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000/:8002 and TLS to OpenCTI.
+- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
+
+#### F-492 — Communication Channel Manipulation  `CR06`
+
+- **Element:** Operator login (Keycloak authorization endpoint, shipped overlay) (flow)
+- **Response:** accepted — Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-495 — Unprotected Sensitive Data  `DR01`
+
+- **Element:** Operator login (Keycloak authorization endpoint, shipped overlay) (flow)
+- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, OpenCTI stores) and host-internal hops carry it in clear (DS06). Hardening: encrypted volumes or disk encryption, TLS between services.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-496 — Credentials Disclosure  `AC23`
+
+- **Element:** Operator login (Keycloak authorization endpoint, shipped overlay) (flow)
+- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000/:8002 and TLS to OpenCTI.
+- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
+
+#### F-500 — Communication Channel Manipulation  `CR06`
 
 - **Element:** Direct loopback API/console (no overlay) (flow)
 - **Response:** accepted — Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-493 — Unprotected Sensitive Data  `DR01`
+#### F-503 — Unprotected Sensitive Data  `DR01`
 
 - **Element:** Direct loopback API/console (no overlay) (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, OpenCTI stores) and host-internal hops carry it in clear (DS06). Hardening: encrypted volumes or disk encryption, TLS between services.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-494 — Credentials Disclosure  `AC23`
+#### F-504 — Credentials Disclosure  `AC23`
 
 - **Element:** Direct loopback API/console (no overlay) (flow)
 - **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000/:8002 and TLS to OpenCTI.
 - **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
 
-#### F-498 — Communication Channel Manipulation  `CR06`
+#### F-508 — Communication Channel Manipulation  `CR06`
 
 - **Element:** GET /health, /metrics (flow)
 - **Response:** accepted — Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-503 — Communication Channel Manipulation  `CR06`
+#### F-513 — Communication Channel Manipulation  `CR06`
 
 - **Element:** POST /bundles (STIX intake) (flow)
 - **Response:** accepted — Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-506 — Unprotected Sensitive Data  `DR01`
+#### F-516 — Unprotected Sensitive Data  `DR01`
 
 - **Element:** POST /bundles (STIX intake) (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, OpenCTI stores) and host-internal hops carry it in clear (DS06). Hardening: encrypted volumes or disk encryption, TLS between services.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-507 — Credentials Disclosure  `AC23`
+#### F-517 — Credentials Disclosure  `AC23`
 
 - **Element:** POST /bundles (STIX intake) (flow)
 - **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000/:8002 and TLS to OpenCTI.
 - **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
 
-#### F-511 — Communication Channel Manipulation  `CR06`
+#### F-521 — Communication Channel Manipulation  `CR06`
 
 - **Element:** Cron dispatch (in-process) (flow)
 - **Response:** accepted — Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-516 — Communication Channel Manipulation  `CR06`
+#### F-526 — Communication Channel Manipulation  `CR06`
 
 - **Element:** Scan control & results (flow)
 - **Response:** accepted — Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-519 — Unprotected Sensitive Data  `DR01`
+#### F-529 — Unprotected Sensitive Data  `DR01`
 
 - **Element:** Scan control & results (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, OpenCTI stores) and host-internal hops carry it in clear (DS06). Hardening: encrypted volumes or disk encryption, TLS between services.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-523 — Communication Channel Manipulation  `CR06`
+#### F-533 — Communication Channel Manipulation  `CR06`
 
 - **Element:** Enumeration submit (oam_enum) (flow)
 - **Response:** accepted — Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-528 — Communication Channel Manipulation  `CR06`
+#### F-538 — Communication Channel Manipulation  `CR06`
 
 - **Element:** Engine writes asset.db (flow)
 - **Response:** accepted — Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-531 — Unprotected Sensitive Data  `DR01`
+#### F-541 — Unprotected Sensitive Data  `DR01`
 
 - **Element:** Engine writes asset.db (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, OpenCTI stores) and host-internal hops carry it in clear (DS06). Hardening: encrypted volumes or disk encryption, TLS between services.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-535 — Communication Channel Manipulation  `CR06`
+#### F-545 — Communication Channel Manipulation  `CR06`
 
 - **Element:** Read discovered names (oam_subs, shared volume) (flow)
 - **Response:** accepted — Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-538 — Unprotected Sensitive Data  `DR01`
+#### F-548 — Unprotected Sensitive Data  `DR01`
 
 - **Element:** Read discovered names (oam_subs, shared volume) (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, OpenCTI stores) and host-internal hops carry it in clear (DS06). Hardening: encrypted volumes or disk encryption, TLS between services.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-542 — Communication Channel Manipulation  `CR06`
+#### F-552 — Communication Channel Manipulation  `CR06`
 
 - **Element:** Platform collection jobs (flow)
 - **Response:** accepted — Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-545 — Unprotected Sensitive Data  `DR01`
+#### F-555 — Unprotected Sensitive Data  `DR01`
 
 - **Element:** Platform collection jobs (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, OpenCTI stores) and host-internal hops carry it in clear (DS06). Hardening: encrypted volumes or disk encryption, TLS between services.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-549 — Communication Channel Manipulation  `CR06`
+#### F-559 — Communication Channel Manipulation  `CR06`
+
+- **Element:** SocialOSINT text and vision prompts (own endpoint and key) (flow)
+- **Response:** accepted — Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-561 — Credentials Disclosure  `AC23`
+
+- **Element:** SocialOSINT text and vision prompts (own endpoint and key) (flow)
+- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000/:8002 and TLS to OpenCTI.
+- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
+
+#### F-565 — Communication Channel Manipulation  `CR06`
+
+- **Element:** Platform collection (operator's API tokens) (flow)
+- **Response:** accepted — Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-567 — Credentials Disclosure  `AC23`
+
+- **Element:** Platform collection (operator's API tokens) (flow)
+- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000/:8002 and TLS to OpenCTI.
+- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
+
+#### F-571 — Communication Channel Manipulation  `CR06`
 
 - **Element:** Due-diligence queries (flow)
 - **Response:** accepted — Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-551 — Credentials Disclosure  `AC23`
+#### F-573 — Credentials Disclosure  `AC23`
 
 - **Element:** Due-diligence queries (flow)
 - **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000/:8002 and TLS to OpenCTI.
 - **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
 
-#### F-555 — Communication Channel Manipulation  `CR06`
+#### F-577 — Communication Channel Manipulation  `CR06`
 
 - **Element:** Active reconnaissance (flow)
 - **Response:** accepted — Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-560 — Communication Channel Manipulation  `CR06`
+#### F-582 — Communication Channel Manipulation  `CR06`
 
 - **Element:** Passive collection (OpenOSINT) (flow)
 - **Response:** accepted — Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-565 — Communication Channel Manipulation  `CR06`
+#### F-587 — Communication Channel Manipulation  `CR06`
 
 - **Element:** Qualification & synthesis prompts (local) (flow)
 - **Response:** accepted — Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-568 — Unprotected Sensitive Data  `DR01`
+#### F-590 — Unprotected Sensitive Data  `DR01`
 
 - **Element:** Qualification & synthesis prompts (local) (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, OpenCTI stores) and host-internal hops carry it in clear (DS06). Hardening: encrypted volumes or disk encryption, TLS between services.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-572 — Communication Channel Manipulation  `CR06`
+#### F-594 — Communication Channel Manipulation  `CR06`
 
 - **Element:** Qualification & synthesis prompts (cloud) (flow)
 - **Response:** accepted — Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-574 — Credentials Disclosure  `AC23`
+#### F-596 — Credentials Disclosure  `AC23`
 
 - **Element:** Qualification & synthesis prompts (cloud) (flow)
 - **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000/:8002 and TLS to OpenCTI.
 - **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
 
-#### F-578 — Communication Channel Manipulation  `CR06`
+#### F-600 — Communication Channel Manipulation  `CR06`
 
 - **Element:** Run/state SQL (flow)
 - **Response:** accepted — Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-581 — Unprotected Sensitive Data  `DR01`
+#### F-603 — Unprotected Sensitive Data  `DR01`
 
 - **Element:** Run/state SQL (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, OpenCTI stores) and host-internal hops carry it in clear (DS06). Hardening: encrypted volumes or disk encryption, TLS between services.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-585 — Communication Channel Manipulation  `CR06`
+#### F-607 — Communication Channel Manipulation  `CR06`
 
 - **Element:** Seal run artefacts + manifest (flow)
 - **Response:** accepted — Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-588 — Unprotected Sensitive Data  `DR01`
+#### F-610 — Unprotected Sensitive Data  `DR01`
 
 - **Element:** Seal run artefacts + manifest (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, OpenCTI stores) and host-internal hops carry it in clear (DS06). Hardening: encrypted volumes or disk encryption, TLS between services.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-592 — Communication Channel Manipulation  `CR06`
+#### F-614 — Communication Channel Manipulation  `CR06`
 
 - **Element:** Read target inventory (flow)
 - **Response:** accepted — Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-597 — Communication Channel Manipulation  `CR06`
+#### F-619 — Communication Channel Manipulation  `CR06`
 
 - **Element:** STIX ingest (pycti, outbox retries) (flow)
 - **Response:** accepted — Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-600 — Unprotected Sensitive Data  `DR01`
+#### F-622 — Unprotected Sensitive Data  `DR01`
 
 - **Element:** STIX ingest (pycti, outbox retries) (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, OpenCTI stores) and host-internal hops carry it in clear (DS06). Hardening: encrypted volumes or disk encryption, TLS between services.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-601 — Credentials Disclosure  `AC23`
+#### F-623 — Credentials Disclosure  `AC23`
 
 - **Element:** STIX ingest (pycti, outbox retries) (flow)
 - **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000/:8002 and TLS to OpenCTI.
 - **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
 
-#### F-605 — Communication Channel Manipulation  `CR06`
+#### F-627 — Communication Channel Manipulation  `CR06`
 
-- **Element:** Index/object/queue traffic (flow)
+- **Element:** Elasticsearch indices (flow)
 - **Response:** accepted — Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-608 — Unprotected Sensitive Data  `DR01`
+#### F-630 — Unprotected Sensitive Data  `DR01`
 
-- **Element:** Index/object/queue traffic (flow)
+- **Element:** Elasticsearch indices (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, OpenCTI stores) and host-internal hops carry it in clear (DS06). Hardening: encrypted volumes or disk encryption, TLS between services.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-612 — Communication Channel Manipulation  `CR06`
+#### F-634 — Communication Channel Manipulation  `CR06`
+
+- **Element:** MinIO objects (flow)
+- **Response:** accepted — Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-637 — Unprotected Sensitive Data  `DR01`
+
+- **Element:** MinIO objects (flow)
+- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, OpenCTI stores) and host-internal hops carry it in clear (DS06). Hardening: encrypted volumes or disk encryption, TLS between services.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-638 — Credentials Disclosure  `AC23`
+
+- **Element:** MinIO objects (flow)
+- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000/:8002 and TLS to OpenCTI.
+- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
+
+#### F-642 — Communication Channel Manipulation  `CR06`
+
+- **Element:** RabbitMQ queues (flow)
+- **Response:** accepted — Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-645 — Unprotected Sensitive Data  `DR01`
+
+- **Element:** RabbitMQ queues (flow)
+- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, OpenCTI stores) and host-internal hops carry it in clear (DS06). Hardening: encrypted volumes or disk encryption, TLS between services.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-646 — Credentials Disclosure  `AC23`
+
+- **Element:** RabbitMQ queues (flow)
+- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000/:8002 and TLS to OpenCTI.
+- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
+
+#### F-650 — Communication Channel Manipulation  `CR06`
+
+- **Element:** Redis cache (no authentication) (flow)
+- **Response:** accepted — Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-653 — Unprotected Sensitive Data  `DR01`
+
+- **Element:** Redis cache (no authentication) (flow)
+- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, OpenCTI stores) and host-internal hops carry it in clear (DS06). Hardening: encrypted volumes or disk encryption, TLS between services.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-657 — Communication Channel Manipulation  `CR06`
 
 - **Element:** connector-misp polls MISP events (flow)
 - **Response:** accepted — Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-614 — Credentials Disclosure  `AC23`
+#### F-659 — Credentials Disclosure  `AC23`
 
 - **Element:** connector-misp polls MISP events (flow)
 - **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000/:8002 and TLS to OpenCTI.
 - **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
 
-#### F-618 — Communication Channel Manipulation  `CR06`
+#### F-663 — Communication Channel Manipulation  `CR06`
 
 - **Element:** connector-misp writes to OpenCTI (flow)
 - **Response:** accepted — Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-621 — Unprotected Sensitive Data  `DR01`
+#### F-666 — Unprotected Sensitive Data  `DR01`
 
 - **Element:** connector-misp writes to OpenCTI (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, OpenCTI stores) and host-internal hops carry it in clear (DS06). Hardening: encrypted volumes or disk encryption, TLS between services.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-622 — Credentials Disclosure  `AC23`
+#### F-667 — Credentials Disclosure  `AC23`
 
 - **Element:** connector-misp writes to OpenCTI (flow)
 - **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000/:8002 and TLS to OpenCTI.
 - **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
 
-#### F-626 — Communication Channel Manipulation  `CR06`
+#### F-671 — Communication Channel Manipulation  `CR06`
 
 - **Element:** Alert webhook (ALERT_WEBHOOK_URL) (flow)
 - **Response:** accepted — Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-631 — Communication Channel Manipulation  `CR06`
+#### F-676 — Communication Channel Manipulation  `CR06`
 
 - **Element:** Alert e-mail (SMTP, STARTTLS by default) (flow)
 - **Response:** accepted — Internet hops are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-633 — Credentials Disclosure  `AC23`
+#### F-678 — Credentials Disclosure  `AC23`
 
 - **Element:** Alert e-mail (SMTP, STARTTLS by default) (flow)
 - **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000/:8002 and TLS to OpenCTI.
 - **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
 
-### Severity: Medium (284)
+### Severity: Medium (307)
 
 #### F-3 — Excavation  `DS01`
 
@@ -2540,1225 +2674,1363 @@ Every finding carries a triage response:
 - **Response:** accepted — One process owns each volume (uid 1000 for the orchestrator's stores, the engine for asset.db); there is no finer privilege to abuse. Hardening: volume permissions and read-only mounts where possible.
 - **pytm mitigations:** Use strong authentication and authorization mechanisms. A proven protocol is OAuth 2.0, which enables a third-party application to obtain limited access to an API.
 
-#### F-198 — Excessive Allocation  `DO02`
+#### F-198 — Shared Data Manipulation  `AC02`
+
+- **Element:** Amass asset database (shared volume) (store)
+- **Response:** accepted — The Amass asset database is shared between the engine and the orchestrator on one volume of the trusted host (ADR-005); oam_subs output is parsed as untrusted text.
+- **pytm mitigations:** Use strong authentication and authorization mechanisms. Use HTTPS/SSL for communication.
+
+#### F-199 — Excessive Allocation  `DO02`
 
 - **Element:** Amass asset database (shared volume) (store)
 - **Response:** accepted — Stores grow with runs: the scheduler's retention purge bounds SQLite rows and daily_reports; asset.db and targets.yaml grow with the inventory only. Hardening: disk quotas and monitoring on the volumes.
 - **pytm mitigations:** Limit the amount of resources that are accessible to unprivileged users. Assume all input is malicious. Consider all potentially relevant properties when validating input. Consider uniformly throttling all requests in order to make it more difficult to consume resources more quickly than they can again be freed. Use resource-limiting settings, if possible.
 
-#### F-203 — Authentication Abuse/ByPass  `AA01`
+#### F-204 — Authentication Abuse/ByPass  `AA01`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — SpiderFoot, Amass, SocialOSINT and Ollama have no sessions and no authentication; they are reachable only on loopback or the compose bridge (ADR-005). Hardening for shared hosts: authentication in front of SpiderFoot and network policies between services.
 - **pytm mitigations:** Use strong authentication and authorization mechanisms. A proven protocol is OAuth 2.0, which enables a third-party application to obtain limited access to an API.
 
-#### F-204 — Excavation  `DS01`
+#### F-205 — Excavation  `DS01`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Minimize error/response output to only what is necessary for functional use or corrective language. Remove potentially sensitive information that is not necessary for the application's functionality.
 
-#### F-205 — Double Encoding  `DE02`
+#### F-206 — Double Encoding  `DE02`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Assume all input is malicious. Create a white list that defines all valid input to the software system based on the requirements specifications. Input that does not match against the white list should not be permitted to enter into the system. Test your decoding process against malicious input. Be aware of the threat of alternative method of data encoding and obfuscation technique such as IP address encoding. When client input is required from web-based forms, avoid using the GET method to submit data, as the method causes the form data to be appended to the URL and is easily manipulated. Instead, use the POST method whenever possible. Any security checks should occur after the data has been decoded and validated as correct data format. Do not repeat decoding process, if bad character are left after decoding process, treat the data as suspicious, and fail the validation process.Refer to the RFCs to safely decode URL. Regular expression can be used to match safe URL patterns. However, that may discard valid URL requests if the regular expression is too restrictive. There are tools to scan HTTP requests to the server for valid URL such as URLScan from Microsoft (http://www.microsoft.com/technet/security/tools/urlscan.mspx).
 
-#### F-206 — Privilege Abuse  `AC01`
+#### F-207 — Privilege Abuse  `AC01`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — No roles on the sidecars: every caller can do everything they do (AA01).
 - **pytm mitigations:** Use strong authentication and authorization mechanisms. A proven protocol is OAuth 2.0, which enables a third-party application to obtain limited access to an API.
 
-#### F-207 — Flooding  `DO01`
+#### F-208 — Flooding  `DO01`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — The sidecars can be flooded by anything on the compose network; the orchestrator bounds its own use with timeouts and per-run caps.
 - **pytm mitigations:** Ensure that protocols have specific limits of scale configured. Specify expectations for capabilities and dictate which behaviors are acceptable when resource allocation reaches limits. Uniformly throttle all requests in order to make it more difficult to consume resources more quickly than they can again be freed.
 
-#### F-209 — Excessive Allocation  `DO02`
+#### F-210 — Excessive Allocation  `DO02`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Limit the amount of resources that are accessible to unprivileged users. Assume all input is malicious. Consider all potentially relevant properties when validating input. Consider uniformly throttling all requests in order to make it more difficult to consume resources more quickly than they can again be freed. Use resource-limiting settings, if possible.
 
-#### F-212 — Parameter Injection  `INP10`
+#### F-213 — Parameter Injection  `INP10`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Implement an audit log written to a separate host. In the event of a compromise, the audit log may be able to provide evidence and details of the compromise. Treat all user input as untrusted data that must be validated before use.
 
-#### F-214 — Input Data Manipulation  `INP14`
+#### F-215 — Input Data Manipulation  `INP14`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc.
 
-#### F-220 — Exploiting Incorrectly Configured Access Control Security Levels  `AC07`
+#### F-221 — Exploiting Incorrectly Configured Access Control Security Levels  `AC07`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — There is no access control to misconfigure on the sidecars (AA01).
 - **pytm mitigations:** Design: Configure the access control correctly.
 
-#### F-223 — Principal Spoof  `AA02`
+#### F-224 — Principal Spoof  `AA02`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — The sidecars accept anything on the compose network as the orchestrator (AA01).
 - **pytm mitigations:** Employ robust authentication processes (e.g., multi-factor authentication).
 
-#### F-224 — XSS Targeting Error Pages  `DS04`
+#### F-225 — XSS Targeting Error Pages  `DS04`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Design: Use libraries and templates that minimize unfiltered input.Implementation: Normalize, filter and white list any input that will be used in error messages.Implementation: The victim should configure the browser to minimize active content from untrusted sources.
 
-#### F-227 — Manipulate Registry Information  `AC08`
+#### F-228 — Manipulate Registry Information  `AC08`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — Service discovery is static compose DNS on the trusted network; there is no registry to manipulate from outside the host.
 - **pytm mitigations:** Ensure proper permissions are set for Registry hives to prevent users from modifying keys.Employ a robust and layered defensive posture in order to prevent unauthorized users on your system.Employ robust identification and audit/blocking via whitelisting of applications on your system. Unnecessary applications, utilities, and configurations will have a presence in the system registry that can be leveraged by an adversary through this attack pattern.
 
-#### F-229 — XSS Using MIME Type Mismatch  `INP17`
+#### F-230 — XSS Using MIME Type Mismatch  `INP17`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — The orchestrator's console sets X-Content-Type-Options: nosniff and a strict CSP; SpiderFoot's UI is loopback-only.
 - **pytm mitigations:** Design: Browsers must invoke script filters to detect that the specified MIME type of the file matches the actual type of its content before deciding which script interpreter to use.
 
-#### F-231 — Functionality Misuse  `AC09`
+#### F-232 — Functionality Misuse  `AC09`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — Anything on the compose network can drive an unauthenticated sidecar (AA01); the orchestrator's own triggers are guarded by the in-progress 409 rule and per-target schedules.
 - **pytm mitigations:** Perform comprehensive threat modeling, a process of identifying, evaluating, and mitigating potential threats to the application. This effort can help reveal potentially obscure application functionality that can be manipulated for malicious purposes.When implementing security features, consider how they can be misused and compromised.
 
-#### F-234 — XML External Entities Blowup  `INP19`
+#### F-235 — XML External Entities Blowup  `INP19`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** transferred — The orchestrator's contracts are JSON and CLI text; it parses no XML, SOAP or DTD. Any XML handling lives inside the sidecar or vendor service and is upstream code.
 - **pytm mitigations:** This attack may be mitigated by tweaking the XML parser to not resolve external entities. If external entities are needed, then implement a custom XmlResolver that has a request timeout, data retrieval limit, and restrict resources it can retrieve locally.
 
-#### F-235 — Session Credential Falsification through Manipulation  `AC11`
+#### F-236 — Session Credential Falsification through Manipulation  `AC11`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — SpiderFoot, Amass, SocialOSINT and Ollama have no sessions and no authentication; they are reachable only on loopback or the compose bridge (ADR-005). Hardening for shared hosts: authentication in front of SpiderFoot and network policies between services.
 - **pytm mitigations:** Implementation: Use session IDs that are difficult to guess or brute-force: One way for the attackers to obtain valid session IDs is by brute-forcing or guessing them. By choosing session identifiers that are sufficiently random, brute-forcing or guessing becomes very difficult. Implementation: Regenerate and destroy session identifiers when there is a change in the level of privilege: This ensures that even though a potential victim may have followed a link with a fixated identifier, a new one is issued when the level of privilege changes.
 
-#### F-236 — DTD Injection  `INP21`
+#### F-237 — DTD Injection  `INP21`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** transferred — The orchestrator's contracts are JSON and CLI text; it parses no XML, SOAP or DTD. Any XML handling lives inside the sidecar or vendor service and is upstream code.
 - **pytm mitigations:** Design: Sanitize incoming DTDs to prevent excessive expansion or other actions that could result in impacts like resource depletion.Implementation: Disallow the inclusion of DTDs as part of incoming messages.Implementation: Use XML parsing tools that protect against DTD attacks.
 
-#### F-239 — XSS Using Doubled Characters  `INP29`
+#### F-240 — XSS Using Doubled Characters  `INP29`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Design: Use libraries and templates that minimize unfiltered input.Implementation: Normalize, filter and sanitize all user supplied fields.Implementation: The victim should configure the browser to minimize active content from untrusted sources.
 
-#### F-241 — HTTP Response Smuggling  `INP36`
+#### F-242 — HTTP Response Smuggling  `INP36`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — No proxy is chained in front of the sidecars: the orchestrator reaches them directly on the compose bridge, so smuggling needs a position on the host (ADR-005).
 - **pytm mitigations:** Design: Employ strict adherence to interpretations of HTTP messages wherever possible.Implementation: Encode header information provided by user input so that user-supplied content is not interpreted by intermediaries.
 
-#### F-247 — Authentication Abuse/ByPass  `AA01`
+#### F-248 — Authentication Abuse/ByPass  `AA01`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — SpiderFoot, Amass, SocialOSINT and Ollama have no sessions and no authentication; they are reachable only on loopback or the compose bridge (ADR-005). Hardening for shared hosts: authentication in front of SpiderFoot and network policies between services.
 - **pytm mitigations:** Use strong authentication and authorization mechanisms. A proven protocol is OAuth 2.0, which enables a third-party application to obtain limited access to an API.
 
-#### F-248 — Excavation  `DS01`
+#### F-249 — Excavation  `DS01`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Minimize error/response output to only what is necessary for functional use or corrective language. Remove potentially sensitive information that is not necessary for the application's functionality.
 
-#### F-249 — Double Encoding  `DE02`
+#### F-250 — Double Encoding  `DE02`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Assume all input is malicious. Create a white list that defines all valid input to the software system based on the requirements specifications. Input that does not match against the white list should not be permitted to enter into the system. Test your decoding process against malicious input. Be aware of the threat of alternative method of data encoding and obfuscation technique such as IP address encoding. When client input is required from web-based forms, avoid using the GET method to submit data, as the method causes the form data to be appended to the URL and is easily manipulated. Instead, use the POST method whenever possible. Any security checks should occur after the data has been decoded and validated as correct data format. Do not repeat decoding process, if bad character are left after decoding process, treat the data as suspicious, and fail the validation process.Refer to the RFCs to safely decode URL. Regular expression can be used to match safe URL patterns. However, that may discard valid URL requests if the regular expression is too restrictive. There are tools to scan HTTP requests to the server for valid URL such as URLScan from Microsoft (http://www.microsoft.com/technet/security/tools/urlscan.mspx).
 
-#### F-250 — Privilege Abuse  `AC01`
+#### F-251 — Privilege Abuse  `AC01`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — No roles on the sidecars: every caller can do everything they do (AA01).
 - **pytm mitigations:** Use strong authentication and authorization mechanisms. A proven protocol is OAuth 2.0, which enables a third-party application to obtain limited access to an API.
 
-#### F-251 — Flooding  `DO01`
+#### F-252 — Flooding  `DO01`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — The sidecars can be flooded by anything on the compose network; the orchestrator bounds its own use with timeouts and per-run caps.
 - **pytm mitigations:** Ensure that protocols have specific limits of scale configured. Specify expectations for capabilities and dictate which behaviors are acceptable when resource allocation reaches limits. Uniformly throttle all requests in order to make it more difficult to consume resources more quickly than they can again be freed.
 
-#### F-253 — Excessive Allocation  `DO02`
+#### F-254 — Excessive Allocation  `DO02`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Limit the amount of resources that are accessible to unprivileged users. Assume all input is malicious. Consider all potentially relevant properties when validating input. Consider uniformly throttling all requests in order to make it more difficult to consume resources more quickly than they can again be freed. Use resource-limiting settings, if possible.
 
-#### F-256 — Parameter Injection  `INP10`
+#### F-257 — Parameter Injection  `INP10`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Implement an audit log written to a separate host. In the event of a compromise, the audit log may be able to provide evidence and details of the compromise. Treat all user input as untrusted data that must be validated before use.
 
-#### F-258 — Input Data Manipulation  `INP14`
+#### F-259 — Input Data Manipulation  `INP14`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc.
 
-#### F-264 — Exploiting Incorrectly Configured Access Control Security Levels  `AC07`
+#### F-265 — Exploiting Incorrectly Configured Access Control Security Levels  `AC07`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — There is no access control to misconfigure on the sidecars (AA01).
 - **pytm mitigations:** Design: Configure the access control correctly.
 
-#### F-267 — Principal Spoof  `AA02`
+#### F-268 — Principal Spoof  `AA02`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — The sidecars accept anything on the compose network as the orchestrator (AA01).
 - **pytm mitigations:** Employ robust authentication processes (e.g., multi-factor authentication).
 
-#### F-268 — XSS Targeting Error Pages  `DS04`
+#### F-269 — XSS Targeting Error Pages  `DS04`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Design: Use libraries and templates that minimize unfiltered input.Implementation: Normalize, filter and white list any input that will be used in error messages.Implementation: The victim should configure the browser to minimize active content from untrusted sources.
 
-#### F-271 — Manipulate Registry Information  `AC08`
+#### F-272 — Manipulate Registry Information  `AC08`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — Service discovery is static compose DNS on the trusted network; there is no registry to manipulate from outside the host.
 - **pytm mitigations:** Ensure proper permissions are set for Registry hives to prevent users from modifying keys.Employ a robust and layered defensive posture in order to prevent unauthorized users on your system.Employ robust identification and audit/blocking via whitelisting of applications on your system. Unnecessary applications, utilities, and configurations will have a presence in the system registry that can be leveraged by an adversary through this attack pattern.
 
-#### F-273 — XSS Using MIME Type Mismatch  `INP17`
+#### F-274 — XSS Using MIME Type Mismatch  `INP17`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — The orchestrator's console sets X-Content-Type-Options: nosniff and a strict CSP; SpiderFoot's UI is loopback-only.
 - **pytm mitigations:** Design: Browsers must invoke script filters to detect that the specified MIME type of the file matches the actual type of its content before deciding which script interpreter to use.
 
-#### F-275 — Functionality Misuse  `AC09`
+#### F-276 — Functionality Misuse  `AC09`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — Anything on the compose network can drive an unauthenticated sidecar (AA01); the orchestrator's own triggers are guarded by the in-progress 409 rule and per-target schedules.
 - **pytm mitigations:** Perform comprehensive threat modeling, a process of identifying, evaluating, and mitigating potential threats to the application. This effort can help reveal potentially obscure application functionality that can be manipulated for malicious purposes.When implementing security features, consider how they can be misused and compromised.
 
-#### F-278 — XML External Entities Blowup  `INP19`
+#### F-279 — XML External Entities Blowup  `INP19`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** transferred — The orchestrator's contracts are JSON and CLI text; it parses no XML, SOAP or DTD. Any XML handling lives inside the sidecar or vendor service and is upstream code.
 - **pytm mitigations:** This attack may be mitigated by tweaking the XML parser to not resolve external entities. If external entities are needed, then implement a custom XmlResolver that has a request timeout, data retrieval limit, and restrict resources it can retrieve locally.
 
-#### F-279 — Session Credential Falsification through Manipulation  `AC11`
+#### F-280 — Session Credential Falsification through Manipulation  `AC11`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — SpiderFoot, Amass, SocialOSINT and Ollama have no sessions and no authentication; they are reachable only on loopback or the compose bridge (ADR-005). Hardening for shared hosts: authentication in front of SpiderFoot and network policies between services.
 - **pytm mitigations:** Implementation: Use session IDs that are difficult to guess or brute-force: One way for the attackers to obtain valid session IDs is by brute-forcing or guessing them. By choosing session identifiers that are sufficiently random, brute-forcing or guessing becomes very difficult. Implementation: Regenerate and destroy session identifiers when there is a change in the level of privilege: This ensures that even though a potential victim may have followed a link with a fixated identifier, a new one is issued when the level of privilege changes.
 
-#### F-280 — DTD Injection  `INP21`
+#### F-281 — DTD Injection  `INP21`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** transferred — The orchestrator's contracts are JSON and CLI text; it parses no XML, SOAP or DTD. Any XML handling lives inside the sidecar or vendor service and is upstream code.
 - **pytm mitigations:** Design: Sanitize incoming DTDs to prevent excessive expansion or other actions that could result in impacts like resource depletion.Implementation: Disallow the inclusion of DTDs as part of incoming messages.Implementation: Use XML parsing tools that protect against DTD attacks.
 
-#### F-283 — XSS Using Doubled Characters  `INP29`
+#### F-284 — XSS Using Doubled Characters  `INP29`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Design: Use libraries and templates that minimize unfiltered input.Implementation: Normalize, filter and sanitize all user supplied fields.Implementation: The victim should configure the browser to minimize active content from untrusted sources.
 
-#### F-285 — HTTP Response Smuggling  `INP36`
+#### F-286 — HTTP Response Smuggling  `INP36`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — No proxy is chained in front of the sidecars: the orchestrator reaches them directly on the compose bridge, so smuggling needs a position on the host (ADR-005).
 - **pytm mitigations:** Design: Employ strict adherence to interpretations of HTTP messages wherever possible.Implementation: Encode header information provided by user input so that user-supplied content is not interpreted by intermediaries.
 
-#### F-291 — Authentication Abuse/ByPass  `AA01`
+#### F-292 — Authentication Abuse/ByPass  `AA01`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — SpiderFoot, Amass, SocialOSINT and Ollama have no sessions and no authentication; they are reachable only on loopback or the compose bridge (ADR-005). Hardening for shared hosts: authentication in front of SpiderFoot and network policies between services.
 - **pytm mitigations:** Use strong authentication and authorization mechanisms. A proven protocol is OAuth 2.0, which enables a third-party application to obtain limited access to an API.
 
-#### F-292 — Excavation  `DS01`
+#### F-293 — Excavation  `DS01`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Minimize error/response output to only what is necessary for functional use or corrective language. Remove potentially sensitive information that is not necessary for the application's functionality.
 
-#### F-293 — Double Encoding  `DE02`
+#### F-294 — Double Encoding  `DE02`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Assume all input is malicious. Create a white list that defines all valid input to the software system based on the requirements specifications. Input that does not match against the white list should not be permitted to enter into the system. Test your decoding process against malicious input. Be aware of the threat of alternative method of data encoding and obfuscation technique such as IP address encoding. When client input is required from web-based forms, avoid using the GET method to submit data, as the method causes the form data to be appended to the URL and is easily manipulated. Instead, use the POST method whenever possible. Any security checks should occur after the data has been decoded and validated as correct data format. Do not repeat decoding process, if bad character are left after decoding process, treat the data as suspicious, and fail the validation process.Refer to the RFCs to safely decode URL. Regular expression can be used to match safe URL patterns. However, that may discard valid URL requests if the regular expression is too restrictive. There are tools to scan HTTP requests to the server for valid URL such as URLScan from Microsoft (http://www.microsoft.com/technet/security/tools/urlscan.mspx).
 
-#### F-294 — Privilege Abuse  `AC01`
+#### F-295 — Privilege Abuse  `AC01`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — No roles on the sidecars: every caller can do everything they do (AA01).
 - **pytm mitigations:** Use strong authentication and authorization mechanisms. A proven protocol is OAuth 2.0, which enables a third-party application to obtain limited access to an API.
 
-#### F-295 — Flooding  `DO01`
+#### F-296 — Flooding  `DO01`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — The sidecars can be flooded by anything on the compose network; the orchestrator bounds its own use with timeouts and per-run caps.
 - **pytm mitigations:** Ensure that protocols have specific limits of scale configured. Specify expectations for capabilities and dictate which behaviors are acceptable when resource allocation reaches limits. Uniformly throttle all requests in order to make it more difficult to consume resources more quickly than they can again be freed.
 
-#### F-297 — Excessive Allocation  `DO02`
+#### F-298 — Excessive Allocation  `DO02`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Limit the amount of resources that are accessible to unprivileged users. Assume all input is malicious. Consider all potentially relevant properties when validating input. Consider uniformly throttling all requests in order to make it more difficult to consume resources more quickly than they can again be freed. Use resource-limiting settings, if possible.
 
-#### F-300 — Parameter Injection  `INP10`
+#### F-301 — Parameter Injection  `INP10`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Implement an audit log written to a separate host. In the event of a compromise, the audit log may be able to provide evidence and details of the compromise. Treat all user input as untrusted data that must be validated before use.
 
-#### F-302 — Input Data Manipulation  `INP14`
+#### F-303 — Input Data Manipulation  `INP14`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc.
 
-#### F-308 — Exploiting Incorrectly Configured Access Control Security Levels  `AC07`
+#### F-309 — Exploiting Incorrectly Configured Access Control Security Levels  `AC07`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — There is no access control to misconfigure on the sidecars (AA01).
 - **pytm mitigations:** Design: Configure the access control correctly.
 
-#### F-311 — Principal Spoof  `AA02`
+#### F-312 — Principal Spoof  `AA02`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — The sidecars accept anything on the compose network as the orchestrator (AA01).
 - **pytm mitigations:** Employ robust authentication processes (e.g., multi-factor authentication).
 
-#### F-312 — XSS Targeting Error Pages  `DS04`
+#### F-313 — XSS Targeting Error Pages  `DS04`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Design: Use libraries and templates that minimize unfiltered input.Implementation: Normalize, filter and white list any input that will be used in error messages.Implementation: The victim should configure the browser to minimize active content from untrusted sources.
 
-#### F-315 — Manipulate Registry Information  `AC08`
+#### F-316 — Manipulate Registry Information  `AC08`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — Service discovery is static compose DNS on the trusted network; there is no registry to manipulate from outside the host.
 - **pytm mitigations:** Ensure proper permissions are set for Registry hives to prevent users from modifying keys.Employ a robust and layered defensive posture in order to prevent unauthorized users on your system.Employ robust identification and audit/blocking via whitelisting of applications on your system. Unnecessary applications, utilities, and configurations will have a presence in the system registry that can be leveraged by an adversary through this attack pattern.
 
-#### F-317 — XSS Using MIME Type Mismatch  `INP17`
+#### F-318 — XSS Using MIME Type Mismatch  `INP17`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — The orchestrator's console sets X-Content-Type-Options: nosniff and a strict CSP; SpiderFoot's UI is loopback-only.
 - **pytm mitigations:** Design: Browsers must invoke script filters to detect that the specified MIME type of the file matches the actual type of its content before deciding which script interpreter to use.
 
-#### F-319 — Functionality Misuse  `AC09`
+#### F-320 — Functionality Misuse  `AC09`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — Anything on the compose network can drive an unauthenticated sidecar (AA01); the orchestrator's own triggers are guarded by the in-progress 409 rule and per-target schedules.
 - **pytm mitigations:** Perform comprehensive threat modeling, a process of identifying, evaluating, and mitigating potential threats to the application. This effort can help reveal potentially obscure application functionality that can be manipulated for malicious purposes.When implementing security features, consider how they can be misused and compromised.
 
-#### F-322 — XML External Entities Blowup  `INP19`
+#### F-323 — XML External Entities Blowup  `INP19`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** transferred — The orchestrator's contracts are JSON and CLI text; it parses no XML, SOAP or DTD. Any XML handling lives inside the sidecar or vendor service and is upstream code.
 - **pytm mitigations:** This attack may be mitigated by tweaking the XML parser to not resolve external entities. If external entities are needed, then implement a custom XmlResolver that has a request timeout, data retrieval limit, and restrict resources it can retrieve locally.
 
-#### F-323 — Session Credential Falsification through Manipulation  `AC11`
+#### F-324 — Session Credential Falsification through Manipulation  `AC11`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — SpiderFoot, Amass, SocialOSINT and Ollama have no sessions and no authentication; they are reachable only on loopback or the compose bridge (ADR-005). Hardening for shared hosts: authentication in front of SpiderFoot and network policies between services.
 - **pytm mitigations:** Implementation: Use session IDs that are difficult to guess or brute-force: One way for the attackers to obtain valid session IDs is by brute-forcing or guessing them. By choosing session identifiers that are sufficiently random, brute-forcing or guessing becomes very difficult. Implementation: Regenerate and destroy session identifiers when there is a change in the level of privilege: This ensures that even though a potential victim may have followed a link with a fixated identifier, a new one is issued when the level of privilege changes.
 
-#### F-324 — DTD Injection  `INP21`
+#### F-325 — DTD Injection  `INP21`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** transferred — The orchestrator's contracts are JSON and CLI text; it parses no XML, SOAP or DTD. Any XML handling lives inside the sidecar or vendor service and is upstream code.
 - **pytm mitigations:** Design: Sanitize incoming DTDs to prevent excessive expansion or other actions that could result in impacts like resource depletion.Implementation: Disallow the inclusion of DTDs as part of incoming messages.Implementation: Use XML parsing tools that protect against DTD attacks.
 
-#### F-327 — XSS Using Doubled Characters  `INP29`
+#### F-328 — XSS Using Doubled Characters  `INP29`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Design: Use libraries and templates that minimize unfiltered input.Implementation: Normalize, filter and sanitize all user supplied fields.Implementation: The victim should configure the browser to minimize active content from untrusted sources.
 
-#### F-329 — HTTP Response Smuggling  `INP36`
+#### F-330 — HTTP Response Smuggling  `INP36`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — No proxy is chained in front of the sidecars: the orchestrator reaches them directly on the compose bridge, so smuggling needs a position on the host (ADR-005).
 - **pytm mitigations:** Design: Employ strict adherence to interpretations of HTTP messages wherever possible.Implementation: Encode header information provided by user input so that user-supplied content is not interpreted by intermediaries.
 
-#### F-337 — Excavation  `DS01`
+#### F-338 — Excavation  `DS01`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Minimize error/response output to only what is necessary for functional use or corrective language. Remove potentially sensitive information that is not necessary for the application's functionality.
 
-#### F-338 — Double Encoding  `DE02`
+#### F-339 — Double Encoding  `DE02`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Assume all input is malicious. Create a white list that defines all valid input to the software system based on the requirements specifications. Input that does not match against the white list should not be permitted to enter into the system. Test your decoding process against malicious input. Be aware of the threat of alternative method of data encoding and obfuscation technique such as IP address encoding. When client input is required from web-based forms, avoid using the GET method to submit data, as the method causes the form data to be appended to the URL and is easily manipulated. Instead, use the POST method whenever possible. Any security checks should occur after the data has been decoded and validated as correct data format. Do not repeat decoding process, if bad character are left after decoding process, treat the data as suspicious, and fail the validation process.Refer to the RFCs to safely decode URL. Regular expression can be used to match safe URL patterns. However, that may discard valid URL requests if the regular expression is too restrictive. There are tools to scan HTTP requests to the server for valid URL such as URLScan from Microsoft (http://www.microsoft.com/technet/security/tools/urlscan.mspx).
 
-#### F-339 — Privilege Abuse  `AC01`
+#### F-340 — Privilege Abuse  `AC01`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — Authentication and authorisation inside Keycloak, OpenCTI, MISP, Tavily, oauth2-proxy and connector-misp are the vendor's.
 - **pytm mitigations:** Use strong authentication and authorization mechanisms. A proven protocol is OAuth 2.0, which enables a third-party application to obtain limited access to an API.
 
-#### F-340 — Flooding  `DO01`
+#### F-341 — Flooding  `DO01`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — Rate limiting of vendor services is the vendor's.
 - **pytm mitigations:** Ensure that protocols have specific limits of scale configured. Specify expectations for capabilities and dictate which behaviors are acceptable when resource allocation reaches limits. Uniformly throttle all requests in order to make it more difficult to consume resources more quickly than they can again be freed.
 
-#### F-342 — Excessive Allocation  `DO02`
+#### F-343 — Excessive Allocation  `DO02`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Limit the amount of resources that are accessible to unprivileged users. Assume all input is malicious. Consider all potentially relevant properties when validating input. Consider uniformly throttling all requests in order to make it more difficult to consume resources more quickly than they can again be freed. Use resource-limiting settings, if possible.
 
-#### F-345 — Parameter Injection  `INP10`
+#### F-346 — Parameter Injection  `INP10`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Implement an audit log written to a separate host. In the event of a compromise, the audit log may be able to provide evidence and details of the compromise. Treat all user input as untrusted data that must be validated before use.
 
-#### F-347 — Input Data Manipulation  `INP14`
+#### F-348 — Input Data Manipulation  `INP14`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc.
 
-#### F-353 — Exploiting Incorrectly Configured Access Control Security Levels  `AC07`
+#### F-354 — Exploiting Incorrectly Configured Access Control Security Levels  `AC07`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — Authentication and authorisation inside Keycloak, OpenCTI, MISP, Tavily, oauth2-proxy and connector-misp are the vendor's.
 - **pytm mitigations:** Design: Configure the access control correctly.
 
-#### F-356 — XSS Targeting Error Pages  `DS04`
+#### F-357 — XSS Targeting Error Pages  `DS04`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Design: Use libraries and templates that minimize unfiltered input.Implementation: Normalize, filter and white list any input that will be used in error messages.Implementation: The victim should configure the browser to minimize active content from untrusted sources.
 
-#### F-359 — Manipulate Registry Information  `AC08`
+#### F-360 — Manipulate Registry Information  `AC08`
 
 - **Element:** MISP (vendor)
 - **Response:** accepted — Service discovery is static compose DNS on the trusted network; there is no registry to manipulate from outside the host.
 - **pytm mitigations:** Ensure proper permissions are set for Registry hives to prevent users from modifying keys.Employ a robust and layered defensive posture in order to prevent unauthorized users on your system.Employ robust identification and audit/blocking via whitelisting of applications on your system. Unnecessary applications, utilities, and configurations will have a presence in the system registry that can be leveraged by an adversary through this attack pattern.
 
-#### F-361 — XSS Using MIME Type Mismatch  `INP17`
+#### F-362 — XSS Using MIME Type Mismatch  `INP17`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — MIME handling of vendor web UIs is the vendor's.
 - **pytm mitigations:** Design: Browsers must invoke script filters to detect that the specified MIME type of the file matches the actual type of its content before deciding which script interpreter to use.
 
-#### F-363 — Functionality Misuse  `AC09`
+#### F-364 — Functionality Misuse  `AC09`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — Authentication and authorisation inside Keycloak, OpenCTI, MISP, Tavily, oauth2-proxy and connector-misp are the vendor's.
 - **pytm mitigations:** Perform comprehensive threat modeling, a process of identifying, evaluating, and mitigating potential threats to the application. This effort can help reveal potentially obscure application functionality that can be manipulated for malicious purposes.When implementing security features, consider how they can be misused and compromised.
 
-#### F-366 — XML External Entities Blowup  `INP19`
+#### F-367 — XML External Entities Blowup  `INP19`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — The orchestrator's contracts are JSON and CLI text; it parses no XML, SOAP or DTD. Any XML handling lives inside the sidecar or vendor service and is upstream code.
 - **pytm mitigations:** This attack may be mitigated by tweaking the XML parser to not resolve external entities. If external entities are needed, then implement a custom XmlResolver that has a request timeout, data retrieval limit, and restrict resources it can retrieve locally.
 
-#### F-367 — Session Credential Falsification through Manipulation  `AC11`
+#### F-368 — Session Credential Falsification through Manipulation  `AC11`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — Session and credential handling inside Keycloak, OpenCTI, MISP, Tavily and the SMTP relay is the vendor's; the orchestrator presents only API tokens.
 - **pytm mitigations:** Implementation: Use session IDs that are difficult to guess or brute-force: One way for the attackers to obtain valid session IDs is by brute-forcing or guessing them. By choosing session identifiers that are sufficiently random, brute-forcing or guessing becomes very difficult. Implementation: Regenerate and destroy session identifiers when there is a change in the level of privilege: This ensures that even though a potential victim may have followed a link with a fixated identifier, a new one is issued when the level of privilege changes.
 
-#### F-368 — DTD Injection  `INP21`
+#### F-369 — DTD Injection  `INP21`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — The orchestrator's contracts are JSON and CLI text; it parses no XML, SOAP or DTD. Any XML handling lives inside the sidecar or vendor service and is upstream code.
 - **pytm mitigations:** Design: Sanitize incoming DTDs to prevent excessive expansion or other actions that could result in impacts like resource depletion.Implementation: Disallow the inclusion of DTDs as part of incoming messages.Implementation: Use XML parsing tools that protect against DTD attacks.
 
-#### F-371 — XSS Using Doubled Characters  `INP29`
+#### F-372 — XSS Using Doubled Characters  `INP29`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Design: Use libraries and templates that minimize unfiltered input.Implementation: Normalize, filter and sanitize all user supplied fields.Implementation: The victim should configure the browser to minimize active content from untrusted sources.
 
-#### F-373 — HTTP Response Smuggling  `INP36`
+#### F-374 — HTTP Response Smuggling  `INP36`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — HTTP parsing of Keycloak, OpenCTI, MISP, Tavily and the SMTP relay is the vendor's; the orchestrator sends well-formed requests from httpx, pycti and smtplib.
 - **pytm mitigations:** Design: Employ strict adherence to interpretations of HTTP messages wherever possible.Implementation: Encode header information provided by user input so that user-supplied content is not interpreted by intermediaries.
 
-#### F-380 — Authentication Abuse/ByPass  `AA01`
+#### F-381 — Authentication Abuse/ByPass  `AA01`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Authentication and authorisation inside Keycloak, OpenCTI, MISP, Tavily, oauth2-proxy and connector-misp are the vendor's.
 - **pytm mitigations:** Use strong authentication and authorization mechanisms. A proven protocol is OAuth 2.0, which enables a third-party application to obtain limited access to an API.
 
-#### F-381 — Excavation  `DS01`
+#### F-382 — Excavation  `DS01`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Minimize error/response output to only what is necessary for functional use or corrective language. Remove potentially sensitive information that is not necessary for the application's functionality.
 
-#### F-382 — Double Encoding  `DE02`
+#### F-383 — Double Encoding  `DE02`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Assume all input is malicious. Create a white list that defines all valid input to the software system based on the requirements specifications. Input that does not match against the white list should not be permitted to enter into the system. Test your decoding process against malicious input. Be aware of the threat of alternative method of data encoding and obfuscation technique such as IP address encoding. When client input is required from web-based forms, avoid using the GET method to submit data, as the method causes the form data to be appended to the URL and is easily manipulated. Instead, use the POST method whenever possible. Any security checks should occur after the data has been decoded and validated as correct data format. Do not repeat decoding process, if bad character are left after decoding process, treat the data as suspicious, and fail the validation process.Refer to the RFCs to safely decode URL. Regular expression can be used to match safe URL patterns. However, that may discard valid URL requests if the regular expression is too restrictive. There are tools to scan HTTP requests to the server for valid URL such as URLScan from Microsoft (http://www.microsoft.com/technet/security/tools/urlscan.mspx).
 
-#### F-383 — Privilege Abuse  `AC01`
+#### F-384 — Privilege Abuse  `AC01`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Authentication and authorisation inside Keycloak, OpenCTI, MISP, Tavily, oauth2-proxy and connector-misp are the vendor's.
 - **pytm mitigations:** Use strong authentication and authorization mechanisms. A proven protocol is OAuth 2.0, which enables a third-party application to obtain limited access to an API.
 
-#### F-384 — Flooding  `DO01`
+#### F-385 — Flooding  `DO01`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Rate limiting of vendor services is the vendor's.
 - **pytm mitigations:** Ensure that protocols have specific limits of scale configured. Specify expectations for capabilities and dictate which behaviors are acceptable when resource allocation reaches limits. Uniformly throttle all requests in order to make it more difficult to consume resources more quickly than they can again be freed.
 
-#### F-386 — Excessive Allocation  `DO02`
+#### F-387 — Excessive Allocation  `DO02`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Limit the amount of resources that are accessible to unprivileged users. Assume all input is malicious. Consider all potentially relevant properties when validating input. Consider uniformly throttling all requests in order to make it more difficult to consume resources more quickly than they can again be freed. Use resource-limiting settings, if possible.
 
-#### F-389 — Parameter Injection  `INP10`
+#### F-390 — Parameter Injection  `INP10`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Implement an audit log written to a separate host. In the event of a compromise, the audit log may be able to provide evidence and details of the compromise. Treat all user input as untrusted data that must be validated before use.
 
-#### F-391 — Input Data Manipulation  `INP14`
+#### F-392 — Input Data Manipulation  `INP14`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc.
 
-#### F-398 — Principal Spoof  `AA02`
+#### F-399 — Principal Spoof  `AA02`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Authentication and authorisation inside Keycloak, OpenCTI, MISP, Tavily, oauth2-proxy and connector-misp are the vendor's.
 - **pytm mitigations:** Employ robust authentication processes (e.g., multi-factor authentication).
 
-#### F-399 — Session Credential Falsification through Forging  `CR04`
+#### F-400 — Session Credential Falsification through Forging  `CR04`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Session and credential handling inside Keycloak, OpenCTI, MISP, Tavily and the SMTP relay is the vendor's; the orchestrator presents only API tokens.
 - **pytm mitigations:** Implementation: Use session IDs that are difficult to guess or brute-force: One way for the attackers to obtain valid session IDs is by brute-forcing or guessing them. By choosing session identifiers that are sufficiently random, brute-forcing or guessing becomes very difficult.Implementation: Regenerate and destroy session identifiers when there is a change in the level of privilege: This ensures that even though a potential victim may have followed a link with a fixated identifier, a new one is issued when the level of privilege changes.
 
-#### F-400 — XSS Targeting Error Pages  `DS04`
+#### F-401 — XSS Targeting Error Pages  `DS04`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Design: Use libraries and templates that minimize unfiltered input.Implementation: Normalize, filter and white list any input that will be used in error messages.Implementation: The victim should configure the browser to minimize active content from untrusted sources.
 
-#### F-404 — XSS Using MIME Type Mismatch  `INP17`
+#### F-405 — XSS Using MIME Type Mismatch  `INP17`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — MIME handling of vendor web UIs is the vendor's.
 - **pytm mitigations:** Design: Browsers must invoke script filters to detect that the specified MIME type of the file matches the actual type of its content before deciding which script interpreter to use.
 
-#### F-406 — Functionality Misuse  `AC09`
+#### F-407 — Functionality Misuse  `AC09`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Authentication and authorisation inside Keycloak, OpenCTI, MISP, Tavily, oauth2-proxy and connector-misp are the vendor's.
 - **pytm mitigations:** Perform comprehensive threat modeling, a process of identifying, evaluating, and mitigating potential threats to the application. This effort can help reveal potentially obscure application functionality that can be manipulated for malicious purposes.When implementing security features, consider how they can be misused and compromised.
 
-#### F-409 — XML External Entities Blowup  `INP19`
+#### F-410 — XML External Entities Blowup  `INP19`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — The orchestrator's contracts are JSON and CLI text; it parses no XML, SOAP or DTD. Any XML handling lives inside the sidecar or vendor service and is upstream code.
 - **pytm mitigations:** This attack may be mitigated by tweaking the XML parser to not resolve external entities. If external entities are needed, then implement a custom XmlResolver that has a request timeout, data retrieval limit, and restrict resources it can retrieve locally.
 
-#### F-410 — Session Credential Falsification through Manipulation  `AC11`
+#### F-411 — Session Credential Falsification through Manipulation  `AC11`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Session and credential handling inside Keycloak, OpenCTI, MISP, Tavily and the SMTP relay is the vendor's; the orchestrator presents only API tokens.
 - **pytm mitigations:** Implementation: Use session IDs that are difficult to guess or brute-force: One way for the attackers to obtain valid session IDs is by brute-forcing or guessing them. By choosing session identifiers that are sufficiently random, brute-forcing or guessing becomes very difficult. Implementation: Regenerate and destroy session identifiers when there is a change in the level of privilege: This ensures that even though a potential victim may have followed a link with a fixated identifier, a new one is issued when the level of privilege changes.
 
-#### F-411 — DTD Injection  `INP21`
+#### F-412 — DTD Injection  `INP21`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — The orchestrator's contracts are JSON and CLI text; it parses no XML, SOAP or DTD. Any XML handling lives inside the sidecar or vendor service and is upstream code.
 - **pytm mitigations:** Design: Sanitize incoming DTDs to prevent excessive expansion or other actions that could result in impacts like resource depletion.Implementation: Disallow the inclusion of DTDs as part of incoming messages.Implementation: Use XML parsing tools that protect against DTD attacks.
 
-#### F-414 — XSS Using Doubled Characters  `INP29`
+#### F-415 — XSS Using Doubled Characters  `INP29`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Design: Use libraries and templates that minimize unfiltered input.Implementation: Normalize, filter and sanitize all user supplied fields.Implementation: The victim should configure the browser to minimize active content from untrusted sources.
 
-#### F-416 — HTTP Response Smuggling  `INP36`
+#### F-417 — HTTP Response Smuggling  `INP36`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — HTTP parsing of Keycloak, OpenCTI, MISP, Tavily and the SMTP relay is the vendor's; the orchestrator sends well-formed requests from httpx, pycti and smtplib.
 - **pytm mitigations:** Design: Employ strict adherence to interpretations of HTTP messages wherever possible.Implementation: Encode header information provided by user input so that user-supplied content is not interpreted by intermediaries.
 
-#### F-421 — Privilege Abuse  `AC01`
+#### F-422 — Privilege Abuse  `AC01`
 
 - **Element:** OpenCTI backing stores (vendor)
 - **Response:** transferred — Authentication and authorisation inside Keycloak, OpenCTI, MISP, Tavily, oauth2-proxy and connector-misp are the vendor's.
 - **pytm mitigations:** Use strong authentication and authorization mechanisms. A proven protocol is OAuth 2.0, which enables a third-party application to obtain limited access to an API.
 
-#### F-422 — Shared Data Manipulation  `AC02`
+#### F-423 — Shared Data Manipulation  `AC02`
 
 - **Element:** OpenCTI backing stores (vendor)
 - **Response:** transferred — OpenCTI's backing stores (Elasticsearch, MinIO, RabbitMQ, Redis) are owned and hardened by the OpenCTI platform deployment.
 - **pytm mitigations:** Use strong authentication and authorization mechanisms. Use HTTPS/SSL for communication.
 
-#### F-423 — Excessive Allocation  `DO02`
+#### F-424 — Excessive Allocation  `DO02`
 
 - **Element:** OpenCTI backing stores (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Limit the amount of resources that are accessible to unprivileged users. Assume all input is malicious. Consider all potentially relevant properties when validating input. Consider uniformly throttling all requests in order to make it more difficult to consume resources more quickly than they can again be freed. Use resource-limiting settings, if possible.
 
-#### F-427 — Authentication Abuse/ByPass  `AA01`
+#### F-428 — Authentication Abuse/ByPass  `AA01`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — Authentication and authorisation inside Keycloak, OpenCTI, MISP, Tavily, oauth2-proxy and connector-misp are the vendor's.
 - **pytm mitigations:** Use strong authentication and authorization mechanisms. A proven protocol is OAuth 2.0, which enables a third-party application to obtain limited access to an API.
 
-#### F-428 — Double Encoding  `DE02`
+#### F-429 — Double Encoding  `DE02`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Assume all input is malicious. Create a white list that defines all valid input to the software system based on the requirements specifications. Input that does not match against the white list should not be permitted to enter into the system. Test your decoding process against malicious input. Be aware of the threat of alternative method of data encoding and obfuscation technique such as IP address encoding. When client input is required from web-based forms, avoid using the GET method to submit data, as the method causes the form data to be appended to the URL and is easily manipulated. Instead, use the POST method whenever possible. Any security checks should occur after the data has been decoded and validated as correct data format. Do not repeat decoding process, if bad character are left after decoding process, treat the data as suspicious, and fail the validation process.Refer to the RFCs to safely decode URL. Regular expression can be used to match safe URL patterns. However, that may discard valid URL requests if the regular expression is too restrictive. There are tools to scan HTTP requests to the server for valid URL such as URLScan from Microsoft (http://www.microsoft.com/technet/security/tools/urlscan.mspx).
 
-#### F-429 — Privilege Abuse  `AC01`
+#### F-430 — Privilege Abuse  `AC01`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — Authentication and authorisation inside Keycloak, OpenCTI, MISP, Tavily, oauth2-proxy and connector-misp are the vendor's.
 - **pytm mitigations:** Use strong authentication and authorization mechanisms. A proven protocol is OAuth 2.0, which enables a third-party application to obtain limited access to an API.
 
-#### F-431 — Flooding  `DO01`
+#### F-432 — Flooding  `DO01`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — Rate limiting of vendor services is the vendor's.
 - **pytm mitigations:** Ensure that protocols have specific limits of scale configured. Specify expectations for capabilities and dictate which behaviors are acceptable when resource allocation reaches limits. Uniformly throttle all requests in order to make it more difficult to consume resources more quickly than they can again be freed.
 
-#### F-432 — Excessive Allocation  `DO02`
+#### F-433 — Excessive Allocation  `DO02`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Limit the amount of resources that are accessible to unprivileged users. Assume all input is malicious. Consider all potentially relevant properties when validating input. Consider uniformly throttling all requests in order to make it more difficult to consume resources more quickly than they can again be freed. Use resource-limiting settings, if possible.
 
-#### F-436 — Input Data Manipulation  `INP14`
+#### F-437 — Input Data Manipulation  `INP14`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc.
 
-#### F-438 — Principal Spoof  `AA02`
+#### F-439 — Principal Spoof  `AA02`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — Authentication and authorisation inside Keycloak, OpenCTI, MISP, Tavily, oauth2-proxy and connector-misp are the vendor's.
 - **pytm mitigations:** Employ robust authentication processes (e.g., multi-factor authentication).
 
-#### F-442 — Hijacking a privileged process  `AC13`
+#### F-443 — Hijacking a privileged process  `AC13`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — oauth2-proxy and connector-misp run as their pinned vendor images ship them; what happens inside them is upstream code.
 - **pytm mitigations:** Very carefully manage the setting, management, and handling of privileges. Explicitly manage trust zones in the software. Follow the principle of least privilege when assigning access rights to entities in a software system. Implement separation of privilege - Require multiple conditions to be met before permitting access to a system resource.
 
-#### F-447 — XSS Targeting HTML Attributes  `INP27`
+#### F-448 — XSS Targeting HTML Attributes  `INP27`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Design: Use libraries and templates that minimize unfiltered input.Implementation: Normalize, filter and white list all input including that which is not expected to have any scripting content.Implementation: The victim should configure the browser to minimize active content from untrusted sources.
 
-#### F-449 — XSS Using Doubled Characters  `INP29`
+#### F-450 — XSS Using Doubled Characters  `INP29`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Design: Use libraries and templates that minimize unfiltered input.Implementation: Normalize, filter and sanitize all user supplied fields.Implementation: The victim should configure the browser to minimize active content from untrusted sources.
 
-#### F-450 — XSS Using Invalid Characters  `INP30`
+#### F-451 — XSS Using Invalid Characters  `INP30`
 
 - **Element:** connector-misp (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Design: Use libraries and templates that minimize unfiltered input.Implementation: Normalize, filter and white list any input that will be included in any subsequent web pages or back end operations.Implementation: The victim should configure the browser to minimize active content from untrusted sources.
 
-#### F-462 — Interception  `DE01`
+#### F-463 — Interception  `DE01`
 
 - **Element:** Operator session (OIDC, shipped overlay) (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-463 — Content Spoofing  `AC05`
+#### F-464 — Content Spoofing  `AC05`
 
 - **Element:** Operator session (OIDC, shipped overlay) (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-464 — Sniffing Attacks  `DE03`
+#### F-465 — Sniffing Attacks  `DE03`
 
 - **Element:** Operator session (OIDC, shipped overlay) (flow)
 - **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-466 — Client-Server Protocol Manipulation  `CR08`
+#### F-467 — Client-Server Protocol Manipulation  `CR08`
 
 - **Element:** Operator session (OIDC, shipped overlay) (flow)
-- **Response:** accepted — The orchestrator validates protocol, headers and content type on everything it serves and sends well-formed requests; manipulating a host-internal plaintext hop needs a position on the host (DS06).
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-472 — Interception  `DE01`
+#### F-473 — Interception  `DE01`
 
 - **Element:** Proxied console/API calls (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-473 — Content Spoofing  `AC05`
+#### F-474 — Content Spoofing  `AC05`
 
 - **Element:** Proxied console/API calls (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-474 — Sniffing Attacks  `DE03`
+#### F-475 — Sniffing Attacks  `DE03`
 
 - **Element:** Proxied console/API calls (flow)
 - **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-476 — Client-Server Protocol Manipulation  `CR08`
+#### F-477 — Client-Server Protocol Manipulation  `CR08`
 
 - **Element:** Proxied console/API calls (flow)
-- **Response:** accepted — The orchestrator validates protocol, headers and content type on everything it serves and sends well-formed requests; manipulating a host-internal plaintext hop needs a position on the host (DS06).
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-480 — Interception  `DE01`
+#### F-481 — Interception  `DE01`
 
 - **Element:** Token redeem / userinfo (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-481 — Content Spoofing  `AC05`
+#### F-482 — Content Spoofing  `AC05`
 
 - **Element:** Token redeem / userinfo (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-482 — Sniffing Attacks  `DE03`
+#### F-483 — Sniffing Attacks  `DE03`
 
 - **Element:** Token redeem / userinfo (flow)
 - **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-484 — Client-Server Protocol Manipulation  `CR08`
+#### F-485 — Client-Server Protocol Manipulation  `CR08`
 
 - **Element:** Token redeem / userinfo (flow)
-- **Response:** accepted — The orchestrator validates protocol, headers and content type on everything it serves and sends well-formed requests; manipulating a host-internal plaintext hop needs a position on the host (DS06).
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-487 — Interception  `DE01`
+#### F-489 — Interception  `DE01`
+
+- **Element:** Operator login (Keycloak authorization endpoint, shipped overlay) (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-490 — Content Spoofing  `AC05`
+
+- **Element:** Operator login (Keycloak authorization endpoint, shipped overlay) (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-491 — Sniffing Attacks  `DE03`
+
+- **Element:** Operator login (Keycloak authorization endpoint, shipped overlay) (flow)
+- **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-493 — Client-Server Protocol Manipulation  `CR08`
+
+- **Element:** Operator login (Keycloak authorization endpoint, shipped overlay) (flow)
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06).
+- **pytm mitigations:** Use strong authentication protocols.
+
+#### F-497 — Interception  `DE01`
 
 - **Element:** Direct loopback API/console (no overlay) (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-488 — Content Spoofing  `AC05`
+#### F-498 — Content Spoofing  `AC05`
 
 - **Element:** Direct loopback API/console (no overlay) (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-489 — Sniffing Attacks  `DE03`
+#### F-499 — Sniffing Attacks  `DE03`
 
 - **Element:** Direct loopback API/console (no overlay) (flow)
 - **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-491 — Client-Server Protocol Manipulation  `CR08`
+#### F-501 — Client-Server Protocol Manipulation  `CR08`
 
 - **Element:** Direct loopback API/console (no overlay) (flow)
-- **Response:** accepted — The orchestrator validates protocol, headers and content type on everything it serves and sends well-formed requests; manipulating a host-internal plaintext hop needs a position on the host (DS06).
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-495 — Interception  `DE01`
+#### F-505 — Interception  `DE01`
 
 - **Element:** GET /health, /metrics (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-496 — Content Spoofing  `AC05`
+#### F-506 — Content Spoofing  `AC05`
 
 - **Element:** GET /health, /metrics (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-497 — Sniffing Attacks  `DE03`
+#### F-507 — Sniffing Attacks  `DE03`
 
 - **Element:** GET /health, /metrics (flow)
 - **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-499 — Client-Server Protocol Manipulation  `CR08`
+#### F-509 — Client-Server Protocol Manipulation  `CR08`
 
 - **Element:** GET /health, /metrics (flow)
-- **Response:** accepted — The orchestrator validates protocol, headers and content type on everything it serves and sends well-formed requests; manipulating a host-internal plaintext hop needs a position on the host (DS06).
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-500 — Interception  `DE01`
+#### F-510 — Interception  `DE01`
 
 - **Element:** POST /bundles (STIX intake) (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-501 — Content Spoofing  `AC05`
+#### F-511 — Content Spoofing  `AC05`
 
 - **Element:** POST /bundles (STIX intake) (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-502 — Sniffing Attacks  `DE03`
+#### F-512 — Sniffing Attacks  `DE03`
 
 - **Element:** POST /bundles (STIX intake) (flow)
 - **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-504 — Client-Server Protocol Manipulation  `CR08`
+#### F-514 — Client-Server Protocol Manipulation  `CR08`
 
 - **Element:** POST /bundles (STIX intake) (flow)
-- **Response:** accepted — The orchestrator validates protocol, headers and content type on everything it serves and sends well-formed requests; manipulating a host-internal plaintext hop needs a position on the host (DS06).
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-508 — Interception  `DE01`
+#### F-518 — Interception  `DE01`
 
 - **Element:** Cron dispatch (in-process) (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-509 — Content Spoofing  `AC05`
+#### F-519 — Content Spoofing  `AC05`
 
 - **Element:** Cron dispatch (in-process) (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-510 — Sniffing Attacks  `DE03`
+#### F-520 — Sniffing Attacks  `DE03`
 
 - **Element:** Cron dispatch (in-process) (flow)
 - **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-512 — Client-Server Protocol Manipulation  `CR08`
+#### F-522 — Client-Server Protocol Manipulation  `CR08`
 
 - **Element:** Cron dispatch (in-process) (flow)
-- **Response:** accepted — The orchestrator validates protocol, headers and content type on everything it serves and sends well-formed requests; manipulating a host-internal plaintext hop needs a position on the host (DS06).
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-513 — Interception  `DE01`
+#### F-523 — Interception  `DE01`
 
 - **Element:** Scan control & results (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-514 — Content Spoofing  `AC05`
+#### F-524 — Content Spoofing  `AC05`
 
 - **Element:** Scan control & results (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-515 — Sniffing Attacks  `DE03`
+#### F-525 — Sniffing Attacks  `DE03`
 
 - **Element:** Scan control & results (flow)
 - **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-517 — Client-Server Protocol Manipulation  `CR08`
+#### F-527 — Client-Server Protocol Manipulation  `CR08`
 
 - **Element:** Scan control & results (flow)
-- **Response:** accepted — The orchestrator validates protocol, headers and content type on everything it serves and sends well-formed requests; manipulating a host-internal plaintext hop needs a position on the host (DS06).
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-520 — Interception  `DE01`
+#### F-530 — Interception  `DE01`
 
 - **Element:** Enumeration submit (oam_enum) (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-521 — Content Spoofing  `AC05`
+#### F-531 — Content Spoofing  `AC05`
 
 - **Element:** Enumeration submit (oam_enum) (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-522 — Sniffing Attacks  `DE03`
+#### F-532 — Sniffing Attacks  `DE03`
 
 - **Element:** Enumeration submit (oam_enum) (flow)
 - **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-524 — Client-Server Protocol Manipulation  `CR08`
+#### F-534 — Client-Server Protocol Manipulation  `CR08`
 
 - **Element:** Enumeration submit (oam_enum) (flow)
-- **Response:** accepted — The orchestrator validates protocol, headers and content type on everything it serves and sends well-formed requests; manipulating a host-internal plaintext hop needs a position on the host (DS06).
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-525 — Interception  `DE01`
+#### F-535 — Interception  `DE01`
 
 - **Element:** Engine writes asset.db (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-526 — Content Spoofing  `AC05`
+#### F-536 — Content Spoofing  `AC05`
 
 - **Element:** Engine writes asset.db (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-527 — Sniffing Attacks  `DE03`
+#### F-537 — Sniffing Attacks  `DE03`
 
 - **Element:** Engine writes asset.db (flow)
 - **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-529 — Client-Server Protocol Manipulation  `CR08`
+#### F-539 — Client-Server Protocol Manipulation  `CR08`
 
 - **Element:** Engine writes asset.db (flow)
-- **Response:** accepted — The orchestrator validates protocol, headers and content type on everything it serves and sends well-formed requests; manipulating a host-internal plaintext hop needs a position on the host (DS06).
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-532 — Interception  `DE01`
+#### F-542 — Interception  `DE01`
 
 - **Element:** Read discovered names (oam_subs, shared volume) (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-533 — Content Spoofing  `AC05`
+#### F-543 — Content Spoofing  `AC05`
 
 - **Element:** Read discovered names (oam_subs, shared volume) (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-534 — Sniffing Attacks  `DE03`
+#### F-544 — Sniffing Attacks  `DE03`
 
 - **Element:** Read discovered names (oam_subs, shared volume) (flow)
 - **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-536 — Client-Server Protocol Manipulation  `CR08`
+#### F-546 — Client-Server Protocol Manipulation  `CR08`
 
 - **Element:** Read discovered names (oam_subs, shared volume) (flow)
-- **Response:** accepted — The orchestrator validates protocol, headers and content type on everything it serves and sends well-formed requests; manipulating a host-internal plaintext hop needs a position on the host (DS06).
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-539 — Interception  `DE01`
+#### F-549 — Interception  `DE01`
 
 - **Element:** Platform collection jobs (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-540 — Content Spoofing  `AC05`
+#### F-550 — Content Spoofing  `AC05`
 
 - **Element:** Platform collection jobs (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-541 — Sniffing Attacks  `DE03`
+#### F-551 — Sniffing Attacks  `DE03`
 
 - **Element:** Platform collection jobs (flow)
 - **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-543 — Client-Server Protocol Manipulation  `CR08`
+#### F-553 — Client-Server Protocol Manipulation  `CR08`
 
 - **Element:** Platform collection jobs (flow)
-- **Response:** accepted — The orchestrator validates protocol, headers and content type on everything it serves and sends well-formed requests; manipulating a host-internal plaintext hop needs a position on the host (DS06).
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-546 — Interception  `DE01`
+#### F-556 — Interception  `DE01`
 
-- **Element:** Due-diligence queries (flow)
+- **Element:** SocialOSINT text and vision prompts (own endpoint and key) (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-547 — Content Spoofing  `AC05`
+#### F-557 — Content Spoofing  `AC05`
 
-- **Element:** Due-diligence queries (flow)
+- **Element:** SocialOSINT text and vision prompts (own endpoint and key) (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-548 — Sniffing Attacks  `DE03`
+#### F-558 — Sniffing Attacks  `DE03`
 
-- **Element:** Due-diligence queries (flow)
-- **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
-- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
-
-#### F-552 — Interception  `DE01`
-
-- **Element:** Active reconnaissance (flow)
-- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
-- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
-
-#### F-553 — Content Spoofing  `AC05`
-
-- **Element:** Active reconnaissance (flow)
-- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
-- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
-
-#### F-554 — Sniffing Attacks  `DE03`
-
-- **Element:** Active reconnaissance (flow)
-- **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
-- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
-
-#### F-557 — Interception  `DE01`
-
-- **Element:** Passive collection (OpenOSINT) (flow)
-- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
-- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
-
-#### F-558 — Content Spoofing  `AC05`
-
-- **Element:** Passive collection (OpenOSINT) (flow)
-- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
-- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
-
-#### F-559 — Sniffing Attacks  `DE03`
-
-- **Element:** Passive collection (OpenOSINT) (flow)
+- **Element:** SocialOSINT text and vision prompts (own endpoint and key) (flow)
 - **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
 #### F-562 — Interception  `DE01`
 
-- **Element:** Qualification & synthesis prompts (local) (flow)
+- **Element:** Platform collection (operator's API tokens) (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
 #### F-563 — Content Spoofing  `AC05`
 
-- **Element:** Qualification & synthesis prompts (local) (flow)
+- **Element:** Platform collection (operator's API tokens) (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
 #### F-564 — Sniffing Attacks  `DE03`
 
+- **Element:** Platform collection (operator's API tokens) (flow)
+- **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-568 — Interception  `DE01`
+
+- **Element:** Due-diligence queries (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-569 — Content Spoofing  `AC05`
+
+- **Element:** Due-diligence queries (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-570 — Sniffing Attacks  `DE03`
+
+- **Element:** Due-diligence queries (flow)
+- **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-574 — Interception  `DE01`
+
+- **Element:** Active reconnaissance (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-575 — Content Spoofing  `AC05`
+
+- **Element:** Active reconnaissance (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-576 — Sniffing Attacks  `DE03`
+
+- **Element:** Active reconnaissance (flow)
+- **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-579 — Interception  `DE01`
+
+- **Element:** Passive collection (OpenOSINT) (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-580 — Content Spoofing  `AC05`
+
+- **Element:** Passive collection (OpenOSINT) (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-581 — Sniffing Attacks  `DE03`
+
+- **Element:** Passive collection (OpenOSINT) (flow)
+- **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-584 — Interception  `DE01`
+
+- **Element:** Qualification & synthesis prompts (local) (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-585 — Content Spoofing  `AC05`
+
+- **Element:** Qualification & synthesis prompts (local) (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-586 — Sniffing Attacks  `DE03`
+
 - **Element:** Qualification & synthesis prompts (local) (flow)
 - **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-566 — Client-Server Protocol Manipulation  `CR08`
+#### F-588 — Client-Server Protocol Manipulation  `CR08`
 
 - **Element:** Qualification & synthesis prompts (local) (flow)
-- **Response:** accepted — The orchestrator validates protocol, headers and content type on everything it serves and sends well-formed requests; manipulating a host-internal plaintext hop needs a position on the host (DS06).
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-569 — Interception  `DE01`
+#### F-591 — Interception  `DE01`
 
 - **Element:** Qualification & synthesis prompts (cloud) (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-570 — Content Spoofing  `AC05`
+#### F-592 — Content Spoofing  `AC05`
 
 - **Element:** Qualification & synthesis prompts (cloud) (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-571 — Sniffing Attacks  `DE03`
+#### F-593 — Sniffing Attacks  `DE03`
 
 - **Element:** Qualification & synthesis prompts (cloud) (flow)
 - **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-575 — Interception  `DE01`
+#### F-597 — Interception  `DE01`
 
 - **Element:** Run/state SQL (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-576 — Content Spoofing  `AC05`
+#### F-598 — Content Spoofing  `AC05`
 
 - **Element:** Run/state SQL (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-577 — Sniffing Attacks  `DE03`
+#### F-599 — Sniffing Attacks  `DE03`
 
 - **Element:** Run/state SQL (flow)
 - **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-579 — Client-Server Protocol Manipulation  `CR08`
+#### F-601 — Client-Server Protocol Manipulation  `CR08`
 
 - **Element:** Run/state SQL (flow)
-- **Response:** accepted — The orchestrator validates protocol, headers and content type on everything it serves and sends well-formed requests; manipulating a host-internal plaintext hop needs a position on the host (DS06).
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-582 — Interception  `DE01`
+#### F-604 — Interception  `DE01`
 
 - **Element:** Seal run artefacts + manifest (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-583 — Content Spoofing  `AC05`
+#### F-605 — Content Spoofing  `AC05`
 
 - **Element:** Seal run artefacts + manifest (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-584 — Sniffing Attacks  `DE03`
+#### F-606 — Sniffing Attacks  `DE03`
 
 - **Element:** Seal run artefacts + manifest (flow)
 - **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-586 — Client-Server Protocol Manipulation  `CR08`
+#### F-608 — Client-Server Protocol Manipulation  `CR08`
 
 - **Element:** Seal run artefacts + manifest (flow)
-- **Response:** accepted — The orchestrator validates protocol, headers and content type on everything it serves and sends well-formed requests; manipulating a host-internal plaintext hop needs a position on the host (DS06).
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-589 — Interception  `DE01`
+#### F-611 — Interception  `DE01`
 
 - **Element:** Read target inventory (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-590 — Content Spoofing  `AC05`
+#### F-612 — Content Spoofing  `AC05`
 
 - **Element:** Read target inventory (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-591 — Sniffing Attacks  `DE03`
+#### F-613 — Sniffing Attacks  `DE03`
 
 - **Element:** Read target inventory (flow)
 - **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-593 — Client-Server Protocol Manipulation  `CR08`
+#### F-615 — Client-Server Protocol Manipulation  `CR08`
 
 - **Element:** Read target inventory (flow)
-- **Response:** accepted — The orchestrator validates protocol, headers and content type on everything it serves and sends well-formed requests; manipulating a host-internal plaintext hop needs a position on the host (DS06).
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-594 — Interception  `DE01`
+#### F-616 — Interception  `DE01`
 
 - **Element:** STIX ingest (pycti, outbox retries) (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-595 — Content Spoofing  `AC05`
+#### F-617 — Content Spoofing  `AC05`
 
 - **Element:** STIX ingest (pycti, outbox retries) (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-596 — Sniffing Attacks  `DE03`
+#### F-618 — Sniffing Attacks  `DE03`
 
 - **Element:** STIX ingest (pycti, outbox retries) (flow)
 - **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-598 — Client-Server Protocol Manipulation  `CR08`
+#### F-620 — Client-Server Protocol Manipulation  `CR08`
 
 - **Element:** STIX ingest (pycti, outbox retries) (flow)
-- **Response:** accepted — The orchestrator validates protocol, headers and content type on everything it serves and sends well-formed requests; manipulating a host-internal plaintext hop needs a position on the host (DS06).
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-602 — Interception  `DE01`
+#### F-624 — Interception  `DE01`
 
-- **Element:** Index/object/queue traffic (flow)
+- **Element:** Elasticsearch indices (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-603 — Content Spoofing  `AC05`
+#### F-625 — Content Spoofing  `AC05`
 
-- **Element:** Index/object/queue traffic (flow)
+- **Element:** Elasticsearch indices (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-604 — Sniffing Attacks  `DE03`
+#### F-626 — Sniffing Attacks  `DE03`
 
-- **Element:** Index/object/queue traffic (flow)
+- **Element:** Elasticsearch indices (flow)
 - **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-606 — Client-Server Protocol Manipulation  `CR08`
+#### F-628 — Client-Server Protocol Manipulation  `CR08`
 
-- **Element:** Index/object/queue traffic (flow)
-- **Response:** accepted — The orchestrator validates protocol, headers and content type on everything it serves and sends well-formed requests; manipulating a host-internal plaintext hop needs a position on the host (DS06).
+- **Element:** Elasticsearch indices (flow)
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-609 — Interception  `DE01`
+#### F-631 — Interception  `DE01`
+
+- **Element:** MinIO objects (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-632 — Content Spoofing  `AC05`
+
+- **Element:** MinIO objects (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-633 — Sniffing Attacks  `DE03`
+
+- **Element:** MinIO objects (flow)
+- **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-635 — Client-Server Protocol Manipulation  `CR08`
+
+- **Element:** MinIO objects (flow)
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06).
+- **pytm mitigations:** Use strong authentication protocols.
+
+#### F-639 — Interception  `DE01`
+
+- **Element:** RabbitMQ queues (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-640 — Content Spoofing  `AC05`
+
+- **Element:** RabbitMQ queues (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-641 — Sniffing Attacks  `DE03`
+
+- **Element:** RabbitMQ queues (flow)
+- **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-643 — Client-Server Protocol Manipulation  `CR08`
+
+- **Element:** RabbitMQ queues (flow)
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06).
+- **pytm mitigations:** Use strong authentication protocols.
+
+#### F-647 — Interception  `DE01`
+
+- **Element:** Redis cache (no authentication) (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-648 — Content Spoofing  `AC05`
+
+- **Element:** Redis cache (no authentication) (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-649 — Sniffing Attacks  `DE03`
+
+- **Element:** Redis cache (no authentication) (flow)
+- **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-651 — Client-Server Protocol Manipulation  `CR08`
+
+- **Element:** Redis cache (no authentication) (flow)
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06).
+- **pytm mitigations:** Use strong authentication protocols.
+
+#### F-654 — Interception  `DE01`
 
 - **Element:** connector-misp polls MISP events (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-610 — Content Spoofing  `AC05`
+#### F-655 — Content Spoofing  `AC05`
 
 - **Element:** connector-misp polls MISP events (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-611 — Sniffing Attacks  `DE03`
+#### F-656 — Sniffing Attacks  `DE03`
 
 - **Element:** connector-misp polls MISP events (flow)
 - **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-615 — Interception  `DE01`
+#### F-660 — Interception  `DE01`
 
 - **Element:** connector-misp writes to OpenCTI (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-616 — Content Spoofing  `AC05`
+#### F-661 — Content Spoofing  `AC05`
 
 - **Element:** connector-misp writes to OpenCTI (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-617 — Sniffing Attacks  `DE03`
+#### F-662 — Sniffing Attacks  `DE03`
 
 - **Element:** connector-misp writes to OpenCTI (flow)
 - **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-619 — Client-Server Protocol Manipulation  `CR08`
+#### F-664 — Client-Server Protocol Manipulation  `CR08`
 
 - **Element:** connector-misp writes to OpenCTI (flow)
-- **Response:** accepted — The orchestrator validates protocol, headers and content type on everything it serves and sends well-formed requests; manipulating a host-internal plaintext hop needs a position on the host (DS06).
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-623 — Interception  `DE01`
+#### F-668 — Interception  `DE01`
 
 - **Element:** Alert webhook (ALERT_WEBHOOK_URL) (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-624 — Content Spoofing  `AC05`
+#### F-669 — Content Spoofing  `AC05`
 
 - **Element:** Alert webhook (ALERT_WEBHOOK_URL) (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-625 — Sniffing Attacks  `DE03`
+#### F-670 — Sniffing Attacks  `DE03`
 
 - **Element:** Alert webhook (ALERT_WEBHOOK_URL) (flow)
 - **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-628 — Interception  `DE01`
+#### F-673 — Interception  `DE01`
 
 - **Element:** Alert e-mail (SMTP, STARTTLS by default) (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; everything that leaves the host is TLS.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-629 — Content Spoofing  `AC05`
+#### F-674 — Content Spoofing  `AC05`
 
 - **Element:** Alert e-mail (SMTP, STARTTLS by default) (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06).
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-630 — Sniffing Attacks  `DE03`
+#### F-675 — Sniffing Attacks  `DE03`
 
 - **Element:** Alert e-mail (SMTP, STARTTLS by default) (flow)
 - **Response:** accepted — Same boundary argument as DE01: sniffing requires host compromise, which is out of the modelled scope.
@@ -3838,103 +4110,103 @@ Every finding carries a triage response:
 - **Response:** accepted — Nothing is encrypted at rest to brute-force (DR01).
 - **pytm mitigations:** Use commonly accepted algorithms and recommended key sizes. The key size used will depend on how important it is to keep the data confidential and for how long.In theory a brute force attack performing an exhaustive key space search will always succeed, so the goal is to have computational security. Moore's law needs to be taken into account that suggests that computing resources double every eighteen months.
 
-#### F-199 — Encryption Brute Forcing  `CR05`
+#### F-200 — Encryption Brute Forcing  `CR05`
 
 - **Element:** Amass asset database (shared volume) (store)
 - **Response:** accepted — Nothing is encrypted at rest to brute-force (DR01).
 - **pytm mitigations:** Use commonly accepted algorithms and recommended key sizes. The key size used will depend on how important it is to keep the data confidential and for how long.In theory a brute force attack performing an exhaustive key space search will always succeed, so the goal is to have computational security. Moore's law needs to be taken into account that suggests that computing resources double every eighteen months.
 
-#### F-218 — Web Application Fingerprinting  `HA03`
+#### F-219 — Web Application Fingerprinting  `HA03`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — SpiderFoot's unauthenticated UI is upstream design; compose publishes it on loopback only, limiting fingerprinting to the host itself.
 - **pytm mitigations:** Implementation: Obfuscate server fields of HTTP response.Implementation: Hide inner ordering of HTTP response header.Implementation: Customizing HTTP error codes such as 404 or 500.Implementation: Hide URL file extension.Implementation: Hide HTTP response header software information filed.Implementation: Hide cookie's software information filed.Implementation: Appropriately deal with error messages.Implementation: Obfuscate database type in Database API's error message.
 
-#### F-226 — Encryption Brute Forcing  `CR05`
+#### F-227 — Encryption Brute Forcing  `CR05`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — Nothing is encrypted at rest to brute-force (DR01); the orchestrator's keys and HMACs are 128-256-bit CSPRNG material.
 - **pytm mitigations:** Use commonly accepted algorithms and recommended key sizes. The key size used will depend on how important it is to keep the data confidential and for how long.In theory a brute force attack performing an exhaustive key space search will always succeed, so the goal is to have computational security. Moore's law needs to be taken into account that suggests that computing resources double every eighteen months.
 
-#### F-232 — Fuzzing and observing application log data/errors for application mapping  `INP18`
+#### F-233 — Fuzzing and observing application log data/errors for application mapping  `INP18`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Design: Construct a 'code book' for error messages. When using a code book, application error messages aren't generated in string or stack trace form, but are catalogued and replaced with a unique (often integer-based) value 'coding' for the error. Such a technique will require helpdesk and hosting personnel to use a 'code book' or similar mapping to decode application errors/logs in order to respond to them normally.Design: wrap application functionality (preferably through the underlying framework) in an output encoding scheme that obscures or cleanses error messages to prevent such attacks. Such a technique is often used in conjunction with the above 'code book' suggestion.Implementation: Obfuscate server fields of HTTP response.Implementation: Hide inner ordering of HTTP response header.Implementation: Customizing HTTP error codes such as 404 or 500.Implementation: Hide HTTP response header software information filed.Implementation: Hide cookie's software information filed.Implementation: Obfuscate database type in Database API's error message.
 
-#### F-262 — Web Application Fingerprinting  `HA03`
+#### F-263 — Web Application Fingerprinting  `HA03`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — SpiderFoot's unauthenticated UI is upstream design; compose publishes it on loopback only, limiting fingerprinting to the host itself.
 - **pytm mitigations:** Implementation: Obfuscate server fields of HTTP response.Implementation: Hide inner ordering of HTTP response header.Implementation: Customizing HTTP error codes such as 404 or 500.Implementation: Hide URL file extension.Implementation: Hide HTTP response header software information filed.Implementation: Hide cookie's software information filed.Implementation: Appropriately deal with error messages.Implementation: Obfuscate database type in Database API's error message.
 
-#### F-270 — Encryption Brute Forcing  `CR05`
+#### F-271 — Encryption Brute Forcing  `CR05`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — Nothing is encrypted at rest to brute-force (DR01); the orchestrator's keys and HMACs are 128-256-bit CSPRNG material.
 - **pytm mitigations:** Use commonly accepted algorithms and recommended key sizes. The key size used will depend on how important it is to keep the data confidential and for how long.In theory a brute force attack performing an exhaustive key space search will always succeed, so the goal is to have computational security. Moore's law needs to be taken into account that suggests that computing resources double every eighteen months.
 
-#### F-276 — Fuzzing and observing application log data/errors for application mapping  `INP18`
+#### F-277 — Fuzzing and observing application log data/errors for application mapping  `INP18`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Design: Construct a 'code book' for error messages. When using a code book, application error messages aren't generated in string or stack trace form, but are catalogued and replaced with a unique (often integer-based) value 'coding' for the error. Such a technique will require helpdesk and hosting personnel to use a 'code book' or similar mapping to decode application errors/logs in order to respond to them normally.Design: wrap application functionality (preferably through the underlying framework) in an output encoding scheme that obscures or cleanses error messages to prevent such attacks. Such a technique is often used in conjunction with the above 'code book' suggestion.Implementation: Obfuscate server fields of HTTP response.Implementation: Hide inner ordering of HTTP response header.Implementation: Customizing HTTP error codes such as 404 or 500.Implementation: Hide HTTP response header software information filed.Implementation: Hide cookie's software information filed.Implementation: Obfuscate database type in Database API's error message.
 
-#### F-306 — Web Application Fingerprinting  `HA03`
+#### F-307 — Web Application Fingerprinting  `HA03`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — SpiderFoot's unauthenticated UI is upstream design; compose publishes it on loopback only, limiting fingerprinting to the host itself.
 - **pytm mitigations:** Implementation: Obfuscate server fields of HTTP response.Implementation: Hide inner ordering of HTTP response header.Implementation: Customizing HTTP error codes such as 404 or 500.Implementation: Hide URL file extension.Implementation: Hide HTTP response header software information filed.Implementation: Hide cookie's software information filed.Implementation: Appropriately deal with error messages.Implementation: Obfuscate database type in Database API's error message.
 
-#### F-314 — Encryption Brute Forcing  `CR05`
+#### F-315 — Encryption Brute Forcing  `CR05`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — Nothing is encrypted at rest to brute-force (DR01); the orchestrator's keys and HMACs are 128-256-bit CSPRNG material.
 - **pytm mitigations:** Use commonly accepted algorithms and recommended key sizes. The key size used will depend on how important it is to keep the data confidential and for how long.In theory a brute force attack performing an exhaustive key space search will always succeed, so the goal is to have computational security. Moore's law needs to be taken into account that suggests that computing resources double every eighteen months.
 
-#### F-320 — Fuzzing and observing application log data/errors for application mapping  `INP18`
+#### F-321 — Fuzzing and observing application log data/errors for application mapping  `INP18`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current.
 - **pytm mitigations:** Design: Construct a 'code book' for error messages. When using a code book, application error messages aren't generated in string or stack trace form, but are catalogued and replaced with a unique (often integer-based) value 'coding' for the error. Such a technique will require helpdesk and hosting personnel to use a 'code book' or similar mapping to decode application errors/logs in order to respond to them normally.Design: wrap application functionality (preferably through the underlying framework) in an output encoding scheme that obscures or cleanses error messages to prevent such attacks. Such a technique is often used in conjunction with the above 'code book' suggestion.Implementation: Obfuscate server fields of HTTP response.Implementation: Hide inner ordering of HTTP response header.Implementation: Customizing HTTP error codes such as 404 or 500.Implementation: Hide HTTP response header software information filed.Implementation: Hide cookie's software information filed.Implementation: Obfuscate database type in Database API's error message.
 
-#### F-351 — Web Application Fingerprinting  `HA03`
+#### F-352 — Web Application Fingerprinting  `HA03`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — Fingerprinting a vendor service is the vendor's concern; Keycloak, OpenCTI and MISP are loopback-only here, Tavily and the SMTP relay are public services.
 - **pytm mitigations:** Implementation: Obfuscate server fields of HTTP response.Implementation: Hide inner ordering of HTTP response header.Implementation: Customizing HTTP error codes such as 404 or 500.Implementation: Hide URL file extension.Implementation: Hide HTTP response header software information filed.Implementation: Hide cookie's software information filed.Implementation: Appropriately deal with error messages.Implementation: Obfuscate database type in Database API's error message.
 
-#### F-358 — Encryption Brute Forcing  `CR05`
+#### F-359 — Encryption Brute Forcing  `CR05`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — Cryptography inside vendor services is the vendor's.
 - **pytm mitigations:** Use commonly accepted algorithms and recommended key sizes. The key size used will depend on how important it is to keep the data confidential and for how long.In theory a brute force attack performing an exhaustive key space search will always succeed, so the goal is to have computational security. Moore's law needs to be taken into account that suggests that computing resources double every eighteen months.
 
-#### F-364 — Fuzzing and observing application log data/errors for application mapping  `INP18`
+#### F-365 — Fuzzing and observing application log data/errors for application mapping  `INP18`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Design: Construct a 'code book' for error messages. When using a code book, application error messages aren't generated in string or stack trace form, but are catalogued and replaced with a unique (often integer-based) value 'coding' for the error. Such a technique will require helpdesk and hosting personnel to use a 'code book' or similar mapping to decode application errors/logs in order to respond to them normally.Design: wrap application functionality (preferably through the underlying framework) in an output encoding scheme that obscures or cleanses error messages to prevent such attacks. Such a technique is often used in conjunction with the above 'code book' suggestion.Implementation: Obfuscate server fields of HTTP response.Implementation: Hide inner ordering of HTTP response header.Implementation: Customizing HTTP error codes such as 404 or 500.Implementation: Hide HTTP response header software information filed.Implementation: Hide cookie's software information filed.Implementation: Obfuscate database type in Database API's error message.
 
-#### F-394 — Web Application Fingerprinting  `HA03`
+#### F-395 — Web Application Fingerprinting  `HA03`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Fingerprinting a vendor service is the vendor's concern; Keycloak, OpenCTI and MISP are loopback-only here, Tavily and the SMTP relay are public services.
 - **pytm mitigations:** Implementation: Obfuscate server fields of HTTP response.Implementation: Hide inner ordering of HTTP response header.Implementation: Customizing HTTP error codes such as 404 or 500.Implementation: Hide URL file extension.Implementation: Hide HTTP response header software information filed.Implementation: Hide cookie's software information filed.Implementation: Appropriately deal with error messages.Implementation: Obfuscate database type in Database API's error message.
 
-#### F-402 — Encryption Brute Forcing  `CR05`
+#### F-403 — Encryption Brute Forcing  `CR05`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Cryptography inside vendor services is the vendor's.
 - **pytm mitigations:** Use commonly accepted algorithms and recommended key sizes. The key size used will depend on how important it is to keep the data confidential and for how long.In theory a brute force attack performing an exhaustive key space search will always succeed, so the goal is to have computational security. Moore's law needs to be taken into account that suggests that computing resources double every eighteen months.
 
-#### F-407 — Fuzzing and observing application log data/errors for application mapping  `INP18`
+#### F-408 — Fuzzing and observing application log data/errors for application mapping  `INP18`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves.
 - **pytm mitigations:** Design: Construct a 'code book' for error messages. When using a code book, application error messages aren't generated in string or stack trace form, but are catalogued and replaced with a unique (often integer-based) value 'coding' for the error. Such a technique will require helpdesk and hosting personnel to use a 'code book' or similar mapping to decode application errors/logs in order to respond to them normally.Design: wrap application functionality (preferably through the underlying framework) in an output encoding scheme that obscures or cleanses error messages to prevent such attacks. Such a technique is often used in conjunction with the above 'code book' suggestion.Implementation: Obfuscate server fields of HTTP response.Implementation: Hide inner ordering of HTTP response header.Implementation: Customizing HTTP error codes such as 404 or 500.Implementation: Hide HTTP response header software information filed.Implementation: Hide cookie's software information filed.Implementation: Obfuscate database type in Database API's error message.
 
-#### F-424 — Encryption Brute Forcing  `CR05`
+#### F-425 — Encryption Brute Forcing  `CR05`
 
 - **Element:** OpenCTI backing stores (vendor)
 - **Response:** transferred — Cryptography inside vendor services is the vendor's.
@@ -3960,31 +4232,31 @@ Every finding carries a triage response:
 - **Response:** transferred — Footprinting a vendor service is the vendor's concern; the loopback-only ones expose no external surface from this deployment.
 - **pytm mitigations:** Keep patches up to date by installing weekly or daily if possible.Shut down unnecessary services/ports.Change default passwords by choosing strong passwords.Curtail unexpected input.Encrypt and password-protect sensitive data.Avoid including information that has the potential to identify and compromise your organization's security such as access to business plans, formulas, and proprietary documents.
 
-#### F-216 — Footprinting  `DS03`
+#### F-217 — Footprinting  `DS03`
 
 - **Element:** SpiderFoot (sidecar)
 - **Response:** accepted — Footprinting of the loopback-only SpiderFoot service yields no external surface; documented in compose comments.
 - **pytm mitigations:** Keep patches up to date by installing weekly or daily if possible.Shut down unnecessary services/ports.Change default passwords by choosing strong passwords.Curtail unexpected input.Encrypt and password-protect sensitive data.Avoid including information that has the potential to identify and compromise your organization's security such as access to business plans, formulas, and proprietary documents.
 
-#### F-260 — Footprinting  `DS03`
+#### F-261 — Footprinting  `DS03`
 
 - **Element:** Amass v5 engine (sidecar)
 - **Response:** accepted — Footprinting of the loopback-only SpiderFoot service yields no external surface; documented in compose comments.
 - **pytm mitigations:** Keep patches up to date by installing weekly or daily if possible.Shut down unnecessary services/ports.Change default passwords by choosing strong passwords.Curtail unexpected input.Encrypt and password-protect sensitive data.Avoid including information that has the potential to identify and compromise your organization's security such as access to business plans, formulas, and proprietary documents.
 
-#### F-304 — Footprinting  `DS03`
+#### F-305 — Footprinting  `DS03`
 
 - **Element:** SocialOSINT sidecar (sidecar)
 - **Response:** accepted — Footprinting of the loopback-only SpiderFoot service yields no external surface; documented in compose comments.
 - **pytm mitigations:** Keep patches up to date by installing weekly or daily if possible.Shut down unnecessary services/ports.Change default passwords by choosing strong passwords.Curtail unexpected input.Encrypt and password-protect sensitive data.Avoid including information that has the potential to identify and compromise your organization's security such as access to business plans, formulas, and proprietary documents.
 
-#### F-349 — Footprinting  `DS03`
+#### F-350 — Footprinting  `DS03`
 
 - **Element:** MISP (vendor)
 - **Response:** transferred — Footprinting a vendor service is the vendor's concern; the loopback-only ones expose no external surface from this deployment.
 - **pytm mitigations:** Keep patches up to date by installing weekly or daily if possible.Shut down unnecessary services/ports.Change default passwords by choosing strong passwords.Curtail unexpected input.Encrypt and password-protect sensitive data.Avoid including information that has the potential to identify and compromise your organization's security such as access to business plans, formulas, and proprietary documents.
 
-#### F-392 — Footprinting  `DS03`
+#### F-393 — Footprinting  `DS03`
 
 - **Element:** OpenCTI platform (vendor)
 - **Response:** transferred — Footprinting a vendor service is the vendor's concern; the loopback-only ones expose no external surface from this deployment.

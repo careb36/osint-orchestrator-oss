@@ -87,6 +87,9 @@ tm.assumptions = [
     "Collectors only query targets authorised in targets.yaml (operator attestation per target).",
     "OpenCTI, MISP, Amass, SocialOSINT and the OIDC overlay are optional deployments; the model "
     "covers them when enabled.",
+    "ORCHESTRATOR_SECRET_KEY is a private, randomly generated value. The default "
+    "insecure-dev-key only earns a startup warning (auth.py); with it, or with an empty key, "
+    "anyone can forge a manifest, and the integrity claims of this model do not hold.",
 ]
 
 # ── Boundaries ──────────────────────────────────────────────────────────────
@@ -136,6 +139,55 @@ smtp_credentials = Data(
     description="Optional SMTP AUTH credentials of the alert mailer.",
     isCredentials=True,
     credentialsLife=Lifetime.MANUAL,
+    classification=Classification.SECRET,
+)
+keycloak_password = Data(
+    name="Operator Keycloak credentials",
+    description="Username and password typed into Keycloak's login page behind the OIDC overlay.",
+    isCredentials=True,
+    credentialsLife=Lifetime.MANUAL,
+    classification=Classification.SECRET,
+)
+oidc_client_secret = Data(
+    name="AUTH_CLIENT_SECRET",
+    description="oauth2-proxy's OIDC client secret for the Keycloak token endpoint.",
+    isCredentials=True,
+    credentialsLife=Lifetime.LONG,
+    classification=Classification.SECRET,
+)
+oidc_tokens = Data(
+    name="OIDC tokens",
+    description="Authorization code, access and ID tokens exchanged with Keycloak.",
+    isCredentials=True,
+    credentialsLife=Lifetime.SHORT,
+    classification=Classification.SECRET,
+)
+socialosint_llm_key = Data(
+    name="SOCIALOSINT_LLM_API_KEY",
+    description="SocialOSINT's own LLM endpoint key (text and vision analysis).",
+    isCredentials=True,
+    credentialsLife=Lifetime.MANUAL,
+    classification=Classification.SECRET,
+)
+platform_credentials = Data(
+    name="SocialOSINT platform tokens",
+    description="Twitter, Reddit, GitHub, Bluesky and Mastodon credentials the sidecar collects with.",
+    isCredentials=True,
+    credentialsLife=Lifetime.LONG,
+    classification=Classification.SECRET,
+)
+minio_credentials = Data(
+    name="MINIO_ROOT_USER / MINIO_ROOT_PASSWORD",
+    description="OpenCTI's object-store credentials.",
+    isCredentials=True,
+    credentialsLife=Lifetime.LONG,
+    classification=Classification.SECRET,
+)
+rabbitmq_credentials = Data(
+    name="RABBITMQ_DEFAULT_USER / RABBITMQ_DEFAULT_PASS",
+    description="OpenCTI's queue credentials.",
+    isCredentials=True,
+    credentialsLife=Lifetime.LONG,
     classification=Classification.SECRET,
 )
 operator_session = Data(
@@ -196,6 +248,10 @@ webhook_receiver.description = (
     "ALERT_WEBHOOK_URL (Slack, Teams, Discord or a custom endpoint). The payload is signed "
     "with HMAC-SHA256 only when ALERT_WEBHOOK_SECRET is set."
 )
+
+social_platforms = ExternalEntity("Social platforms")
+social_platforms.inBoundary = internet
+social_platforms.description = "Twitter, Reddit, GitHub, Bluesky, Mastodon: SocialOSINT's sources."
 
 tavily = Server("Tavily search API")
 tavily.inBoundary = internet
@@ -264,7 +320,7 @@ ORCHESTRATOR_CONTROLS = dict(
     validatesInput=True,
     sanitizesInput=True,  # collected text reaches models delimited and flattened
     validatesHeaders=True,
-    validatesContentType=True,
+    validatesContentType=False,  # POST /bundles parses request.json() without checking it
     implementsStrictHTTPValidation=True,
     encodesOutput=True,  # React escaping + strict CSP, no inline script
     disablesiFrames=True,  # CSP frame-ancestors 'none'
@@ -316,6 +372,7 @@ amass_db.description = (
     "from the orchestrator image."
 )
 amass_db.isSQL = True
+amass_db.isShared = True  # amass-data is mounted read-write by the engine and the orchestrator
 amass_db.controls = Controls(isEncryptedAtRest=False)
 
 spiderfoot = Server("SpiderFoot")
@@ -398,7 +455,7 @@ CLASSES: dict[str, list] = {
         connector_misp,
     ],
     "store": [sqlite, targets_yaml, reports, amass_db],
-    "actor": [operator, anonymous, stix_producer, public_web],
+    "actor": [operator, anonymous, stix_producer, public_web, social_platforms],
 }
 CLASS_OF = {el.name: cls for cls, els in CLASSES.items() for el in els}
 
@@ -435,7 +492,16 @@ flow(
     "Token redeem / userinfo",
     protocol="HTTP",
     tlsVersion=TLSVersion.NONE,
-    data=[operator_session],
+    data=[oidc_client_secret, oidc_tokens],
+    controls=Controls(isEncrypted=False, authenticatesDestination=False),
+)
+flow(
+    operator,
+    keycloak,
+    "Operator login (Keycloak authorization endpoint, shipped overlay)",
+    protocol="HTTP",
+    tlsVersion=TLSVersion.NONE,
+    data=[keycloak_password, oidc_tokens],
     controls=Controls(isEncrypted=False, authenticatesDestination=False),
 )
 flow(
@@ -514,6 +580,24 @@ flow(
     tlsVersion=TLSVersion.NONE,
     data=[evidence],
     controls=Controls(isEncrypted=False, authenticatesDestination=False),
+)
+flow(
+    socialosint,
+    cloud_llm,
+    "SocialOSINT text and vision prompts (own endpoint and key)",
+    protocol="HTTPS",
+    tlsVersion=TLSVersion.TLSv12,
+    data=[socialosint_llm_key, evidence],
+    controls=Controls(isEncrypted=True, authenticatesDestination=True),
+)
+flow(
+    socialosint,
+    social_platforms,
+    "Platform collection (operator's API tokens)",
+    protocol="HTTPS",
+    tlsVersion=TLSVersion.TLSv12,
+    data=[platform_credentials, evidence],
+    controls=Controls(isEncrypted=True, authenticatesDestination=True),
 )
 flow(
     orchestrator,
@@ -601,11 +685,38 @@ flow(
 flow(
     opencti,
     opencti_store,
-    "Index/object/queue traffic",
+    "Elasticsearch indices",
     protocol="HTTP",
     tlsVersion=TLSVersion.NONE,
     data=[evidence],
-    controls=Controls(isEncrypted=False),
+    controls=Controls(isEncrypted=False, authenticatesDestination=False),
+)
+flow(
+    opencti,
+    opencti_store,
+    "MinIO objects",
+    protocol="HTTP",
+    tlsVersion=TLSVersion.NONE,
+    data=[minio_credentials, evidence],
+    controls=Controls(isEncrypted=False, authenticatesDestination=False),
+)
+flow(
+    opencti,
+    opencti_store,
+    "RabbitMQ queues",
+    protocol="AMQP",
+    tlsVersion=TLSVersion.NONE,
+    data=[rabbitmq_credentials, evidence],
+    controls=Controls(isEncrypted=False, authenticatesDestination=False),
+)
+flow(
+    opencti,
+    opencti_store,
+    "Redis cache (no authentication)",
+    protocol="RESP",
+    tlsVersion=TLSVersion.NONE,
+    data=[evidence],
+    controls=Controls(isEncrypted=False, authenticatesDestination=False),
 )
 flow(
     connector_misp,
@@ -927,8 +1038,7 @@ TRIAGE: dict[str, dict[str, Response]] = {
         "store": (
             "mitigated",
             "Run artefacts are HMAC-signed and chained per target (ADR-007): tampering with "
-            "daily_reports is detectable through /targets/{id}/chain/verify, and a SQLite row "
-            "that disagrees with the sealed manifest is detectable the same way. targets.yaml is "
+            "daily_reports is detectable through /targets/{id}/chain/verify. targets.yaml is "
             "mounted read-only. The Amass asset database carries collector input, not audit "
             "data. Application logs are stdout for the operator's shipper.",
         ),
@@ -1083,9 +1193,10 @@ TRIAGE: dict[str, dict[str, Response]] = {
     "CR08": {  # Client-Server Protocol Manipulation
         "flow": (
             "accepted",
-            "The orchestrator validates protocol, headers and content type on everything it "
-            "serves and sends well-formed requests; manipulating a host-internal plaintext hop "
-            "needs a position on the host (DS06).",
+            "The orchestrator validates protocol and headers on everything it serves and "
+            "sends well-formed requests; POST /bundles parses its body as JSON without checking "
+            "the declared media type, and the schema validation that follows is what bounds it. "
+            "Manipulating a host-internal plaintext hop needs a position on the host (DS06).",
         ),
     },
     "DE01": {  # Interception
@@ -1174,7 +1285,15 @@ TRIAGE: dict[str, dict[str, Response]] = {
 }
 
 # (element, threat) pairs whose answer differs from their class.
-OVERRIDES: dict[tuple[str, str], Response] = {}
+OVERRIDES: dict[tuple[str, str], Response] = {
+    ("SQLite run store", "DE04"): (
+        "accepted",
+        "Run rows are outside the manifest chain: /targets/{id}/chain/verify checks the "
+        "manifest hash, signature, chain link and artefact files (evidence.py), not a row's "
+        "status, collectors or timestamps, so an edit to those fields with the manifest intact "
+        "goes undetected. Hardening: database file permissions, backups and disk encryption.",
+    ),
+}
 
 
 def element_class(finding) -> str:
