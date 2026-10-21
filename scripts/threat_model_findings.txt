@@ -14,6 +14,7 @@ AA01	vendor	SMTP relay (alert e-mail)
 AA01	vendor	connector-import-file-stix
 AA01	vendor	connector-misp
 AA01	vendor	connector-opencti
+AA01	vendor	misp-modules
 AA01	vendor	oauth2-proxy
 AA02	orchestrator	APScheduler cron jobs
 AA02	orchestrator	Orchestrator API (FastAPI + APScheduler)
@@ -31,6 +32,7 @@ AA02	vendor	SMTP relay (alert e-mail)
 AA02	vendor	connector-import-file-stix
 AA02	vendor	connector-misp
 AA02	vendor	connector-opencti
+AA02	vendor	misp-modules
 AA02	vendor	oauth2-proxy
 AA03	sidecar	Amass v5 engine
 AA03	sidecar	Ollama HTTP API
@@ -47,6 +49,7 @@ AA03	vendor	Redis (MISP)
 AA03	vendor	Redis (OpenCTI)
 AA03	vendor	SMTP relay (alert e-mail)
 AA03	vendor	Tavily search API
+AA03	vendor	misp-modules
 AA04	sidecar	Amass v5 engine
 AA04	sidecar	Ollama HTTP API
 AA04	sidecar	SocialOSINT sidecar
@@ -62,6 +65,7 @@ AA04	vendor	Redis (MISP)
 AA04	vendor	Redis (OpenCTI)
 AA04	vendor	SMTP relay (alert e-mail)
 AA04	vendor	Tavily search API
+AA04	vendor	misp-modules
 AC01	sidecar	Amass v5 engine
 AC01	sidecar	Ollama HTTP API
 AC01	sidecar	SocialOSINT sidecar
@@ -90,6 +94,7 @@ AC01	vendor	Tavily search API
 AC01	vendor	connector-import-file-stix
 AC01	vendor	connector-misp
 AC01	vendor	connector-opencti
+AC01	vendor	misp-modules
 AC01	vendor	oauth2-proxy
 AC02	store	Amass asset database (shared volume)
 AC02	vendor	OpenCTI backing stores
@@ -105,6 +110,7 @@ AC05	flow	Due-diligence queries
 AC05	flow	Elasticsearch indices
 AC05	flow	Elasticsearch persists its indices (volume)
 AC05	flow	Engine writes asset.db
+AC05	flow	Enrichment and import modules (HTTP, compose-internal)
 AC05	flow	Enumeration submit (oam_enum)
 AC05	flow	Fetch uploaded files and push the parsed bundle (OPENCTI_ADMIN_TOKEN, HTTP)
 AC05	flow	GET /health, /metrics
@@ -165,6 +171,7 @@ AC06	vendor	Redis (MISP)
 AC06	vendor	Redis (OpenCTI)
 AC06	vendor	SMTP relay (alert e-mail)
 AC06	vendor	Tavily search API
+AC06	vendor	misp-modules
 AC07	sidecar	Amass v5 engine
 AC07	sidecar	Ollama HTTP API
 AC07	sidecar	SocialOSINT sidecar
@@ -176,6 +183,7 @@ AC07	vendor	Redis (MISP)
 AC07	vendor	Redis (OpenCTI)
 AC07	vendor	SMTP relay (alert e-mail)
 AC07	vendor	Tavily search API
+AC07	vendor	misp-modules
 AC08	sidecar	Amass v5 engine
 AC08	sidecar	Ollama HTTP API
 AC08	sidecar	SocialOSINT sidecar
@@ -187,6 +195,7 @@ AC08	vendor	Redis (MISP)
 AC08	vendor	Redis (OpenCTI)
 AC08	vendor	SMTP relay (alert e-mail)
 AC08	vendor	Tavily search API
+AC08	vendor	misp-modules
 AC09	sidecar	Amass v5 engine
 AC09	sidecar	Ollama HTTP API
 AC09	sidecar	SocialOSINT sidecar
@@ -202,6 +211,7 @@ AC09	vendor	Redis (MISP)
 AC09	vendor	Redis (OpenCTI)
 AC09	vendor	SMTP relay (alert e-mail)
 AC09	vendor	Tavily search API
+AC09	vendor	misp-modules
 AC11	sidecar	Amass v5 engine
 AC11	sidecar	Ollama HTTP API
 AC11	sidecar	SocialOSINT sidecar
@@ -217,6 +227,7 @@ AC11	vendor	Redis (MISP)
 AC11	vendor	Redis (OpenCTI)
 AC11	vendor	SMTP relay (alert e-mail)
 AC11	vendor	Tavily search API
+AC11	vendor	misp-modules
 AC12	orchestrator	APScheduler cron jobs
 AC12	orchestrator	Orchestrator API (FastAPI + APScheduler)
 AC12	vendor	OpenCTI worker
@@ -259,6 +270,7 @@ AC16	vendor	Redis (MISP)
 AC16	vendor	Redis (OpenCTI)
 AC16	vendor	SMTP relay (alert e-mail)
 AC16	vendor	Tavily search API
+AC16	vendor	misp-modules
 AC17	sidecar	Amass v5 engine
 AC17	sidecar	Ollama HTTP API
 AC17	sidecar	SocialOSINT sidecar
@@ -274,11 +286,11 @@ AC17	vendor	Redis (MISP)
 AC17	vendor	Redis (OpenCTI)
 AC17	vendor	SMTP relay (alert e-mail)
 AC17	vendor	Tavily search API
+AC17	vendor	misp-modules
 AC18	vendor	OpenCTI worker
 AC18	vendor	connector-import-file-stix
 AC18	vendor	connector-misp
 AC18	vendor	connector-opencti
-AC18	vendor	oauth2-proxy
 AC19	vendor	Keycloak
 AC19	vendor	OpenCTI platform
 AC20	vendor	OpenCTI worker
@@ -346,6 +358,7 @@ CR03	vendor	Tavily search API
 CR03	vendor	connector-import-file-stix
 CR03	vendor	connector-misp
 CR03	vendor	connector-opencti
+CR03	vendor	misp-modules
 CR04	vendor	Keycloak
 CR04	vendor	OpenCTI platform
 CR05	sidecar	Amass v5 engine
@@ -372,6 +385,7 @@ CR05	vendor	Redis (MISP)
 CR05	vendor	Redis (OpenCTI)
 CR05	vendor	SMTP relay (alert e-mail)
 CR05	vendor	Tavily search API
+CR05	vendor	misp-modules
 CR06	flow	Alert e-mail (SMTP, STARTTLS by default)
 CR06	flow	Alert webhook (ALERT_WEBHOOK_URL)
 CR06	flow	Cache collected profiles and posts (/app/data)
@@ -384,6 +398,7 @@ CR06	flow	Due-diligence queries
 CR06	flow	Elasticsearch indices
 CR06	flow	Elasticsearch persists its indices (volume)
 CR06	flow	Engine writes asset.db
+CR06	flow	Enrichment and import modules (HTTP, compose-internal)
 CR06	flow	Enumeration submit (oam_enum)
 CR06	flow	Fetch uploaded files and push the parsed bundle (OPENCTI_ADMIN_TOKEN, HTTP)
 CR06	flow	GET /health, /metrics
@@ -438,6 +453,7 @@ CR08	flow	Direct loopback API/console (no overlay)
 CR08	flow	Elasticsearch indices
 CR08	flow	Elasticsearch persists its indices (volume)
 CR08	flow	Engine writes asset.db
+CR08	flow	Enrichment and import modules (HTTP, compose-internal)
 CR08	flow	Enumeration submit (oam_enum)
 CR08	flow	Fetch uploaded files and push the parsed bundle (OPENCTI_ADMIN_TOKEN, HTTP)
 CR08	flow	GET /health, /metrics
@@ -487,6 +503,7 @@ DE01	flow	Due-diligence queries
 DE01	flow	Elasticsearch indices
 DE01	flow	Elasticsearch persists its indices (volume)
 DE01	flow	Engine writes asset.db
+DE01	flow	Enrichment and import modules (HTTP, compose-internal)
 DE01	flow	Enumeration submit (oam_enum)
 DE01	flow	Fetch uploaded files and push the parsed bundle (OPENCTI_ADMIN_TOKEN, HTTP)
 DE01	flow	GET /health, /metrics
@@ -551,6 +568,7 @@ DE02	vendor	Tavily search API
 DE02	vendor	connector-import-file-stix
 DE02	vendor	connector-misp
 DE02	vendor	connector-opencti
+DE02	vendor	misp-modules
 DE02	vendor	oauth2-proxy
 DE03	flow	Alert e-mail (SMTP, STARTTLS by default)
 DE03	flow	Alert webhook (ALERT_WEBHOOK_URL)
@@ -564,6 +582,7 @@ DE03	flow	Due-diligence queries
 DE03	flow	Elasticsearch indices
 DE03	flow	Elasticsearch persists its indices (volume)
 DE03	flow	Engine writes asset.db
+DE03	flow	Enrichment and import modules (HTTP, compose-internal)
 DE03	flow	Enumeration submit (oam_enum)
 DE03	flow	Fetch uploaded files and push the parsed bundle (OPENCTI_ADMIN_TOKEN, HTTP)
 DE03	flow	GET /health, /metrics
@@ -639,6 +658,7 @@ DO01	vendor	Tavily search API
 DO01	vendor	connector-import-file-stix
 DO01	vendor	connector-misp
 DO01	vendor	connector-opencti
+DO01	vendor	misp-modules
 DO01	vendor	oauth2-proxy
 DO02	orchestrator	APScheduler cron jobs
 DO02	orchestrator	Orchestrator API (FastAPI + APScheduler)
@@ -670,6 +690,7 @@ DO02	vendor	Tavily search API
 DO02	vendor	connector-import-file-stix
 DO02	vendor	connector-misp
 DO02	vendor	connector-opencti
+DO02	vendor	misp-modules
 DO02	vendor	oauth2-proxy
 DR01	flow	Cache collected profiles and posts (/app/data)
 DR01	flow	DNS and WHOIS pivots (OpenOSINT)
@@ -679,6 +700,7 @@ DR01	flow	Direct loopback API/console (no overlay)
 DR01	flow	Elasticsearch indices
 DR01	flow	Elasticsearch persists its indices (volume)
 DR01	flow	Engine writes asset.db
+DR01	flow	Enrichment and import modules (HTTP, compose-internal)
 DR01	flow	Fetch uploaded files and push the parsed bundle (OPENCTI_ADMIN_TOKEN, HTTP)
 DR01	flow	GET /health, /metrics
 DR01	flow	Local model inference
@@ -729,6 +751,7 @@ DS01	vendor	Redis (MISP)
 DS01	vendor	Redis (OpenCTI)
 DS01	vendor	SMTP relay (alert e-mail)
 DS01	vendor	Tavily search API
+DS01	vendor	misp-modules
 DS03	sidecar	Amass v5 engine
 DS03	sidecar	Ollama HTTP API
 DS03	sidecar	SocialOSINT sidecar
@@ -744,6 +767,7 @@ DS03	vendor	Redis (MISP)
 DS03	vendor	Redis (OpenCTI)
 DS03	vendor	SMTP relay (alert e-mail)
 DS03	vendor	Tavily search API
+DS03	vendor	misp-modules
 DS04	sidecar	Amass v5 engine
 DS04	sidecar	Ollama HTTP API
 DS04	sidecar	SocialOSINT sidecar
@@ -759,6 +783,7 @@ DS04	vendor	Redis (MISP)
 DS04	vendor	Redis (OpenCTI)
 DS04	vendor	SMTP relay (alert e-mail)
 DS04	vendor	Tavily search API
+DS04	vendor	misp-modules
 DS06	flow	DNS and WHOIS pivots (OpenOSINT)
 DS06	flow	DNS resolution and active probes (zone transfers, certificate grabs when enabled)
 DS06	flow	DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois)
@@ -786,6 +811,7 @@ HA01	vendor	Redis (MISP)
 HA01	vendor	Redis (OpenCTI)
 HA01	vendor	SMTP relay (alert e-mail)
 HA01	vendor	Tavily search API
+HA01	vendor	misp-modules
 HA03	sidecar	Amass v5 engine
 HA03	sidecar	Ollama HTTP API
 HA03	sidecar	SocialOSINT sidecar
@@ -801,6 +827,7 @@ HA03	vendor	Redis (MISP)
 HA03	vendor	Redis (OpenCTI)
 HA03	vendor	SMTP relay (alert e-mail)
 HA03	vendor	Tavily search API
+HA03	vendor	misp-modules
 INP02	orchestrator	APScheduler cron jobs
 INP02	orchestrator	Orchestrator API (FastAPI + APScheduler)
 INP02	vendor	OpenCTI worker
@@ -823,6 +850,7 @@ INP03	vendor	Redis (MISP)
 INP03	vendor	Redis (OpenCTI)
 INP03	vendor	SMTP relay (alert e-mail)
 INP03	vendor	Tavily search API
+INP03	vendor	misp-modules
 INP04	sidecar	Amass v5 engine
 INP04	sidecar	Ollama HTTP API
 INP04	sidecar	SocialOSINT sidecar
@@ -831,6 +859,7 @@ INP04	vendor	Elasticsearch
 INP04	vendor	Keycloak
 INP04	vendor	MinIO
 INP04	vendor	OpenCTI platform
+INP04	vendor	misp-modules
 INP05	sidecar	Amass v5 engine
 INP05	sidecar	Ollama HTTP API
 INP05	sidecar	SocialOSINT sidecar
@@ -846,6 +875,7 @@ INP05	vendor	Redis (MISP)
 INP05	vendor	Redis (OpenCTI)
 INP05	vendor	SMTP relay (alert e-mail)
 INP05	vendor	Tavily search API
+INP05	vendor	misp-modules
 INP07	vendor	OpenCTI worker
 INP07	vendor	connector-import-file-stix
 INP07	vendor	connector-misp
@@ -870,6 +900,7 @@ INP08	vendor	Tavily search API
 INP08	vendor	connector-import-file-stix
 INP08	vendor	connector-misp
 INP08	vendor	connector-opencti
+INP08	vendor	misp-modules
 INP08	vendor	oauth2-proxy
 INP09	sidecar	Amass v5 engine
 INP09	sidecar	Ollama HTTP API
@@ -886,6 +917,7 @@ INP09	vendor	Redis (MISP)
 INP09	vendor	Redis (OpenCTI)
 INP09	vendor	SMTP relay (alert e-mail)
 INP09	vendor	Tavily search API
+INP09	vendor	misp-modules
 INP10	sidecar	Amass v5 engine
 INP10	sidecar	Ollama HTTP API
 INP10	sidecar	SocialOSINT sidecar
@@ -901,6 +933,7 @@ INP10	vendor	Redis (MISP)
 INP10	vendor	Redis (OpenCTI)
 INP10	vendor	SMTP relay (alert e-mail)
 INP10	vendor	Tavily search API
+INP10	vendor	misp-modules
 INP11	sidecar	Amass v5 engine
 INP11	sidecar	Ollama HTTP API
 INP11	sidecar	SocialOSINT sidecar
@@ -916,6 +949,7 @@ INP11	vendor	Redis (MISP)
 INP11	vendor	Redis (OpenCTI)
 INP11	vendor	SMTP relay (alert e-mail)
 INP11	vendor	Tavily search API
+INP11	vendor	misp-modules
 INP12	vendor	OpenCTI worker
 INP12	vendor	connector-import-file-stix
 INP12	vendor	connector-misp
@@ -945,6 +979,7 @@ INP14	vendor	Tavily search API
 INP14	vendor	connector-import-file-stix
 INP14	vendor	connector-misp
 INP14	vendor	connector-opencti
+INP14	vendor	misp-modules
 INP14	vendor	oauth2-proxy
 INP15	vendor	SMTP relay (alert e-mail)
 INP16	sidecar	Amass v5 engine
@@ -962,6 +997,7 @@ INP16	vendor	Redis (MISP)
 INP16	vendor	Redis (OpenCTI)
 INP16	vendor	SMTP relay (alert e-mail)
 INP16	vendor	Tavily search API
+INP16	vendor	misp-modules
 INP17	sidecar	Amass v5 engine
 INP17	sidecar	Ollama HTTP API
 INP17	sidecar	SocialOSINT sidecar
@@ -977,6 +1013,7 @@ INP17	vendor	Redis (MISP)
 INP17	vendor	Redis (OpenCTI)
 INP17	vendor	SMTP relay (alert e-mail)
 INP17	vendor	Tavily search API
+INP17	vendor	misp-modules
 INP18	sidecar	Amass v5 engine
 INP18	sidecar	Ollama HTTP API
 INP18	sidecar	SocialOSINT sidecar
@@ -992,6 +1029,7 @@ INP18	vendor	Redis (MISP)
 INP18	vendor	Redis (OpenCTI)
 INP18	vendor	SMTP relay (alert e-mail)
 INP18	vendor	Tavily search API
+INP18	vendor	misp-modules
 INP19	sidecar	Amass v5 engine
 INP19	sidecar	Ollama HTTP API
 INP19	sidecar	SocialOSINT sidecar
@@ -1007,6 +1045,7 @@ INP19	vendor	Redis (MISP)
 INP19	vendor	Redis (OpenCTI)
 INP19	vendor	SMTP relay (alert e-mail)
 INP19	vendor	Tavily search API
+INP19	vendor	misp-modules
 INP20	vendor	OpenCTI worker
 INP20	vendor	connector-import-file-stix
 INP20	vendor	connector-misp
@@ -1027,6 +1066,7 @@ INP21	vendor	Redis (MISP)
 INP21	vendor	Redis (OpenCTI)
 INP21	vendor	SMTP relay (alert e-mail)
 INP21	vendor	Tavily search API
+INP21	vendor	misp-modules
 INP22	sidecar	Amass v5 engine
 INP22	sidecar	Ollama HTTP API
 INP22	sidecar	SocialOSINT sidecar
@@ -1042,6 +1082,7 @@ INP22	vendor	Redis (MISP)
 INP22	vendor	Redis (OpenCTI)
 INP22	vendor	SMTP relay (alert e-mail)
 INP22	vendor	Tavily search API
+INP22	vendor	misp-modules
 INP23	vendor	OpenCTI worker
 INP23	vendor	connector-import-file-stix
 INP23	vendor	connector-misp
@@ -1088,6 +1129,7 @@ INP28	vendor	Tavily search API
 INP28	vendor	connector-import-file-stix
 INP28	vendor	connector-misp
 INP28	vendor	connector-opencti
+INP28	vendor	misp-modules
 INP28	vendor	oauth2-proxy
 INP29	sidecar	Amass v5 engine
 INP29	sidecar	Ollama HTTP API
@@ -1108,6 +1150,7 @@ INP29	vendor	Tavily search API
 INP29	vendor	connector-import-file-stix
 INP29	vendor	connector-misp
 INP29	vendor	connector-opencti
+INP29	vendor	misp-modules
 INP29	vendor	oauth2-proxy
 INP30	vendor	OpenCTI worker
 INP30	vendor	connector-import-file-stix
@@ -1144,6 +1187,7 @@ INP34	vendor	Redis (MISP)
 INP34	vendor	Redis (OpenCTI)
 INP34	vendor	SMTP relay (alert e-mail)
 INP34	vendor	Tavily search API
+INP34	vendor	misp-modules
 INP35	vendor	OpenCTI worker
 INP35	vendor	connector-import-file-stix
 INP35	vendor	connector-misp
@@ -1164,6 +1208,7 @@ INP36	vendor	Redis (MISP)
 INP36	vendor	Redis (OpenCTI)
 INP36	vendor	SMTP relay (alert e-mail)
 INP36	vendor	Tavily search API
+INP36	vendor	misp-modules
 INP37	sidecar	Amass v5 engine
 INP37	sidecar	Ollama HTTP API
 INP37	sidecar	SocialOSINT sidecar
@@ -1179,6 +1224,7 @@ INP37	vendor	Redis (MISP)
 INP37	vendor	Redis (OpenCTI)
 INP37	vendor	SMTP relay (alert e-mail)
 INP37	vendor	Tavily search API
+INP37	vendor	misp-modules
 INP41	vendor	OpenCTI worker
 INP41	vendor	connector-import-file-stix
 INP41	vendor	connector-misp
@@ -1187,6 +1233,9 @@ INP41	vendor	oauth2-proxy
 LLM01	sidecar	Ollama (local models)
 LLM01	vendor	Cloud LLM provider
 LLM01	vendor	SocialOSINT's LLM endpoint
+LLM02	sidecar	Ollama (local models)
+LLM02	vendor	Cloud LLM provider
+LLM02	vendor	SocialOSINT's LLM endpoint
 LLM03	vendor	Cloud LLM provider
 LLM03	vendor	SocialOSINT's LLM endpoint
 LLM07	sidecar	Ollama (local models)
@@ -1210,6 +1259,7 @@ SC02	vendor	Redis (MISP)
 SC02	vendor	Redis (OpenCTI)
 SC02	vendor	SMTP relay (alert e-mail)
 SC02	vendor	Tavily search API
+SC02	vendor	misp-modules
 SC03	sidecar	Amass v5 engine
 SC03	sidecar	Ollama HTTP API
 SC03	sidecar	SocialOSINT sidecar
@@ -1225,6 +1275,7 @@ SC03	vendor	Redis (MISP)
 SC03	vendor	Redis (OpenCTI)
 SC03	vendor	SMTP relay (alert e-mail)
 SC03	vendor	Tavily search API
+SC03	vendor	misp-modules
 SC04	sidecar	Amass v5 engine
 SC04	sidecar	Ollama HTTP API
 SC04	sidecar	SocialOSINT sidecar
@@ -1240,6 +1291,7 @@ SC04	vendor	Redis (MISP)
 SC04	vendor	Redis (OpenCTI)
 SC04	vendor	SMTP relay (alert e-mail)
 SC04	vendor	Tavily search API
+SC04	vendor	misp-modules
 SC05	sidecar	Amass v5 engine
 SC05	sidecar	Ollama HTTP API
 SC05	sidecar	SocialOSINT sidecar
@@ -1255,3 +1307,4 @@ SC05	vendor	Redis (MISP)
 SC05	vendor	Redis (OpenCTI)
 SC05	vendor	SMTP relay (alert e-mail)
 SC05	vendor	Tavily search API
+SC05	vendor	misp-modules

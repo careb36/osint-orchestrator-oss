@@ -333,6 +333,7 @@ socialosint_llm.inBoundary = internet
 socialosint_llm.protocol = "HTTPS"
 socialosint_llm.isThirdParty = True
 socialosint_llm.processesPersonalData = True  # profiles, posts and images of named people
+socialosint_llm.hasRAG = True  # collected profiles and posts are the prompt
 socialosint_llm.description = (
     "SOCIALOSINT_LLM_BASE_URL (OpenRouter, OpenAI or another OpenAI-compatible endpoint): "
     "text and vision analysis whose reply is a free-text Markdown report."
@@ -357,6 +358,7 @@ cloud_llm.inBoundary = internet
 cloud_llm.protocol = "HTTPS"
 cloud_llm.isThirdParty = True
 cloud_llm.processesPersonalData = True  # observables in the prompt: e-mail, phone, person names
+cloud_llm.hasRAG = True  # retrieved snippets and titles are inserted into the prompt (qualify.py)
 cloud_llm.controls = Controls(
     isEncrypted=True, authenticatesSource=True, authenticationScheme="provider API key"
 )
@@ -385,7 +387,9 @@ proxy.description = (
 proxy.controls = Controls(
     implementsAuthenticationScheme=True,
     authenticationScheme="OIDC authorization code (Keycloak)",
-    encryptsCookies=False,  # OAUTH2_PROXY_COOKIE_SECURE is hardcoded to "false" in the overlay
+    # v7.7.1 encrypts the session state with OAUTH2_PROXY_COOKIE_SECRET; the hardcoded
+    # OAUTH2_PROXY_COOKIE_SECURE=false only drops the Secure attribute (CR01).
+    encryptsCookies=True,
     usesStrongSessionIdentifiers=True,
     implementsCSRFToken=True,
     verifySessionIdentifiers=True,
@@ -552,6 +556,7 @@ ollama = LLM("Ollama (local models)")
 ollama.inBoundary = compose
 ollama.isThirdParty = False
 ollama.processesPersonalData = True  # same prompts; local only under the LLM_BASE_URL assumption
+ollama.hasRAG = True  # same retrieval-augmented prompts
 ollama.controls = Controls(isEncrypted=False, authenticatesSource=False)
 
 misp = Server("MISP")
@@ -587,6 +592,17 @@ misp_redis.inBoundary = compose
 misp_redis.protocol = "RESP"
 misp_redis.description = "redis:8.0.6 without a password (ENABLE_REDIS_EMPTY_PASSWORD): no authentication, not published on the host."
 misp_redis.controls = Controls(
+    isHardened=False, isEncrypted=False, authenticatesSource=False, hasAccessControl=False
+)
+
+misp_modules = Server("misp-modules")
+misp_modules.inBoundary = compose
+misp_modules.protocol = "HTTP"
+misp_modules.description = (
+    "misp-docker's misp-modules sidecar (pinned): the enrichment and import modules MISP calls "
+    "over HTTP (MISP_MODULES_FQDN); no authentication, not published on the host."
+)
+misp_modules.controls = Controls(
     isHardened=False, isEncrypted=False, authenticatesSource=False, hasAccessControl=False
 )
 
@@ -714,6 +730,7 @@ CLASSES: dict[str, list] = {
         rabbitmq,
         misp_db,
         misp_redis,
+        misp_modules,
     ],
     "store": [sqlite, targets_yaml, reports, amass_db, socialosint_cache, spiderfoot_db],
     "actor": [operator, anonymous, stix_producer, public_web, datasets_repo, social_platforms],
@@ -755,6 +772,7 @@ _LIMITS: dict[Classification, list] = {
         rabbitmq,
         misp_db,
         misp_redis,
+        misp_modules,
         amass,  # provider keys mounted from datasources.yaml
         socialosint,  # platform tokens in its environment
     ],
@@ -1227,6 +1245,15 @@ flow(
     controls=Controls(isEncrypted=False, authenticatesSource=True),
 )
 flow(
+    misp,
+    misp_modules,
+    "Enrichment and import modules (HTTP, compose-internal)",
+    protocol="HTTP",
+    tlsVersion=TLSVersion.NONE,
+    data=[evidence],
+    controls=Controls(isEncrypted=False, authenticatesDestination=False),
+)
+flow(
     connector_misp,
     misp,
     "connector-misp polls MISP events",
@@ -1616,6 +1643,20 @@ TRIAGE: dict[str, dict[str, Response]] = {
     "INP34": {"*": _XML},  # SOAP Array Overflow
     "INP37": {"sidecar": _SMUGGLING_SIDECAR, "vendor": _SMUGGLING_VENDOR},  # Request Smuggling
     "LLM01": {"*": _LLM},  # Direct Prompt Injection
+    "LLM02": {  # Indirect Prompt Injection via Retrieved Content
+        "*": (
+            "accepted",
+            "Retrieval-augmented by design: qualify.py and the synthesis put the collectors' "
+            "snippets, titles and observables into the prompt, so attacker-controlled source "
+            "text reaches the local or cloud model, with no content filter in front of it. It "
+            "arrives delimited and flattened, the model has no tools and its reply is "
+            "JSON-schema validated and consumed as data, so an injected instruction executes "
+            "nothing; what it can do is skew the category, relevance or risk level of an item "
+            "that an analyst reviews next to its source (LLM01's residual risk). Hardening: "
+            "the per-item and LLM_MAX_OBSERVABLES_IN_PROMPT caps stay, and a local model for "
+            "workloads heavy in untrusted text.",
+        ),
+    },
     "LLM03": {  # Sensitive Data Leakage to Third-Party Provider
         "vendor": (
             "accepted",
@@ -1889,7 +1930,8 @@ _SOCIALOSINT_LLM = (
 _UNAUTHENTICATED_BACKING: Response = (
     "accepted",
     "Runs without authentication by the compose file's decision (xpack.security.enabled=false "
-    "for Elasticsearch, no requirepass for Redis): reachable only on the compose network, never "
+    "for Elasticsearch, no requirepass for Redis, none at all in misp-modules): reachable only "
+    "on the compose network, never "
     "published on the host, and only its own platform talks to it (ADR-005). Hardening for "
     "shared hosts: enable the service's authentication (xpack security, requirepass) and TLS, "
     "or network policies that pin each backing service to its platform.",
@@ -1957,6 +1999,7 @@ OVERRIDES: dict[tuple[str, str], Response] = {
         "sized to the retention the operator owes the people in those profiles.",
     ),
     ("SocialOSINT's LLM endpoint", "LLM01"): _SOCIALOSINT_LLM,
+    ("SocialOSINT's LLM endpoint", "LLM02"): _SOCIALOSINT_LLM,
     ("SocialOSINT's LLM endpoint", "LLM07"): _SOCIALOSINT_LLM,
     ("SQLite run store", "DE04"): (
         "accepted",
@@ -1968,7 +2011,7 @@ OVERRIDES: dict[tuple[str, str], Response] = {
 }
 # Authentication is disabled by this repository's compose files, not by the vendor: every
 # authentication, access-control and misuse threat on these services is the deployment's.
-for _element in ("Elasticsearch", "Redis (OpenCTI)", "Redis (MISP)"):
+for _element in ("Elasticsearch", "Redis (OpenCTI)", "Redis (MISP)", "misp-modules"):
     for _threat in ("AA01", "AA02", "AC01", "AC07", "AC09"):
         OVERRIDES[(_element, _threat)] = _UNAUTHENTICATED_BACKING
 _SMTP_NO_AUTH: Response = (
