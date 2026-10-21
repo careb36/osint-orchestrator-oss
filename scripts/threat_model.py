@@ -83,8 +83,10 @@ tm.assumptions = [
     "is a "
     "production hardening step, modelled as absent.",
     "Alert channels are modelled with their defaults: SMTP with STARTTLS "
-    "(ALERT_SMTP_STARTTLS=true) and the webhook over the operator's URL with the optional "
-    "HMAC signature (ALERT_WEBHOOK_SECRET) unset.",
+    "(ALERT_SMTP_STARTTLS=true) and the webhook over an https:// URL of the operator's with "
+    "the optional HMAC signature (ALERT_WEBHOOK_SECRET) unset. ALERT_WEBHOOK_URL accepts any "
+    "URL (config.py) and the notifier posts to it as given; an http:// webhook would carry the "
+    "alert payload and the URL's own token in clear and is outside this model's scope.",
     "Collectors only query targets authorised in targets.yaml (operator attestation per target).",
     "OpenCTI, MISP, Amass, SocialOSINT and the OIDC overlay are optional deployments; the model "
     "covers them when enabled.",
@@ -273,7 +275,8 @@ webhook_receiver = ExternalEntity("Alert webhook receiver")
 webhook_receiver.inBoundary = internet
 webhook_receiver.description = (
     "ALERT_WEBHOOK_URL (Slack, Teams, Discord or a custom endpoint). The payload is signed "
-    "with HMAC-SHA256 only when ALERT_WEBHOOK_SECRET is set."
+    "with HMAC-SHA256 only when ALERT_WEBHOOK_SECRET is set. Modelled over https:// only; "
+    "the configuration accepts an http:// URL too (assumptions)."
 )
 
 socialosint_llm = LLM("SocialOSINT's LLM endpoint")
@@ -434,6 +437,16 @@ spiderfoot.controls = Controls(
     isHardened=False, isEncrypted=False, authenticatesSource=False, hasAccessControl=False
 )
 
+spiderfoot_db = Datastore("SpiderFoot scan database (spiderfoot-data volume)")
+spiderfoot_db.inBoundary = compose
+spiderfoot_db.description = (
+    "spiderfoot-data mounted at /home/spiderfoot/.spiderfoot: upstream keeps scan results "
+    "and logs in SQLite. The collector copies a scan's events into its own evidence and "
+    "leaves the scan in place; the orchestrator's retention purge never reaches this volume."
+)
+spiderfoot_db.isSQL = True
+spiderfoot_db.controls = Controls(isEncryptedAtRest=False)
+
 amass = Server("Amass v5 engine")
 amass.inBoundary = compose
 amass.protocol = "HTTP"
@@ -530,7 +543,7 @@ CLASSES: dict[str, list] = {
         opencti_store,
         connector_misp,
     ],
-    "store": [sqlite, targets_yaml, reports, amass_db, socialosint_cache],
+    "store": [sqlite, targets_yaml, reports, amass_db, socialosint_cache, spiderfoot_db],
     "actor": [operator, anonymous, stix_producer, public_web, social_platforms],
 }
 CLASS_OF = {el.name: cls for cls, els in CLASSES.items() for el in els}
@@ -568,6 +581,7 @@ _LIMITS: dict[Classification, list] = {
         targets_yaml,
         reports,
         amass_db,
+        spiderfoot_db,
         spiderfoot,
         ollama_api,
         ollama,
@@ -787,6 +801,22 @@ flow(
     tlsVersion=TLSVersion.TLSv12,
     data=[evidence],
     controls=Controls(isEncrypted=True),
+)
+flow(
+    spiderfoot,
+    spiderfoot_db,
+    "Write scan results and logs",
+    protocol="file",
+    data=[evidence],
+    controls=Controls(isEncrypted=False),
+)
+flow(
+    spiderfoot_db,
+    spiderfoot,
+    "Read scan results for the API",
+    protocol="file",
+    data=[evidence],
+    controls=Controls(isEncrypted=False),
 )
 flow(
     orchestrator,
@@ -1265,7 +1295,8 @@ TRIAGE: dict[str, dict[str, Response]] = {
         "flow": (
             "accepted",
             "Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass "
-            "asset database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry "
+            "asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI "
+            "stores) and host-internal hops carry "
             "it in clear; credentials and personal data travel only to the service they belong "
             "to, under TLS when they leave the host. Hardening: encrypted volumes or disk "
             "encryption, TLS between services." + _DISCOVERY,
@@ -1373,7 +1404,8 @@ TRIAGE: dict[str, dict[str, Response]] = {
         "store": (
             "accepted",
             "One process owns each volume (uid 1000 for the orchestrator's stores, the engine for "
-            "asset.db, the SocialOSINT sidecar for its cache); there is no finer privilege to "
+            "asset.db, SpiderFoot and the SocialOSINT sidecar for their own volumes); there is "
+            "no finer privilege to "
             "abuse. Hardening: volume permissions and "
             "read-only mounts where possible.",
         ),
@@ -1546,6 +1578,21 @@ _SOCIALOSINT_LLM = (
     "report misleads the analyst who reads the note.",
 )
 OVERRIDES: dict[tuple[str, str], Response] = {
+    ("SpiderFoot scan database (spiderfoot-data volume)", "DE04"): (
+        "accepted",
+        "Outside the manifest chain: scan rows and logs are plain SQLite the sidecar rewrites. "
+        "The orchestrator reads a scan's events once, at collection, into evidence it then "
+        "seals, and verifies nothing against this database afterwards, so a later edit here "
+        "changes no sealed run but misleads whoever reads SpiderFoot's own UI. Hardening: "
+        "volume permissions and deleting scans after collection.",
+    ),
+    ("SpiderFoot scan database (spiderfoot-data volume)", "DO02"): (
+        "accepted",
+        "No retention: completed scans stay in the database (the collector stops only the "
+        "scans it abandons) and purge_expired cleans run rows and daily_reports only, so the "
+        "volume grows with every run. Hardening: delete each scan after collection or run a "
+        "purge job, and put a disk quota on the volume.",
+    ),
     ("SocialOSINT cache volume", "DE04"): (
         "accepted",
         "The cache is outside the manifest chain: profiles and posts under /app/data are plain "

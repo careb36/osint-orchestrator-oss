@@ -43,6 +43,7 @@ AC01	sidecar	SpiderFoot
 AC01	store	Amass asset database (shared volume)
 AC01	store	SQLite run store
 AC01	store	SocialOSINT cache volume
+AC01	store	SpiderFoot scan database (spiderfoot-data volume)
 AC01	store	daily_reports (sealed runs)
 AC01	store	targets.yaml
 AC01	vendor	Keycloak
@@ -83,6 +84,7 @@ AC05	flow	Qualification & synthesis prompts (local HTTP API)
 AC05	flow	RabbitMQ queues
 AC05	flow	Read cached profiles for later sessions
 AC05	flow	Read discovered names (oam_subs, shared volume)
+AC05	flow	Read scan results for the API
 AC05	flow	Read target inventory
 AC05	flow	Redis cache (no authentication)
 AC05	flow	Run/state SQL
@@ -92,6 +94,7 @@ AC05	flow	Seal run artefacts + manifest
 AC05	flow	SocialOSINT text and vision prompts (own endpoint and key)
 AC05	flow	TLS certificate and HTTPS fetches (sfp_sslcert)
 AC05	flow	Token redeem / userinfo
+AC05	flow	Write scan results and logs
 AC05	flow	connector-misp polls MISP events
 AC05	flow	connector-misp writes to OpenCTI
 AC06	sidecar	Amass v5 engine
@@ -223,6 +226,7 @@ CR05	sidecar	SpiderFoot
 CR05	store	Amass asset database (shared volume)
 CR05	store	SQLite run store
 CR05	store	SocialOSINT cache volume
+CR05	store	SpiderFoot scan database (spiderfoot-data volume)
 CR05	store	daily_reports (sealed runs)
 CR05	store	targets.yaml
 CR05	vendor	Keycloak
@@ -259,6 +263,7 @@ CR06	flow	Qualification & synthesis prompts (local HTTP API)
 CR06	flow	RabbitMQ queues
 CR06	flow	Read cached profiles for later sessions
 CR06	flow	Read discovered names (oam_subs, shared volume)
+CR06	flow	Read scan results for the API
 CR06	flow	Read target inventory
 CR06	flow	Redis cache (no authentication)
 CR06	flow	Run/state SQL
@@ -268,6 +273,7 @@ CR06	flow	Seal run artefacts + manifest
 CR06	flow	SocialOSINT text and vision prompts (own endpoint and key)
 CR06	flow	TLS certificate and HTTPS fetches (sfp_sslcert)
 CR06	flow	Token redeem / userinfo
+CR06	flow	Write scan results and logs
 CR06	flow	connector-misp polls MISP events
 CR06	flow	connector-misp writes to OpenCTI
 CR08	flow	Cache collected profiles and posts (/app/data)
@@ -291,6 +297,7 @@ CR08	flow	Qualification & synthesis prompts (local HTTP API)
 CR08	flow	RabbitMQ queues
 CR08	flow	Read cached profiles for later sessions
 CR08	flow	Read discovered names (oam_subs, shared volume)
+CR08	flow	Read scan results for the API
 CR08	flow	Read target inventory
 CR08	flow	Redis cache (no authentication)
 CR08	flow	Run/state SQL
@@ -298,6 +305,7 @@ CR08	flow	STIX ingest (pycti, outbox retries)
 CR08	flow	Scan control & results
 CR08	flow	Seal run artefacts + manifest
 CR08	flow	Token redeem / userinfo
+CR08	flow	Write scan results and logs
 CR08	flow	connector-misp writes to OpenCTI
 DE01	flow	Alert e-mail (SMTP, STARTTLS by default)
 DE01	flow	Alert webhook (ALERT_WEBHOOK_URL)
@@ -327,6 +335,7 @@ DE01	flow	Qualification & synthesis prompts (local HTTP API)
 DE01	flow	RabbitMQ queues
 DE01	flow	Read cached profiles for later sessions
 DE01	flow	Read discovered names (oam_subs, shared volume)
+DE01	flow	Read scan results for the API
 DE01	flow	Read target inventory
 DE01	flow	Redis cache (no authentication)
 DE01	flow	Run/state SQL
@@ -336,6 +345,7 @@ DE01	flow	Seal run artefacts + manifest
 DE01	flow	SocialOSINT text and vision prompts (own endpoint and key)
 DE01	flow	TLS certificate and HTTPS fetches (sfp_sslcert)
 DE01	flow	Token redeem / userinfo
+DE01	flow	Write scan results and logs
 DE01	flow	connector-misp polls MISP events
 DE01	flow	connector-misp writes to OpenCTI
 DE02	sidecar	Amass v5 engine
@@ -377,6 +387,7 @@ DE03	flow	Qualification & synthesis prompts (local HTTP API)
 DE03	flow	RabbitMQ queues
 DE03	flow	Read cached profiles for later sessions
 DE03	flow	Read discovered names (oam_subs, shared volume)
+DE03	flow	Read scan results for the API
 DE03	flow	Read target inventory
 DE03	flow	Redis cache (no authentication)
 DE03	flow	Run/state SQL
@@ -386,11 +397,13 @@ DE03	flow	Seal run artefacts + manifest
 DE03	flow	SocialOSINT text and vision prompts (own endpoint and key)
 DE03	flow	TLS certificate and HTTPS fetches (sfp_sslcert)
 DE03	flow	Token redeem / userinfo
+DE03	flow	Write scan results and logs
 DE03	flow	connector-misp polls MISP events
 DE03	flow	connector-misp writes to OpenCTI
 DE04	store	Amass asset database (shared volume)
 DE04	store	SQLite run store
 DE04	store	SocialOSINT cache volume
+DE04	store	SpiderFoot scan database (spiderfoot-data volume)
 DE04	store	daily_reports (sealed runs)
 DE04	store	targets.yaml
 DE04	vendor	OpenCTI backing stores
@@ -416,6 +429,7 @@ DO02	sidecar	SpiderFoot
 DO02	store	Amass asset database (shared volume)
 DO02	store	SQLite run store
 DO02	store	SocialOSINT cache volume
+DO02	store	SpiderFoot scan database (spiderfoot-data volume)
 DO02	store	daily_reports (sealed runs)
 DO02	store	targets.yaml
 DO02	vendor	Keycloak
