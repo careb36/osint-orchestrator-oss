@@ -135,36 +135,36 @@ export function TargetDetailPage() {
       ) : null}
       {runs.data && runs.data.length > 0 && visibleRuns.length === 0 ? <EmptyState title={t('target.noMatch.title')} description={t('target.noMatch.body')} /> : null}
       {visibleRuns.length > 0 ? (
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th scope="col">{t('col.run')}</th>
-              <th scope="col">{t('col.status')}</th>
-              <th scope="col">{t('col.risk')}</th>
-              <th scope="col">{t('col.change')}</th>
-              <th scope="col">{t('col.collectors')}</th>
-              <th scope="col">{t('col.newObservables')}</th>
-              <th scope="col">{t('col.started')}</th>
-              <th scope="col">{t('col.duration')}</th>
+        <table className="data-table" role="table">
+          <thead role="rowgroup">
+            <tr role="row">
+              <th role="columnheader" scope="col">{t('col.run')}</th>
+              <th role="columnheader" scope="col">{t('col.status')}</th>
+              <th role="columnheader" scope="col">{t('col.risk')}</th>
+              <th role="columnheader" scope="col">{t('col.change')}</th>
+              <th role="columnheader" scope="col">{t('col.collectors')}</th>
+              <th role="columnheader" scope="col">{t('col.newObservables')}</th>
+              <th role="columnheader" scope="col">{t('col.started')}</th>
+              <th role="columnheader" scope="col">{t('col.duration')}</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody role="rowgroup">
             {visibleRuns.map((run) => (
-              <tr key={run.id}>
-                <td data-label={t('col.run')}>
+              <tr role="row" key={run.id}>
+                <td role="cell" data-label={t('col.run')}>
                   <Link to={`/targets/${encodeURIComponent(targetId)}/runs/${run.id}`}>#{run.id}</Link>
                 </td>
-                <td data-label={t('col.status')}>
+                <td role="cell" data-label={t('col.status')}>
                   <StatusPill label={run.status} tone={runStatusTone(run.status)} />
                 </td>
-                <td data-label={t('col.risk')}>{run.risk_level ? <StatusPill label={run.risk_level} tone={riskTone(run.risk_level)} /> : <span className="muted">—</span>}</td>
-                <td data-label={t('col.change')}>
+                <td role="cell" data-label={t('col.risk')}>{run.risk_level ? <StatusPill label={run.risk_level} tone={riskTone(run.risk_level)} /> : <span className="muted">—</span>}</td>
+                <td role="cell" data-label={t('col.change')}>
                   <RunChange transition={transitions.get(run.id)} />
                 </td>
-                <td data-label={t('col.collectors')}>{run.collectors_run || '—'}</td>
-                <td data-label={t('col.newObservables')}>{run.new_observables}</td>
-                <td data-label={t('col.started')}>{formatDateTime(run.started_at, locale)}</td>
-                <td data-label={t('col.duration')}>{formatDuration(run.started_at, run.finished_at)}</td>
+                <td role="cell" data-label={t('col.collectors')}>{run.collectors_run || '—'}</td>
+                <td role="cell" data-label={t('col.newObservables')}>{run.new_observables}</td>
+                <td role="cell" data-label={t('col.started')}>{formatDateTime(run.started_at, locale)}</td>
+                <td role="cell" data-label={t('col.duration')}>{formatDuration(run.started_at, run.finished_at)}</td>
               </tr>
             ))}
           </tbody>

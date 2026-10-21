@@ -293,25 +293,25 @@ export function RunWorkspacePage() {
                   ) : null}
                 </div>
                 {evidenceRows.length === 0 ? <p className="muted">{t('runDetail.noEvidenceMatch')}</p> : null}
-              <table className="data-table">
-                <thead>
-                  <tr>
+              <table className="data-table" role="table">
+                <thead role="rowgroup">
+                  <tr role="row">
                     <SortableHeader label={t('col.category')} column="category" sort={controls.sort} onSort={controls.toggleSort} />
                     <SortableHeader label={t('col.relevance')} column="relevance" sort={controls.sort} onSort={controls.toggleSort} naturalDir="desc" />
                     <SortableHeader label={t('col.confidence')} column="confidence" sort={controls.sort} onSort={controls.toggleSort} naturalDir="desc" />
                     <SortableHeader label={t('col.source')} column="title" sort={controls.sort} onSort={controls.toggleSort} />
-                    <th scope="col">{t('col.rationale')}</th>
+                    <th role="columnheader" scope="col">{t('col.rationale')}</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody role="rowgroup">
                   {evidenceRows.map((row) => (
-                    <tr key={row.id ?? row.url}>
-                      <td data-label={t('col.category')}>{row.category}</td>
-                      <td data-label={t('col.relevance')}>
+                    <tr role="row" key={row.id ?? row.url}>
+                      <td role="cell" data-label={t('col.category')}>{row.category}</td>
+                      <td role="cell" data-label={t('col.relevance')}>
                         <StatusPill label={row.relevance} tone={riskTone(row.relevance)} />
                       </td>
-                      <td data-label={t('col.confidence')}>{Number(row.confidence).toFixed(2)}</td>
-                      <td data-label={t('col.source')}>
+                      <td role="cell" data-label={t('col.confidence')}>{Number(row.confidence).toFixed(2)}</td>
+                      <td role="cell" data-label={t('col.source')}>
                         {isHttpUrl(row.url) ? (
                           <a href={row.url} rel="noopener noreferrer nofollow" target="_blank">
                             {row.title || row.url}
@@ -320,7 +320,7 @@ export function RunWorkspacePage() {
                           row.title || row.url
                         )}
                       </td>
-                      <td data-label={t('col.rationale')}>{row.rationale}</td>
+                      <td role="cell" data-label={t('col.rationale')}>{row.rationale}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -365,18 +365,18 @@ export function RunWorkspacePage() {
                   ) : null}
                 </div>
                 {deltaRows.length === 0 ? <p className="muted">{t('runDetail.noDeltaMatch')}</p> : null}
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th scope="col">{t('col.type')}</th>
-                    <th scope="col">{t('col.value')}</th>
+              <table className="data-table" role="table">
+                <thead role="rowgroup">
+                  <tr role="row">
+                    <th role="columnheader" scope="col">{t('col.type')}</th>
+                    <th role="columnheader" scope="col">{t('col.value')}</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody role="rowgroup">
                   {deltaRows.map((row) => (
-                    <tr key={row.stix_id}>
-                      <td data-label={t('col.type')}>{row.stix_type}</td>
-                      <td data-label={t('col.value')} className="mono">{row.value}</td>
+                    <tr role="row" key={row.stix_id}>
+                      <td role="cell" data-label={t('col.type')}>{row.stix_type}</td>
+                      <td role="cell" data-label={t('col.value')} className="mono">{row.value}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -494,22 +494,22 @@ export function RunWorkspacePage() {
             {run.data.alerts.length === 0 ? (
               <p className="muted">{t('handoff.noAlerts')}</p>
             ) : (
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th scope="col">{t('col.channel')}</th>
-                    <th scope="col">{t('col.status')}</th>
-                    <th scope="col">{t('col.sentAt')}</th>
-                    <th scope="col">{t('col.error')}</th>
+              <table className="data-table" role="table">
+                <thead role="rowgroup">
+                  <tr role="row">
+                    <th role="columnheader" scope="col">{t('col.channel')}</th>
+                    <th role="columnheader" scope="col">{t('col.status')}</th>
+                    <th role="columnheader" scope="col">{t('col.sentAt')}</th>
+                    <th role="columnheader" scope="col">{t('col.error')}</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody role="rowgroup">
                   {run.data.alerts.map((alert, index) => (
-                    <tr key={alert.id ?? index}>
-                      <td data-label={t('col.channel')}>{alert.channel ? tv(alert.channel) : '—'}</td>
-                      <td data-label={t('col.status')}>{alert.status ? <StatusPill label={alert.status} tone={alertStatusTone(alert.status)} /> : '—'}</td>
-                      <td data-label={t('col.sentAt')}>{formatDateTime(alert.sent_at, locale)}</td>
-                      <td data-label={t('col.error')}>{alert.error ?? '—'}</td>
+                    <tr role="row" key={alert.id ?? index}>
+                      <td role="cell" data-label={t('col.channel')}>{alert.channel ? tv(alert.channel) : '—'}</td>
+                      <td role="cell" data-label={t('col.status')}>{alert.status ? <StatusPill label={alert.status} tone={alertStatusTone(alert.status)} /> : '—'}</td>
+                      <td role="cell" data-label={t('col.sentAt')}>{formatDateTime(alert.sent_at, locale)}</td>
+                      <td role="cell" data-label={t('col.error')}>{alert.error ?? '—'}</td>
                     </tr>
                   ))}
                 </tbody>

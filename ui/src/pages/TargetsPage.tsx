@@ -123,21 +123,21 @@ export function TargetsPage() {
       {visible.length === 0 ? (
         <EmptyState title={t('targets.noMatch.title')} description={t('targets.noMatch.body')} action={clearButton} />
       ) : (
-        <table className="data-table">
-          <thead>
-            <tr>
+        <table className="data-table" role="table">
+          <thead role="rowgroup">
+            <tr role="row">
               <SortableHeader label={t('col.target')} column="target" sort={controls.sort} onSort={controls.toggleSort} />
-              <th scope="col">{t('col.collectors')}</th>
+              <th role="columnheader" scope="col">{t('col.collectors')}</th>
               <SortableHeader label={t('col.lastRun')} column="lastRun" sort={controls.sort} onSort={controls.toggleSort} naturalDir="desc" />
               <SortableHeader label={t('col.status')} column="status" sort={controls.sort} onSort={controls.toggleSort} />
               <SortableHeader label={t('col.risk')} column="risk" sort={controls.sort} onSort={controls.toggleSort} naturalDir="desc" />
-              <th scope="col">{t('col.actions')}</th>
+              <th role="columnheader" scope="col">{t('col.actions')}</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody role="rowgroup">
             {visible.map(({ target, lastRun, latestRisk, active }) => (
-              <tr key={target.id}>
-                <td data-label={t('col.target')}>
+              <tr role="row" key={target.id}>
+                <td role="cell" data-label={t('col.target')}>
                   <Link to={`/targets/${encodeURIComponent(target.id)}`}>
                     <strong>{target.fqdn}</strong>
                   </Link>
@@ -147,8 +147,8 @@ export function TargetsPage() {
                     {target.enabled ? '' : t('disabledSuffix')}
                   </small>
                 </td>
-                <td data-label={t('col.collectors')}>{enabledCollectors(target).join(', ') || '—'}</td>
-                <td data-label={t('col.lastRun')}>
+                <td role="cell" data-label={t('col.collectors')}>{enabledCollectors(target).join(', ') || '—'}</td>
+                <td role="cell" data-label={t('col.lastRun')}>
                   {lastRun ? (
                     <Link to={`/runs/${lastRun.id}`}>
                       #{lastRun.id} · {formatDateTime(lastRun.started_at, locale)}
@@ -157,11 +157,11 @@ export function TargetsPage() {
                     <span className="muted">{t('never')}</span>
                   )}
                 </td>
-                <td data-label={t('col.status')}>{lastRun ? <StatusPill label={lastRun.status} tone={runStatusTone(lastRun.status)} /> : <span className="muted">{t('noRuns')}</span>}</td>
-                <td data-label={t('col.risk')}>
+                <td role="cell" data-label={t('col.status')}>{lastRun ? <StatusPill label={lastRun.status} tone={runStatusTone(lastRun.status)} /> : <span className="muted">{t('noRuns')}</span>}</td>
+                <td role="cell" data-label={t('col.risk')}>
                   <StatusPill label={latestRisk} tone={riskTone(latestRisk)} />
                 </td>
-                <td data-label={t('col.actions')}>
+                <td role="cell" data-label={t('col.actions')}>
                   <button type="button" className="ghost-button" disabled={isPending || active || !target.enabled} onClick={() => start(target.id)}>
                     {active ? t('run.running') : t('run.start')}
                     <span className="visually-hidden">{t('run.startFor', { targetId: target.id })}</span>

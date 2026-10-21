@@ -14,7 +14,7 @@ export function SortableHeader<K extends string>({ label, column, sort, onSort, 
   const active = sort.key === column;
   const ariaSort = active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none';
   return (
-    <th scope="col" aria-sort={ariaSort}>
+    <th role="columnheader" scope="col" aria-sort={ariaSort}>
       <button type="button" className="sort-button" onClick={() => onSort(column, naturalDir)}>
         {label}
         <span aria-hidden="true" className="sort-indicator">

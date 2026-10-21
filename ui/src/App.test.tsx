@@ -7,12 +7,12 @@ import { ApiKeyProvider } from './auth';
 import { LOCALE_STORAGE_KEY, LocaleProvider, type Locale } from './i18n';
 import { API_KEY_STORAGE_KEY } from './lib/api';
 import { uiTelemetry } from './lib/telemetry';
-import { installFetchMock, sampleRuns } from './test/mockApi';
+import { installFetchMock, sampleHealth, sampleRuns } from './test/mockApi';
 
 // The assertions below read the English catalogue; Spanish is the default
 // for operators and has its own tests at the end of this file.
-const renderApp = (initialEntries = ['/'], locale: Locale = 'en') => {
-  const queryClient = new QueryClient({
+const newQueryClient = () =>
+  new QueryClient({
     defaultOptions: {
       queries: {
         retry: false,
@@ -20,6 +20,7 @@ const renderApp = (initialEntries = ['/'], locale: Locale = 'en') => {
     },
   });
 
+const renderApp = (initialEntries = ['/'], locale: Locale = 'en', queryClient = newQueryClient()) => {
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={initialEntries}>
@@ -771,15 +772,29 @@ describe('System status chip', () => {
     window.localStorage.clear();
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('reports a healthy platform', async () => {
     installFetchMock();
     renderApp();
     expect(await within(screen.getByRole('banner')).findByText('System OK')).toBeInTheDocument();
   });
 
-  it('shows offline when /health fails, instead of a cached or pending status', async () => {
+  it('shows offline when the first /health probe fails', async () => {
     installFetchMock({ routes: [{ pattern: /^\/health$/, status: 503, body: { detail: 'down' } }] });
     renderApp();
+    expect(await within(screen.getByRole('banner')).findByText('Offline')).toBeInTheDocument();
+  });
+
+  it('lets a failed poll win over the last healthy answer', async () => {
+    installFetchMock({ routes: [{ pattern: /^\/health$/, status: 503, body: { detail: 'down' } }] });
+    const queryClient = newQueryClient();
+    // A healthy answer older than staleTime: the mount refetches and fails,
+    // and the cached data must not keep the chip green.
+    queryClient.setQueryData(['health'], sampleHealth, { updatedAt: Date.now() - 60_000 });
+    renderApp(['/'], 'en', queryClient);
     expect(await within(screen.getByRole('banner')).findByText('Offline')).toBeInTheDocument();
   });
 });

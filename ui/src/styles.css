@@ -630,6 +630,15 @@ code {
   }
 }
 
+/* The colour and the label already say it; the pulse is decoration. */
+@media (prefers-reduced-motion: reduce) {
+  .system-chip.warning .system-dot,
+  .system-chip.error .system-dot,
+  .status-pill[data-value]::before {
+    animation: none;
+  }
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -1418,6 +1427,9 @@ code {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
+  }
+
+  .data-table thead tr:has(.sort-button) {
     margin-bottom: 10px;
   }
 
@@ -1430,8 +1442,19 @@ code {
     background: transparent;
   }
 
+  /* Plain headers are clipped, not removed: with the explicit table roles
+     on the markup they keep naming their column for assistive technology
+     while the cards repeat the label visually. */
   .data-table th:not(:has(.sort-button)) {
-    display: none;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
 
   .data-table th .sort-button {
@@ -1480,8 +1503,14 @@ code {
     color: var(--muted);
   }
 
-  /* A button is its own label. */
-  .data-table tbody td:has(> .ghost-button)::before {
+  /* A button is its own label, and an empty cell (a resolved case has no
+     action left) is not a field. */
+  .data-table tbody td:has(> .ghost-button)::before,
+  .data-table tbody td:empty::before {
+    display: none;
+  }
+
+  .data-table tbody td:empty {
     display: none;
   }
 

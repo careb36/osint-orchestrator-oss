@@ -87,8 +87,9 @@ function SystemStatusChip() {
   const { t } = useLocale();
   // Polled, not read once: the shell stays mounted across navigation and
   // focus refetching is off (main.tsx), so without an interval the dot
-  // would keep its first answer for the whole session.
-  const health = useQuery({ queryKey: ['shell-health'], queryFn: api.getHealth, staleTime: 30_000, refetchInterval: 30_000 });
+  // would keep its first answer for the whole session. Same cache entry as
+  // the overview's health cards (HomePage), so both change together.
+  const health = useQuery({ queryKey: ['health'], queryFn: api.getHealth, staleTime: 30_000, refetchInterval: 30_000 });
   // A failed probe wins over the last cached answer: an API that stopped
   // answering is offline, whatever it said before.
   const status = health.isError ? 'offline' : health.data?.status;
