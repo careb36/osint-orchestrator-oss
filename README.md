@@ -175,9 +175,12 @@ evidence with search and filters, and a Start-run action; it asks for
 `ORCHESTRATOR_API_KEY` on first load. Source in [`ui/`](ui/README.md); the
 images build it, so nothing else is needed.
 
-![Overview: key figures and targets ordered by attention](docs/img/dashboard-overview-en.png)
+Both screenshots are the console after the showcase run of tier 1: the
+fictitious sample, two runs, no API key.
 
-![Run workspace: each piece of evidence with its category, relevance, confidence and rationale](docs/img/dashboard-run-evidence-en.png)
+![Overview: key figures and targets ordered by attention, the showcase target last because it is disabled](docs/img/dashboard-overview-en.png)
+
+![Run workspace: each piece of evidence with its category, relevance, confidence and rationale, qualified by the recorded sample](docs/img/dashboard-run-evidence-en.png)
 
 ## Built during the hackathon
 

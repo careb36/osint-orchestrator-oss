@@ -183,9 +183,12 @@ activas, hallazgos, evidencia con búsqueda y filtros, y un botón para iniciar
 corridas; pide `ORCHESTRATOR_API_KEY` al abrirlo. Código en
 [`ui/`](ui/README.md) (en inglés); las imágenes lo construyen solas.
 
-![Resumen: cifras clave y objetivos ordenados por atención](docs/img/dashboard-overview-es.png)
+Las dos capturas son la consola tras la corrida de muestra del nivel 1: la
+entidad ficticia, dos corridas, ninguna clave de API.
 
-![Espacio de la corrida: cada evidencia con su categoría, relevancia, confianza y justificación](docs/img/dashboard-run-evidence-es.png)
+![Resumen: cifras clave y objetivos ordenados por atención; el objetivo de la muestra va último porque está desactivado](docs/img/dashboard-overview-es.png)
+
+![Espacio de la corrida: cada evidencia con su categoría, relevancia, confianza y justificación, calificada por la muestra grabada](docs/img/dashboard-run-evidence-es.png)
 
 ## Construido durante el hackathon
 

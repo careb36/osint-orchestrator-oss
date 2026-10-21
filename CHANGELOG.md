@@ -11,6 +11,9 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- README screenshots (both languages) now show the console after the showcase
+  run, served by the real API over a database seeded with the two recordings,
+  instead of the unit tests' fixtures; the captions say so.
 - The showcase from a fresh clone: `daily_reports/` ships in the repository
   (a `.gitkeep`), so Docker no longer creates the bind mount root-owned on
   the first `docker compose up` and the container (uid 1000) can write the
