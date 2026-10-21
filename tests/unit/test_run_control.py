@@ -105,8 +105,14 @@ async def test_mark_interrupted_runs_fails_stale_rows_and_readmits_the_target(
     monkeypatch.setattr(run_control, "get_session", _session_factory(engine))
 
     async with _session_factory(engine)() as session:
-        for status in (RunStatus.RUNNING, RunStatus.PENDING, RunStatus.SUCCESS):
-            session.add(Run(target_id="t1", started_at=datetime.now(UTC), status=status))
+        # One active row per target (ux_runs_one_active_per_target): the stale
+        # RUNNING and PENDING rows belong to different targets.
+        for target_id, status in (
+            ("t1", RunStatus.RUNNING),
+            ("t2", RunStatus.PENDING),
+            ("t1", RunStatus.SUCCESS),
+        ):
+            session.add(Run(target_id=target_id, started_at=datetime.now(UTC), status=status))
         await session.commit()
 
     assert await create_pending_run("t1") is None, "guard must hold while a run is RUNNING"
@@ -120,3 +126,75 @@ async def test_mark_interrupted_runs_fails_stale_rows_and_readmits_the_target(
     assert rows[2].error is None
 
     assert await create_pending_run("t1") is not None, "target must be admissible again"
+
+
+@pytest.mark.asyncio
+async def test_database_refuses_a_second_active_run_for_a_target() -> None:
+    """The partial unique index holds whoever inserts: a second process included."""
+    from datetime import UTC, datetime
+
+    from sqlalchemy.exc import IntegrityError
+
+    engine = _make_engine()
+    await _setup_db(engine)
+    async with _session_factory(engine)() as session:
+        session.add(Run(target_id="t1", started_at=datetime.now(UTC), status=RunStatus.RUNNING))
+        await session.commit()
+    async with _session_factory(engine)() as session:
+        session.add(Run(target_id="t1", started_at=datetime.now(UTC), status=RunStatus.PENDING))
+        with pytest.raises(IntegrityError):
+            await session.commit()
+        await session.rollback()
+    # Finished rows are outside the index: the history of a target keeps growing.
+    async with _session_factory(engine)() as session:
+        for status in (RunStatus.SUCCESS, RunStatus.FAILED, RunStatus.PENDING):
+            session.add(Run(target_id="t2", started_at=datetime.now(UTC), status=status))
+        await session.commit()
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_create_pending_run_loses_a_cross_process_race_quietly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Another process admitting a run between this process's SELECT and INSERT
+    (the in-process lock cannot see it) makes the INSERT hit the index; the
+    caller gets None, as for any refused admission, and nothing is raised.
+    """
+    from datetime import UTC, datetime
+
+    engine = _make_engine()
+    await _setup_db(engine)
+    real_factory = _session_factory(engine)
+
+    class _RacedSession:
+        """The real session, with a competitor that inserts right after the SELECT."""
+
+        def __init__(self, inner) -> None:
+            self._inner = inner
+
+        async def exec(self, statement):
+            result = await self._inner.exec(statement)
+            async with real_factory() as other:
+                other.add(
+                    Run(target_id="alpha", started_at=datetime.now(UTC), status=RunStatus.PENDING)
+                )
+                await other.commit()
+            return result
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+    @asynccontextmanager
+    async def _raced():
+        async with real_factory() as session:
+            yield _RacedSession(session)
+
+    monkeypatch.setattr(run_control, "get_session", _raced)
+    assert await create_pending_run("alpha") is None
+
+    async with real_factory() as session:
+        rows = (await session.exec(select(Run))).all()
+    assert [(r.target_id, r.status) for r in rows] == [("alpha", RunStatus.PENDING)]
+    await engine.dispose()

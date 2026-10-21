@@ -20,6 +20,12 @@ from [SECURITY.md](SECURITY.md).
   `targets.example.yaml` ships disabled. `run_target_pipeline`,
   `_qualification_client` and `synthesize` accept injected collectors and an
   LLM client for it. See docs/operations.md (Showcase run).
+- One active run per target is now enforced by the database (migration 0010:
+  partial unique index `ux_runs_one_active_per_target` on PENDING and RUNNING
+  rows), not only by the in-process lock of `create_pending_run`: a second
+  process, such as the showcase command, racing the API loses the INSERT and
+  is reported as not admitted. Runs still active when the migration runs are
+  failed first, as the startup cleanup would.
 - README (both languages): the hackathon table now lists the work merged since the
   first dashboard, from alert cases and the external STIX intake to the threat model.
 - investigation-assistant worker (ADR-011, phase 3): `docker-compose.engine.yml`

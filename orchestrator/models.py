@@ -17,7 +17,7 @@ from enum import StrEnum
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
-from sqlalchemy import Index
+from sqlalchemy import Index, text
 from sqlmodel import Column, DateTime, SQLModel
 from sqlmodel import Field as SQLField
 
@@ -375,6 +375,19 @@ class Run(SQLModel, table=True):
     """
 
     __tablename__ = "runs"
+    # One active run per target, enforced by the database: the in-process lock
+    # of run_control.create_pending_run serialises the API and the scheduler;
+    # the index also covers a second process (the showcase command) racing
+    # them. The condition names the stored enum names.
+    __table_args__ = (
+        Index(
+            "ux_runs_one_active_per_target",
+            "target_id",
+            unique=True,
+            sqlite_where=text("status IN ('PENDING', 'RUNNING')"),
+            postgresql_where=text("status IN ('PENDING', 'RUNNING')"),
+        ),
+    )
 
     id: int | None = SQLField(default=None, primary_key=True)
     target_id: str = SQLField(index=True)
