@@ -8,7 +8,7 @@ on:
 jobs:
   lint-and-test:
     name: Lint & Unit Tests
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, osint]
     permissions:
       contents: read
 
@@ -58,7 +58,7 @@ jobs:
 
   frontend:
     name: Dashboard (lint, tests, build)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, osint]
     permissions:
       contents: read
     defaults:
@@ -95,7 +95,7 @@ jobs:
 
   public-release-guard:
     name: Public-release guard
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, osint]
     permissions:
       contents: read
 
@@ -117,7 +117,7 @@ jobs:
 
   helm-chart:
     name: Helm chart
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, osint]
     permissions:
       contents: read
 
