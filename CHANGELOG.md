@@ -9,6 +9,23 @@ from [SECURITY.md](SECURITY.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- `report.pdf` is legible again. The previous renderer cut every line into
+  40-character chunks and drew every second chunk past the right edge of the
+  page, so the download the console offers as "report in PDF" came out as
+  near-blank pages with truncated text. `orchestrator/reports/pdf.py` now
+  renders the report's Markdown subset (headings, bullets, pipe tables,
+  links, paragraphs) as a paged A4 document: text flows between the margins,
+  overlong URLs and STIX ids wrap character-wise, tables keep their header,
+  links keep their URL on paper, and every page carries a footer with the
+  page number in the report language. Core Helvetica covers Latin-1; a few
+  common characters outside it (dashes, ellipsis, arrows, curly quotes) are
+  transliterated and anything else degrades to `?` instead of aborting.
+  A table cell is capped at 900 characters so one row always fits on a
+  page (fpdf2 refuses taller rows; a 3,000-character URL or collector error
+  used to cost the whole PDF); the footer text comes from `orchestrator/i18n.py`.
+
 ### Added
 
 - README screenshots (both languages) now show the console after the showcase
