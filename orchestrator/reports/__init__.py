@@ -50,6 +50,10 @@ _TEXT: dict[str, dict[str, str]] = {
     "classification_restricted": {"es": "reservada (restricted)", "en": "restricted"},
     "processing": {"es": "Procesamiento de la síntesis", "en": "Synthesis processing"},
     "processing_local": {"es": "modelo local (Ollama)", "en": "local model (Ollama)"},
+    "processing_none": {
+        "es": "sin síntesis (LLM_PROVIDER=none)",
+        "en": "no synthesis (LLM_PROVIDER=none)",
+    },
     "processing_cloud": {"es": "nube: {provider}", "en": "cloud: {provider}"},
     "collectors": {"es": "## Estado por collector", "en": "## Collector status"},
     "collector": {"es": "Collector", "en": "Collector"},
@@ -116,10 +120,11 @@ class RunReportData(BaseModel):
     target_fqdn: str
     authorization: str
     purpose: str
-    # Target.classification and Target.llm, printed in the header so the
-    # document itself says what it may contain and where the synthesis ran.
+    # Target.classification and where its model prompts go
+    # (synthesizer.providers.effective_provider), printed in the header so
+    # the document itself says what it may contain and where it was processed.
     classification: str = "osint"
-    llm: str = "local"
+    processing: str = "ollama"
     run_id: int
     run_status: str
     run_started_at: datetime
@@ -217,11 +222,13 @@ def _classification_label(classification: str, lang: str) -> str:
     return _msg(key, lang) if key in _TEXT else classification
 
 
-def _processing_label(llm: str, lang: str) -> str:
-    """Where the synthesis ran: the local Ollama or the named cloud provider."""
-    if llm == "local":
+def _processing_label(processing: str, lang: str) -> str:
+    """Where the model prompts go: nowhere, the local Ollama or a cloud provider."""
+    if processing == "none":
+        return _msg("processing_none", lang)
+    if processing == "ollama":
         return _msg("processing_local", lang)
-    return _msg("processing_cloud", lang).format(provider=llm)
+    return _msg("processing_cloud", lang).format(provider=processing)
 
 
 def _collector_table(data: RunReportData, lang: str) -> list[str]:
@@ -410,7 +417,7 @@ def _markdown_content(
         f"- **{_msg('authorization', lang)}:** {data.authorization}",
         f"- **{_msg('purpose', lang)}:** {data.purpose}",
         f"- **{_msg('classification', lang)}:** {_classification_label(data.classification, lang)}",
-        f"- **{_msg('processing', lang)}:** {_processing_label(data.llm, lang)}",
+        f"- **{_msg('processing', lang)}:** {_processing_label(data.processing, lang)}",
         "",
         _msg("collectors", lang),
         *_collector_table(data, lang),

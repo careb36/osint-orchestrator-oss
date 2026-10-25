@@ -25,6 +25,8 @@ export type TargetSummary = {
   llm?: string;
   /** Target.classification: "osint" (open sources, cloud allowed) or "restricted" (local model only). */
   classification?: string;
+  /** Where the model prompts actually go: "none", "ollama" or a cloud provider (API-computed). */
+  processing?: string;
   language?: string | null;
   collectors?: Record<string, { enabled?: boolean } & Record<string, unknown>>;
   schedule?: { cron?: string } & Record<string, unknown>;

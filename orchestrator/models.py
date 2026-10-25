@@ -378,10 +378,31 @@ class Target(BaseModel):
 
     @model_validator(mode="after")
     def _restricted_stays_local(self) -> Target:
-        if self.classification == "restricted" and self.llm != "local":
+        """A restricted target's text never reaches a hosted language model.
+
+        Three paths would send it to one: the target's own ``llm``, the
+        SocialOSINT collector (which runs its own LLM analysis, a cloud model
+        by default) and Tavily's ``include_answer`` (Tavily writes the answer
+        with its own model). Collectors still query the public sources they
+        need with the entity's name or domain; that is collection, not
+        analysis, and the rule does not pretend otherwise.
+        """
+        if self.classification != "restricted":
+            return self
+        if self.llm != "local":
             raise ValueError(
                 f"classification 'restricted' requires llm: local, got llm: {self.llm}; "
-                "the prompts of a restricted target must never leave the host"
+                "the model prompts of a restricted target must never leave the host"
+            )
+        if self.collectors.socialosint.enabled:
+            raise ValueError(
+                "classification 'restricted' does not allow collectors.socialosint: "
+                "SocialOSINT sends its analysis to its own LLM, a cloud model by default"
+            )
+        if self.collectors.tavily.include_answer:
+            raise ValueError(
+                "classification 'restricted' does not allow collectors.tavily.include_answer: "
+                "the answer is written by Tavily's own model"
             )
         return self
 

@@ -59,7 +59,7 @@ from orchestrator.reports import (
 from orchestrator.sinks import OpenCTIIngestError, is_transient
 from orchestrator.sinks.opencti import OpenCTISink
 from orchestrator.synthesizer import synthesize
-from orchestrator.synthesizer.providers import LLMClient, get_client
+from orchestrator.synthesizer.providers import LLMClient, effective_provider, get_client
 from orchestrator.synthesizer.qualify import persist_qualifications, qualify_evidence
 
 if TYPE_CHECKING:
@@ -907,7 +907,7 @@ async def _run_target_pipeline(
         authorization=target.authorization,
         purpose=target.purpose,
         classification=target.classification,
-        llm=target.llm,
+        processing=effective_provider(target),
         run_id=run_id,
         run_status=final_status.value,
         run_started_at=run_started_at,

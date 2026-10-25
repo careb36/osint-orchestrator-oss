@@ -512,8 +512,22 @@ describe('App shell', () => {
 
     await screen.findByRole('heading', { name: 'example.com' });
     expect(screen.getByText('restricted')).toBeInTheDocument();
-    expect(screen.getByText(/local model only, never the cloud/i)).toBeInTheDocument();
+    expect(screen.getByText(/local model only; no SocialOSINT/i)).toBeInTheDocument();
     expect(screen.getByText('Local model (Ollama)')).toBeInTheDocument();
+  });
+
+  it('translates the classification and names the cloud provider in Spanish', async () => {
+    installFetchMock();
+    renderApp(['/targets/example-corp'], 'es');
+    await screen.findByRole('heading', { name: 'example.com' });
+    expect(screen.getByText('reservada')).toBeInTheDocument();
+    expect(screen.queryByText('restricted')).not.toBeInTheDocument();
+    expect(screen.getByText('Modelo local (Ollama)')).toBeInTheDocument();
+
+    renderApp(['/targets/paused-target'], 'es');
+    await screen.findByRole('heading', { name: 'paused.example' });
+    expect(screen.getByText('fuentes abiertas')).toBeInTheDocument();
+    expect(screen.getByText('Nube: nebius')).toBeInTheDocument();
   });
 
   it('shows the three top-level sections in the navigation', async () => {

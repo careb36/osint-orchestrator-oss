@@ -200,23 +200,85 @@ def test_restricted_target_must_use_the_local_model(tmp_path: Path) -> None:
     assert targets[1].classification == "osint"  # the default: open sources
 
 
-def test_restricted_validation_names_the_provider() -> None:
-    from pydantic import ValidationError
-
+def _restricted(**overrides):
     from orchestrator.models import Target
 
-    try:
-        Target(
-            id="x",
-            fqdn="x.example",
-            authorization="a",
-            purpose="p",
-            classification="restricted",
-            llm="anthropic",
-        )
-    except ValidationError as exc:
-        message = str(exc)
-        assert "requires llm: local" in message
-        assert "got llm: anthropic" in message
-    else:  # pragma: no cover - the assertion is the point of the test
-        raise AssertionError("a restricted target with a cloud provider must not validate")
+    fields = {
+        "id": "x",
+        "fqdn": "x.example",
+        "authorization": "a",
+        "purpose": "p",
+        "classification": "restricted",
+    }
+    return Target(**{**fields, **overrides})
+
+
+def test_restricted_validation_names_the_provider() -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match=r"requires llm: local, got llm: anthropic"):
+        _restricted(llm="anthropic")
+
+
+def test_restricted_target_cannot_use_socialosint_or_tavily_answers() -> None:
+    """Both reach a hosted model by another road than ``llm``: SocialOSINT
+    runs its own LLM analysis and Tavily writes ``include_answer`` with its
+    own model."""
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="collectors.socialosint"):
+        _restricted(collectors={"socialosint": {"enabled": True}})
+    with pytest.raises(ValidationError, match="include_answer"):
+        _restricted(collectors={"tavily": {"enabled": True, "include_answer": True}})
+    # Plain Tavily searches are collection, not analysis: still allowed.
+    assert _restricted(collectors={"tavily": {"enabled": True}}).classification == "restricted"
+
+
+def test_effective_provider_follows_the_global_switches(monkeypatch) -> None:
+    """The report and the console show where the prompts actually go, which
+    LLM_PROVIDER can change: ``none`` turns synthesis off and ``nebius``
+    remaps ``llm: openai``."""
+    from orchestrator.models import Target
+    from orchestrator.synthesizer.providers import effective_provider
+
+    def target(llm: str) -> Target:
+        return Target(id="t", fqdn="t.example", authorization="a", purpose="p", llm=llm)
+
+    monkeypatch.setattr(settings, "llm_provider", "ollama")
+    assert [effective_provider(target(x)) for x in ("local", "openai", "nebius", "anthropic")] == [
+        "ollama",
+        "openai",
+        "nebius",
+        "anthropic",
+    ]
+    monkeypatch.setattr(settings, "llm_provider", "nebius")
+    assert effective_provider(target("openai")) == "nebius"
+    assert effective_provider(target("local")) == "ollama"
+    monkeypatch.setattr(settings, "llm_provider", "none")
+    assert effective_provider(target("local")) == "none"
+    assert effective_provider(target("nebius")) == "none"
+
+
+def test_api_target_payload_carries_the_effective_provider(monkeypatch, tmp_path: Path) -> None:
+    path = tmp_path / "targets.yaml"
+    _write(
+        path,
+        """
+        targets:
+          - id: remapped
+            fqdn: remapped.example.com
+            authorization: self-owned
+            purpose: test
+            llm: openai
+        """,
+    )
+    monkeypatch.setattr(settings, "targets_file", str(path))
+    monkeypatch.setattr(settings, "llm_provider", "nebius")
+    monkeypatch.setattr(settings, "orchestrator_api_key", "")
+    with TestClient(app) as client:
+        listed = client.get("/targets").json()
+        single = client.get("/targets/remapped").json()
+    assert listed[0]["processing"] == single["processing"] == "nebius"
+    assert single["llm"] == "openai"
