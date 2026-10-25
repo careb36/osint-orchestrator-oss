@@ -11,6 +11,16 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- `classification` per target in `targets.yaml`: `osint` (the default; open
+  sources only, may go to the cloud provider `llm` names) or `restricted` (an
+  investigation that mixes in material that must stay on premises). A
+  restricted target requires `llm: local`; the loader rejects the block with
+  the provider named, so the policy no longer depends on nobody mistyping the
+  YAML. The console's target card shows the classification and where the
+  synthesis runs ("Local model (Ollama)" or "Cloud: nebius") instead of the
+  bare `llm` value, and the report header carries both lines, so the document
+  says what it may contain and where its synthesis was processed.
+
 - README screenshots (both languages) now show the console after the showcase
   run, served by the real API over a database seeded with the two recordings,
   instead of the unit tests' fixtures; the captions say so.

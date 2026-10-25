@@ -164,3 +164,59 @@ def test_load_targets_reports_a_non_mapping_entry_by_index(tmp_path: Path) -> No
     targets, errors = load_targets(str(path))
     assert [target.id for target in targets] == ["acme"]
     assert errors == ["<index 1>"]
+
+
+def test_restricted_target_must_use_the_local_model(tmp_path: Path) -> None:
+    """A restricted investigation never reaches a cloud provider: the block is
+    rejected at load time instead of silently sending its prompts away."""
+    path = tmp_path / "targets.yaml"
+    _write(
+        path,
+        """
+        targets:
+          - id: on-premises
+            fqdn: onprem.example.com
+            authorization: self-owned
+            purpose: test
+            classification: restricted
+            llm: local
+          - id: leaky
+            fqdn: leaky.example.com
+            authorization: self-owned
+            purpose: test
+            classification: restricted
+            llm: nebius
+          - id: open
+            fqdn: open.example.com
+            authorization: self-owned
+            purpose: test
+            llm: nebius
+        """,
+    )
+    targets, errors = load_targets(str(path))
+    assert [target.id for target in targets] == ["on-premises", "open"]
+    assert errors == ["leaky"]
+    assert targets[0].classification == "restricted"
+    assert targets[1].classification == "osint"  # the default: open sources
+
+
+def test_restricted_validation_names_the_provider() -> None:
+    from pydantic import ValidationError
+
+    from orchestrator.models import Target
+
+    try:
+        Target(
+            id="x",
+            fqdn="x.example",
+            authorization="a",
+            purpose="p",
+            classification="restricted",
+            llm="anthropic",
+        )
+    except ValidationError as exc:
+        message = str(exc)
+        assert "requires llm: local" in message
+        assert "got llm: anthropic" in message
+    else:  # pragma: no cover - the assertion is the point of the test
+        raise AssertionError("a restricted target with a cloud provider must not validate")

@@ -506,6 +506,16 @@ describe('App shell', () => {
     expect(screen.getByRole('button', { name: /start run/i })).toBeEnabled();
   });
 
+  it('shows the classification and where the synthesis runs on the target detail', async () => {
+    installFetchMock();
+    renderApp(['/targets/example-corp']);
+
+    await screen.findByRole('heading', { name: 'example.com' });
+    expect(screen.getByText('restricted')).toBeInTheDocument();
+    expect(screen.getByText(/local model only, never the cloud/i)).toBeInTheDocument();
+    expect(screen.getByText('Local model (Ollama)')).toBeInTheDocument();
+  });
+
   it('shows the three top-level sections in the navigation', async () => {
     installFetchMock();
     renderApp();

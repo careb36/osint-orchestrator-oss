@@ -906,6 +906,8 @@ async def _run_target_pipeline(
         target_fqdn=target.fqdn,
         authorization=target.authorization,
         purpose=target.purpose,
+        classification=target.classification,
+        llm=target.llm,
         run_id=run_id,
         run_status=final_status.value,
         run_started_at=run_started_at,

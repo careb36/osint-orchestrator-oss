@@ -249,3 +249,21 @@ async def test_report_renders_when_synthesis_failed(tmp_path: Path) -> None:
     )
     text = report_path.read_text(encoding="utf-8")
     assert any(t("synthesis_unavailable", language=lang) in text for lang in ("es", "en"))
+
+
+@pytest.mark.asyncio
+async def test_report_header_states_classification_and_processing(tmp_path: Path) -> None:
+    """The document says what it may contain and where the synthesis ran."""
+    data = _sample_report_data()  # defaults: osint, local
+    es_text = (await generate_report(data, report_dir=str(tmp_path))).read_text(encoding="utf-8")
+    assert "- **Clasificación:** fuentes abiertas (osint)" in es_text
+    assert "- **Procesamiento de la síntesis:** modelo local (Ollama)" in es_text
+
+    cloud = _sample_report_data(target_id="beta").model_copy(
+        update={"classification": "restricted", "llm": "nebius"}
+    )
+    en_text = (await generate_report(cloud, report_dir=str(tmp_path), language="en")).read_text(
+        encoding="utf-8"
+    )
+    assert "- **Classification:** restricted" in en_text
+    assert "- **Synthesis processing:** cloud: nebius" in en_text

@@ -23,6 +23,8 @@ export type TargetSummary = {
   authorization: string;
   purpose: string;
   llm?: string;
+  /** Target.classification: "osint" (open sources, cloud allowed) or "restricted" (local model only). */
+  classification?: string;
   language?: string | null;
   collectors?: Record<string, { enabled?: boolean } & Record<string, unknown>>;
   schedule?: { cron?: string } & Record<string, unknown>;

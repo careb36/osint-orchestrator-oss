@@ -69,8 +69,21 @@ export function TargetDetailPage() {
             <strong>{String(target.data.schedule?.cron ?? '—')}</strong>
           </div>
           <div className="state-card">
+            <span className="label">{t('target.classification')}</span>
+            <strong>{tv(target.data.classification ?? 'osint')}</strong>
+            <small>
+              {target.data.classification === 'restricted'
+                ? t('target.classification.restricted')
+                : t('target.classification.osint')}
+            </small>
+          </div>
+          <div className="state-card">
             <span className="label">{t('target.llm')}</span>
-            <strong>{target.data.llm ?? 'local'}</strong>
+            <strong>
+              {(target.data.llm ?? 'local') === 'local'
+                ? t('target.processing.local')
+                : t('target.processing.cloud', { provider: target.data.llm ?? '' })}
+            </strong>
           </div>
           <div className="state-card">
             <span className="label">{t('target.risk')}</span>

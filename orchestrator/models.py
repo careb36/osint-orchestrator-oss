@@ -16,7 +16,14 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 from sqlalchemy import Index, text
 from sqlmodel import Column, DateTime, SQLModel
 from sqlmodel import Field as SQLField
@@ -345,6 +352,14 @@ class Target(BaseModel):
     collectors: CollectorSet = Field(default_factory=CollectorSet)
     schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
     llm: Literal["local", "anthropic", "openai", "nebius"] = "local"
+    # Data classification of what this target's prompts may carry. "osint"
+    # (the default) is open-source material only and may go to a cloud
+    # provider when ``llm`` says so; "restricted" marks an investigation that
+    # mixes in material the operator must keep on premises, and pins ``llm``
+    # to "local": the validator below rejects any other provider, so the
+    # policy does not depend on nobody mistyping the YAML. Stable English
+    # identifier, shown translated by the console and the report (ADR-004).
+    classification: Literal["osint", "restricted"] = "osint"
     # Override the global ORCHESTRATOR_LANGUAGE for this target's reports and
     # synthesis. None = use the global setting.
     language: str | None = None
@@ -360,6 +375,15 @@ class Target(BaseModel):
                 "starting with a letter or digit: it names the report directory"
             )
         return value
+
+    @model_validator(mode="after")
+    def _restricted_stays_local(self) -> Target:
+        if self.classification == "restricted" and self.llm != "local":
+            raise ValueError(
+                f"classification 'restricted' requires llm: local, got llm: {self.llm}; "
+                "the prompts of a restricted target must never leave the host"
+            )
+        return self
 
 
 # ─── Run tracking (persisted to SQLite) ──────────────────────────────────────
