@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import re
 import smtplib
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -289,6 +290,14 @@ async def test_email_spanish_subject_and_multiple_recipients() -> None:
     )
     assert "Alerta OSINT" in subject
     assert subject.find("example.com") >= 0
+    # The risk level is a stable English identifier in the event; the reader
+    # gets its label.
+    assert "riesgo alto (high)" in subject
+    body = msg_obj.get_payload(decode=True).decode("utf-8")
+    assert "Riesgo    : alto (high)" in body
+    assert "Estado    : exitosa (success)" in body
+    # Local date with the UTC instant beside it (UTC here: no zone configured).
+    assert re.search(r"Generado  : \d\d/\d\d/\d{4} \d\d:\d\d UTC \(\d{4}-\d\d-\d\dT", body)
 
 
 @pytest.mark.asyncio

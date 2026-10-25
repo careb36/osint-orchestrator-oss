@@ -558,6 +558,8 @@ async def synthesize(
                         "synthesis_failed", language=target.language, error=_safe_error(error2)
                     ),
                     risk_level="unknown",
+                    provider=provider_name,
+                    model=client.model_for_route("reasoning"),
                 )
                 # The run's note first: if the database refuses it, the outer
                 # handler reports the failure and no half-recorded fallback is left.
@@ -573,13 +575,16 @@ async def synthesize(
                 )
                 return finding, "failed"
 
+        # The model the client really sent the request to: Ollama ignores
+        # the route and serves OLLAMA_MODEL, so resolving it here would
+        # record a model that was never used. The finding carries the same
+        # pair so the report's "document data" block can name them.
+        finding.provider = provider_name
+        finding.model = client.model_for_route("reasoning")
         await _persist_finding(
             finding,
-            provider=provider_name,
-            # The model the client really sent the request to: Ollama ignores
-            # the route and serves OLLAMA_MODEL, so resolving it here would
-            # record a model that was never used.
-            model=client.model_for_route("reasoning"),
+            provider=finding.provider,
+            model=finding.model,
             duration_ms=duration_ms,
             raw_response=raw,
         )
