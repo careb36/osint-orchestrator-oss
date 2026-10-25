@@ -76,7 +76,13 @@ targets:
         include_domains: []
         exclude_domains: []
         include_answer: false
-        max_calls_per_run: 3
+        # Cinco plantillas de búsqueda por idioma: prensa adversa y sanciones,
+        # estructura societaria, procesos judiciales, antecedente penal
+        # (condena, procesamiento) y sanción administrativa (multa,
+        # inhabilitación, sumario). Sin filtro temporal: una condena de hace
+        # diez años sigue siendo un hallazgo. Con varios search_terms, subí el
+        # presupuesto para que alcance a todas las plantillas.
+        max_calls_per_run: 5
         # Tiempo de pared total del recolector (reintentos incluidos).
         timeout_seconds: 120
 

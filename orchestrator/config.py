@@ -186,7 +186,7 @@ class Settings(BaseSettings):
     # Global ceilings for the per-target ``max_results`` / ``max_calls_per_run``.
     # A call ceiling of 0 disables the collector for every target.
     tavily_max_results: int = Field(default=5, ge=1, le=20)
-    tavily_max_calls_per_run: int = Field(default=3, ge=0, le=20)
+    tavily_max_calls_per_run: int = Field(default=5, ge=0, le=20)
     # Default wall-clock budget (seconds) of a whole Tavily run per target,
     # retries included; targets.yaml ``timeout_seconds`` overrides it.
     tavily_timeout_seconds: int = 120
@@ -196,8 +196,13 @@ class Settings(BaseSettings):
     tavily_exclude_domains: str = ""
 
     # ─── Retention ───────────────────────────────────────────────────────────
-    # Days to keep run rows and daily_reports directories (0 = disabled).
-    orchestrator_retention_days: int = 90
+    # Days to keep run rows and daily_reports directories; 0 (the default)
+    # never purges. Runs and reports are the evidence a compliance file is
+    # built on, and record-keeping rules measure its retention in years, so
+    # nothing is deleted unless an operator sets a period on purpose. Even then,
+    # for each target the first run that opened an alert case and every run
+    # after it are kept, so the evidence chain stays verifiable (retention.py).
+    orchestrator_retention_days: int = 0
     # UTC cron expression for the nightly purge job.
     orchestrator_retention_cron: str = "30 3 * * *"
 

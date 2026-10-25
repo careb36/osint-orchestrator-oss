@@ -7,7 +7,7 @@ overwrite each other's artefacts):
   - report.md
   - bundle.stix.json
   - delta.json
-  - report.pdf (optional; best-effort via fpdf2)
+  - report.pdf (optional; best-effort via fpdf2, see reports/pdf.py)
 
 Also maintains daily_reports/YYYY-MM-DD/index.md.
 """
@@ -457,35 +457,22 @@ def _json_default(value: Any) -> Any:
     return str(value)
 
 
-def _write_optional_pdf(path: Path, markdown: str) -> None:
+def _write_optional_pdf(path: Path, markdown: str, lang: str = "es") -> None:
     """Best-effort PDF rendering of the Markdown report via fpdf2.
 
     Never raises: a missing library or a rendering failure is logged as a
     warning and the run proceeds — report.md/bundle/delta are the artifacts
-    that matter. Markdown syntax is stripped and text is latin-1 encoded
-    (fpdf2 core-font limitation), so the PDF is a plain-text companion,
-    not a typeset document.
+    that matter. The layout itself lives in :mod:`orchestrator.reports.pdf`.
     """
     try:
-        from fpdf import FPDF
+        import fpdf  # noqa: F401  — probe the optional dependency first
     except Exception as exc:  # noqa: BLE001
         logger.warning("PDF not generated: fpdf2 unavailable (%s)", exc)
         return
     try:
-        pdf = FPDF()
-        pdf.set_auto_page_break(auto=True, margin=12)
-        pdf.add_page()
-        pdf.set_font("Helvetica", size=11)
-        for raw_line in markdown.splitlines():
-            line = raw_line.replace("`", "").replace("#", "").replace("*", "").strip()
-            if not line:
-                pdf.ln(4)
-                continue
-            line = line.encode("latin-1", "replace").decode("latin-1")
-            chunks = [line[i : i + 40] for i in range(0, len(line), 40)] or [""]
-            for chunk in chunks:
-                pdf.multi_cell(180, 6, chunk)
-        pdf.output(str(path))
+        from orchestrator.reports.pdf import render_pdf
+
+        render_pdf(path, markdown, lang)
     except Exception as exc:  # noqa: BLE001
         logger.warning("PDF generation failed: %s", exc)
 
@@ -616,7 +603,7 @@ async def generate_report(
     report_md_path.write_text(report_md, encoding="utf-8")
     _write_json(bundle_path, merged_bundle)
     _write_json(delta_path, delta)
-    _write_optional_pdf(pdf_path, report_md)
+    _write_optional_pdf(pdf_path, report_md, lang)
     risk_level = finding.risk_level if finding is not None else "—"
     _write_daily_index(
         date_dir, data.target_id, data.run_id, data.run_status, len(delta), risk_level, lang
