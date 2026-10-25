@@ -76,7 +76,13 @@ targets:
         include_domains: []
         exclude_domains: []
         include_answer: false
-        max_calls_per_run: 3
+        # Cinco plantillas de búsqueda por idioma: prensa adversa y sanciones,
+        # estructura societaria, procesos judiciales, antecedente penal
+        # (condena, procesamiento) y sanción administrativa (multa,
+        # inhabilitación, sumario). Sin filtro temporal: una condena de hace
+        # diez años sigue siendo un hallazgo. Con varios search_terms, subí el
+        # presupuesto para que alcance a todas las plantillas.
+        max_calls_per_run: 5
         # Tiempo de pared total del recolector (reintentos incluidos).
         timeout_seconds: 120
 
@@ -94,6 +100,18 @@ targets:
     # también para local, y LLM_PROVIDER=nebius manda los objetivos con
     # llm: openai a Nebius, que entonces necesitan NEBIUS_API_KEY.
     llm: local
+
+    # Clasificación de lo que llevan los prompts de este objetivo.
+    # osint (por defecto): solo fuentes abiertas; puede ir a la nube si `llm`
+    #   lo indica.
+    # restricted: la investigación mezcla material que no debe salir del
+    #   equipo; obliga a `llm: local` y no admite SocialOSINT (usa su propio
+    #   modelo en la nube) ni `tavily.include_answer` (la respuesta la escribe
+    #   el modelo de Tavily); el cargador rechaza el bloque si no se cumple.
+    #   Los recolectores siguen consultando fuentes públicas con el nombre o
+    #   el dominio. La consola y el informe muestran la clasificación y dónde
+    #   se procesa la síntesis.
+    classification: osint
 
     # Idioma de los informes y de la síntesis de este objetivo.
     # es | en. Omítelo para usar ORCHESTRATOR_LANGUAGE del .env.
@@ -209,4 +227,5 @@ targets:
         enabled: true
         search_terms: ["Meridian Ridge Holdings"]
     llm: nebius
+    classification: osint          # fuentes abiertas: puede procesarse en la nube
     report_dir: "daily_reports"

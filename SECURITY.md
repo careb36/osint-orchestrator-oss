@@ -48,12 +48,13 @@ advisory with any fix. Security fixes are released and back-referenced in
 | Metrics | Label values are bounded; never an observable value, run id or error string | [Operations → Observability](docs/operations.md#observability) |
 | Logs | JSON logs with request ids; no secret material is logged | `orchestrator/logging_config.py` |
 | Container | The orchestrator image runs as uid 1000, never root; images are pinned to a patch release or a commit; compose publishes every port on `127.0.0.1` only | `Dockerfile`, `docker-compose*.yml`, `tests/unit/test_compose_hardening.py` |
-| Retention | Nightly purge of runs/reports after `ORCHESTRATOR_RETENTION_DAYS` (default 90) | [Operations → Retention](docs/operations.md#retention) |
+| Retention | No purge by default (`ORCHESTRATOR_RETENTION_DAYS=0`); an opt-in nightly purge keeps, per target, the first run that met an alert rule and everything after it | [Operations → Retention](docs/operations.md#retention) |
 | Main branch | Ruleset requiring green CI (lint, unit tests, Helm chart, public-release guard) and forbidding force pushes | repository settings |
 
-The 90-day default is operational. It is not a legal retention period: when
-artifacts form part of AML/CFT evidence, configure the period your regulation
-requires or use controlled external archival storage.
+Retention is disabled by default because the artifacts form part of AML/CFT
+evidence and record-keeping rules measure their retention in years. If you
+enable a period, make it the one your regulation requires, not an operational
+one, and archive the run directories you must keep before the first purge.
 
 Before any deployment beyond a laptop:
 
@@ -98,6 +99,11 @@ Before any deployment beyond a laptop:
   `openai` or `anthropic` sends the run's observables and the web evidence
   being qualified to that cloud provider. Make each cloud opt-in, and the
   `LLM_PROVIDER` value, an explicit, documented decision in your jurisdiction.
+- A target marked `classification: restricted` is pinned to `llm: local` and
+  cannot enable SocialOSINT or Tavily's `include_answer`, the two collector
+  paths that hand text to a hosted model; the loader rejects a block that
+  breaks the rule. Its collectors still query public sources with the
+  entity's name or domain.
 - Tavily receives the search terms configured for a target (entity names or
   the domain).
 - Model output (qualification and risk synthesis) is decision support for an

@@ -255,7 +255,7 @@ Each run writes its own directory,
 
 | File | Content |
 | --- | --- |
-| `report.md` / `report.pdf` | Operator report: collector status, what is new, inventory, qualified evidence, synthesis |
+| `report.md` / `report.pdf` | Operator report: synthesis, qualified evidence, what is new, errors, then a technical annex (collector status, inventory with STIX ids, relationships) and the document data (software version, model, disclaimer) |
 | `bundle.stix.json` | The run's STIX 2.1 bundle, deterministic ids |
 | `delta.json` | Observables new since the previous run |
 | `qualified_evidence.json` | Each web result with its category, relevance, confidence and rationale |
@@ -339,15 +339,23 @@ increase(osint_orchestrator_alert_case_time_to_acknowledge_seconds_sum[1d])
 
 ## Retention
 
-A nightly job (`ORCHESTRATOR_RETENTION_CRON`) deletes runs that finished more
-than `ORCHESTRATOR_RETENTION_DAYS` ago (default `90`, `0` disables it) with their
-observables, findings, qualified evidence, alert cases, alerts and queued
-deliveries. A
-`daily_reports/<date>` directory is deleted once its whole day is older than the
-cutoff and no remaining run started that day, so a kept run never loses its
-report or manifest. The delta memory (`seen_observables`) is never purged. The default is operational, not a legal retention period: when reports
-are due-diligence evidence, set the period your regulation requires or archive
-the run directories before the purge.
+Nothing is purged by default: `ORCHESTRATOR_RETENTION_DAYS` is `0`. Runs and
+reports are the evidence a compliance file is built on, and record-keeping
+rules count their retention in years, so deletion is opt-in. When a period is
+set, a nightly job (`ORCHESTRATOR_RETENTION_CRON`) deletes runs that finished
+more than that many days ago with their observables, findings, qualified
+evidence, alerts, queued deliveries and their own `run-<id>` directory.
+For each target, the first run that met an alert rule (and so opened an
+alert case, where the operator records the review) and every run after it
+are kept whatever their age: the purged runs are always the oldest ones of a
+target, a contiguous prefix of its chain, which `chain/verify` reports as an
+anchor rather than as tampering. A `daily_reports/<date>` directory is
+deleted once its whole day is older than the cutoff and no remaining run
+started that day, so a kept run never loses its report or manifest. The
+summary's `runs_retained_with_case` counts the expired runs kept this way at
+each purge (a snapshot, not a delta). The delta memory (`seen_observables`) is never purged. Before
+enabling a period, archive the run directories you must keep, or set the
+period your regulation requires rather than an operational one.
 
 ## Observability
 

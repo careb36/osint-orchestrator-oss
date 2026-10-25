@@ -191,3 +191,31 @@ def test_risk_level_is_not_localised() -> None:
     finding = Finding(target_id="t1", run_id=1, summary="resumen en español")
     assert finding.risk_level == "unknown"
     assert finding.risk_level not in {"desconocido", "desconocida"}
+
+
+# ── Value labels ──────────────────────────────────────────────────────────────
+
+
+def test_value_catalogue_is_complete() -> None:
+    """Every identifier label carries every supported language."""
+    from orchestrator.i18n import _VALUES
+
+    missing = {
+        key: sorted(SUPPORTED_LANGUAGES - set(translations))
+        for key, translations in _VALUES.items()
+        if SUPPORTED_LANGUAGES - set(translations)
+    }
+    assert missing == {}, f"values missing translations: {missing}"
+
+
+def test_tv_translates_known_identifiers_and_echoes_unknown_ones() -> None:
+    """A status or risk code becomes a label; an identifier the catalogue
+    does not know comes back unchanged, because a report must not fail over
+    a new enum value."""
+    from orchestrator.i18n import tv
+
+    assert tv("high") == "alto"
+    assert tv("high", language="en") == "high"
+    assert tv("adverse_media") == "prensa adversa"
+    assert tv("domain-name", language="en") == "domain"
+    assert tv("brand-new-code") == "brand-new-code"

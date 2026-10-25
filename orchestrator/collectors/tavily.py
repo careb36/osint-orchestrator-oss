@@ -43,22 +43,31 @@ logger = logging.getLogger(__name__)
 TAVILY_SEARCH_URL = "https://api.tavily.com/search"
 _EVIDENCE_SNIPPET_CHARS = 600
 
-# Three templates per language so the default ``max_calls_per_run`` (3) covers
+# Five templates per language so the default ``max_calls_per_run`` (5) covers
 # the whole set; raising the cap does not change coverage.
 # The target is a plain quoted search term, not a ``site:`` scope: adverse
 # news, sanctions and litigation are reported by third parties, not on the
 # entity's own domain. ``include_domains`` exists for operators who want to
 # restrict the sources.
+# The last two templates look for the record itself, not the news cycle: a
+# criminal conviction or prosecution (relevant for years after the fact in a
+# due-diligence file) and administrative sanctions (fines, disqualification,
+# proceedings), which stay relevant without a time limit. For the same reason
+# no query carries a time filter (see ``_search``).
 _QUERY_TEMPLATES: dict[str, list[str]] = {
     "en": [
         "{target} adverse news OR sanctions OR litigation OR regulatory action",
         "{target} ownership structure shareholders ultimate beneficial owner",
         "{target} legal proceedings court case settlement investigation",
+        "{target} convicted OR sentenced OR indicted OR prosecuted money laundering fraud",
+        "{target} fined OR administrative sanction OR disqualified OR disciplinary proceedings",
     ],
     "es": [
         "{target} noticias adversas OR sanciones OR litigios OR acciones regulatorias",
         "{target} estructura societaria accionistas beneficiario final",
         "{target} procesos judiciales demanda acuerdo investigación",
+        "{target} condenado OR procesado OR imputado OR prisión lavado de activos OR blanqueo de capitales fraude",
+        "{target} multa OR sanción administrativa OR inhabilitación OR sumario",
     ],
 }
 
@@ -230,6 +239,10 @@ class TavilyCollector(BaseCollector):
     async def _search(
         self, query: str, cfg, max_results: int, deadline: float
     ) -> dict[str, Any] | None:
+        # No ``topic``, ``days`` or ``time_range``: a due-diligence search looks
+        # back as far as the sources go (a conviction of ten years ago still
+        # matters), so the request must never carry a recency filter.
+        # tests/unit/test_tavily_collector.py pins this.
         payload = {
             "query": query,
             "search_depth": cfg.search_depth or settings.tavily_search_depth,

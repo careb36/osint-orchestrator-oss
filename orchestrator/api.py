@@ -41,7 +41,7 @@ from sqlalchemy import func
 from sqlalchemy import select as sa_select
 from sqlmodel import col, select
 
-from orchestrator import alert_cases, metrics
+from orchestrator import __version__, alert_cases, metrics
 from orchestrator.auth import log_auth_status, log_secret_key_status, require_api_key
 from orchestrator.config import NEBIUS_DEFAULT_BASE_URL, settings
 from orchestrator.contracts import load_schema
@@ -80,15 +80,17 @@ from orchestrator.scheduler import (
     start_scheduler,
 )
 from orchestrator.sinks import OpenCTIIngestError, OpenCTISink
+from orchestrator.synthesizer.providers import effective_provider
 from orchestrator.synthesizer.providers.openai_compat import preflight_configured_models
 from orchestrator.synthesizer.qualify import load_run_qualifications
 from orchestrator.targets import load_targets
 
 logger = logging.getLogger(__name__)
 
-# Keep in sync with [project].version in pyproject.toml (surfaced via
-# GET /health and the build_info metric).
-VERSION = "0.1.0"
+# Single source of truth: orchestrator.__version__ (kept in sync with
+# [project].version in pyproject.toml); surfaced via GET /health, the
+# build_info metric and the report's "document data" block.
+VERSION = __version__
 REQUEST_ID_HEADER = "X-Request-ID"
 _LLM_MODEL_PREFLIGHT_TIMEOUT_SECONDS = 10.0
 # A caller-supplied request id is echoed into a response header and every log
@@ -493,11 +495,18 @@ _DLQ_CHANNEL_QUERY = Query(default=None)
 _DLQ_LIMIT_QUERY = Query(default=100, ge=1, le=1000)
 
 
+def _target_payload(target: Target) -> dict[str, Any]:
+    """The target as configured, plus ``processing``: where its model prompts
+    actually go after the global LLM_PROVIDER switches (none, ollama or a
+    cloud provider), so the console does not have to re-derive it."""
+    return {**target.model_dump(), "processing": effective_provider(target)}
+
+
 @router.get("/targets", response_model=list[dict[str, Any]], tags=["targets"])
 async def list_targets() -> list[dict[str, Any]]:
     """List all configured targets from targets.yaml."""
     targets = _load_targets()
-    return [target.model_dump() for target in targets]
+    return [_target_payload(target) for target in targets]
 
 
 @router.get("/targets/{target_id}", response_model=dict[str, Any], tags=["targets"])
@@ -506,7 +515,7 @@ async def get_target(target_id: str) -> dict[str, Any]:
     targets = _load_targets()
     for target in targets:
         if target.id == target_id:
-            return target.model_dump()
+            return _target_payload(target)
     raise HTTPException(status_code=404, detail=t("target_not_found", target_id=target_id))
 
 
