@@ -129,3 +129,90 @@ async def test_generate_report_writes_a_pdf_in_the_report_language(tmp_path: Pat
     drawn = _drawn_strings(pdf_path.read_bytes())
     assert "Daily OSINT report" in drawn
     assert "Page 1 of 1" in drawn
+
+
+# ─── Review follow-ups ────────────────────────────────────────────────────────
+
+_PT_PER_MM = 72 / 25.4
+_A4_WIDTH_MM = 210.0
+_MARGIN_MM = 15.0
+
+
+def _drawn_runs(pdf_bytes: bytes) -> list[tuple[float, float, str]]:
+    """(x in mm, font size, text) for every string the PDF draws, in order."""
+    runs: list[tuple[float, float, str]] = []
+    size = 10.0
+    for line in _page_text(pdf_bytes).splitlines():
+        font = re.search(r"/F\d+ ([0-9.]+) Tf", line)
+        if font:
+            size = float(font.group(1))
+        drawn = re.search(r"([0-9.]+) [0-9.]+ Td(?: 0 g)? \((.*)\) Tj", line)
+        if drawn:
+            runs.append((float(drawn.group(1)) / _PT_PER_MM, size, drawn.group(2)))
+    return runs
+
+
+def test_every_drawn_string_stays_between_the_margins(tmp_path: Path) -> None:
+    """The property the old renderer broke: no text past the right edge.
+
+    Each run's width is measured with the widest core face (Helvetica bold)
+    at its own size, so the bound is conservative.
+    """
+    from fpdf import FPDF
+
+    out = tmp_path / "report.pdf"
+    render_pdf(out, SAMPLE_MD, "es")
+    meter = FPDF()
+    meter.set_font("Helvetica", style="B")
+    runs = _drawn_runs(out.read_bytes())
+    assert runs, "no text was drawn"
+    for x_mm, size, text in runs:
+        meter.set_font_size(size)
+        right_mm = x_mm + meter.get_string_width(text.replace("\\(", "(").replace("\\)", ")"))
+        assert x_mm >= _MARGIN_MM - 0.5, (x_mm, text)
+        assert right_mm <= _A4_WIDTH_MM - _MARGIN_MM + 1.0, (right_mm, text)
+
+
+def test_a_table_row_taller_than_a_page_is_capped_not_lost(tmp_path: Path) -> None:
+    """fpdf2 refuses a row taller than the page; one 3,000-character URL or
+    collector error used to cost the whole PDF. The cell is capped instead."""
+    out = tmp_path / "report.pdf"
+    huge = "https://e.example/" + "y" * 3000
+    render_pdf(out, f"# T\n\n| a | b |\n|---|---|\n| x | {huge} |\n", "es")
+    drawn = _drawn_strings(out.read_bytes())
+    assert drawn.count("y") < 1000
+    assert "..." in drawn
+
+
+def test_rows_with_more_cells_than_the_header_and_escaped_pipes(tmp_path: Path) -> None:
+    blocks = parse_blocks("| a | b |\n|:--|--:|\n| 1 | 2 | 3 |\n| x \\| y | z |\n")
+    assert [block.kind for block in blocks] == ["table"]
+    assert blocks[0].rows == [["a", "b"], ["1", "2", "3"], ["x | y", "z"]]
+    render_pdf(tmp_path / "report.pdf", "| a | b |\n|:--|--:|\n| 1 | 2 | 3 |\n", "en")
+
+
+def test_page_count_alias_does_not_rewrite_body_text(tmp_path: Path) -> None:
+    out = tmp_path / "report.pdf"
+    render_pdf(out, "# T\n\nPlantilla {nb} literal", "es")
+    assert "Plantilla {nb} literal" in _drawn_strings(out.read_bytes())
+
+
+def test_snake_case_identifiers_keep_their_underscores() -> None:
+    assert inline_text("__init__") == "__init__"
+    assert inline_text("_Sin elementos_") == "Sin elementos"
+
+
+@pytest.mark.asyncio
+async def test_render_failure_is_a_warning_and_writes_no_pdf(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    import orchestrator.reports.pdf as pdf_module
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("layout exploded")
+
+    monkeypatch.setattr(pdf_module, "render_pdf", _boom)
+    report_path = await generate_report(_sample_report_data(), report_dir=str(tmp_path))
+    assert report_path.exists()
+    assert not (report_path.parent / "report.pdf").exists()
+    assert any("PDF generation failed" in record.getMessage() for record in caplog.records)

@@ -22,6 +22,9 @@ from [SECURITY.md](SECURITY.md).
   page number in the report language. Core Helvetica covers Latin-1; a few
   common characters outside it (dashes, ellipsis, arrows, curly quotes) are
   transliterated and anything else degrades to `?` instead of aborting.
+  A table cell is capped at 900 characters so one row always fits on a
+  page (fpdf2 refuses taller rows; a 3,000-character URL or collector error
+  used to cost the whole PDF); the footer text comes from `orchestrator/i18n.py`.
 
 ### Added
 

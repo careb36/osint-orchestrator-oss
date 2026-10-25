@@ -28,12 +28,16 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from orchestrator.i18n import t
+
 _LINK = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)")
 _BOLD = re.compile(r"\*\*(.+?)\*\*")
 _CODE = re.compile(r"`([^`]*)`")
-_EMPHASIS = re.compile(r"\A_(.+)_\Z")
+_EMPHASIS = re.compile(r"\A_([^_](?:.*[^_])?)_\Z")
 _HEADING = re.compile(r"\A(#{1,3})\s+(.*)\Z")
-_TABLE_SEPARATOR = re.compile(r"\A\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\Z")
+_TABLE_SEPARATOR = re.compile(r"\A\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\Z")
+# A cell boundary is a pipe not escaped with a backslash.
+_CELL_SPLIT = re.compile(r"(?<!\\)\|")
 
 # Characters outside Latin-1 that the report or the model commonly produce.
 _TRANSLITERATE = str.maketrans(
@@ -49,11 +53,23 @@ _TRANSLITERATE = str.maketrans(
         "→": "->",
         "←": "<-",
         "✓": "OK",
+        "€": "EUR",
+        "≥": ">=",
+        "≤": "<=",
         " ": " ",
     }
 )
 
-_PAGE_LABEL = {"es": "Página {page} de {total}", "en": "Page {page} of {total}"}
+# fpdf2 replaces this alias with the page count everywhere in the document,
+# so it must be a string no report or web title will ever contain ("{nb}",
+# the default, could appear in a scraped title).
+_PAGE_COUNT_ALIAS = "{__osint_page_count__}"
+
+# A single table cell is capped so one row always fits on a page: fpdf2
+# refuses to render a row taller than the page (a 2,000-character URL or a
+# collector error dump would otherwise cost the whole PDF). The Markdown
+# report keeps the full text.
+_MAX_CELL_CHARS = 900
 
 # Point sizes per block kind; body is the reference.
 _SIZE = {"h1": 16.0, "h2": 13.0, "h3": 11.0, "para": 10.0, "bullet": 10.0, "table": 8.5}
@@ -90,7 +106,11 @@ def _split_table_row(line: str) -> list[str]:
         cells = cells[1:]
     if cells.endswith("|"):
         cells = cells[:-1]
-    return [inline_text(cell.strip()) for cell in cells.split("|")]
+    return [inline_text(cell.strip().replace("\\|", "|")) for cell in _CELL_SPLIT.split(cells)]
+
+
+def _cap(cell: str) -> str:
+    return cell if len(cell) <= _MAX_CELL_CHARS else cell[: _MAX_CELL_CHARS - 3] + "..."
 
 
 def parse_blocks(markdown: str) -> list[Block]:
@@ -159,8 +179,6 @@ def render_pdf(path: Path, markdown: str, lang: str = "es") -> None:
     from fpdf.enums import XPos, YPos
     from fpdf.fonts import FontFace
 
-    page_label = _PAGE_LABEL.get(lang, _PAGE_LABEL["es"])
-
     class _ReportPDF(FPDF):
         def footer(self) -> None:
             self.set_y(-12)
@@ -169,7 +187,7 @@ def render_pdf(path: Path, markdown: str, lang: str = "es") -> None:
             self.cell(
                 0,
                 6,
-                page_label.format(page=self.page_no(), total="{nb}"),
+                t("pdf_page_of", language=lang, page=self.page_no(), total=_PAGE_COUNT_ALIAS),
                 align="R",
                 new_x=XPos.LMARGIN,
                 new_y=YPos.NEXT,
@@ -177,7 +195,7 @@ def render_pdf(path: Path, markdown: str, lang: str = "es") -> None:
             self.set_text_color(0, 0, 0)
 
     pdf = _ReportPDF(orientation="P", unit="mm", format="A4")
-    pdf.alias_nb_pages()
+    pdf.alias_nb_pages(_PAGE_COUNT_ALIAS)
     pdf.set_margins(left=15, top=15, right=15)
     pdf.set_auto_page_break(auto=True, margin=18)
     pdf.add_page()
@@ -210,7 +228,8 @@ def render_pdf(path: Path, markdown: str, lang: str = "es") -> None:
             )
         elif block.kind == "table":
             pdf.set_font("Helvetica", size=_SIZE["table"])
-            widths = _column_widths(block.rows, printable)
+            rows = [[_cap(cell) for cell in cells] for cells in block.rows]
+            widths = _column_widths(rows, printable)
             with pdf.table(
                 col_widths=tuple(widths),
                 width=printable,
@@ -220,7 +239,7 @@ def render_pdf(path: Path, markdown: str, lang: str = "es") -> None:
                 first_row_as_headings=True,
                 padding=1,
             ) as table:
-                for cells in block.rows:
+                for cells in rows:
                     row = table.row()
                     for index in range(len(widths)):
                         row.cell(cells[index] if index < len(cells) else "")
