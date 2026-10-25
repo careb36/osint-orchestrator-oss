@@ -9,6 +9,17 @@ from [SECURITY.md](SECURITY.md).
 
 ## [Unreleased]
 
+### Changed
+
+- CI runs on the self-hosted runner while GitHub-hosted minutes are exhausted.
+  Every workflow takes its runner from the repository variable `CI_RUNS_ON`;
+  unset, a private repository uses the runner labelled `osint` and a public
+  one `ubuntu-latest`. A new push to a pull request cancels the run it
+  replaces. Python 3.11 comes from a pinned uv release instead of
+  setup-python, and nothing is written outside `RUNNER_TEMP`: gitleaks, the
+  venv, the migration check database and the Helm renders. See *CI runner* in
+  CONTRIBUTING.md.
+
 ### Added
 
 - README screenshots (both languages) now show the console after the showcase

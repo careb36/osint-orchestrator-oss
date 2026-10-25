@@ -14,7 +14,7 @@ on:
 jobs:
   github-release:
     name: GitHub Release
-    runs-on: [self-hosted, linux, x64, osint]
+    runs-on: ${{ fromJSON(vars.CI_RUNS_ON || (github.event.repository.private && '["self-hosted","linux","x64","osint"]' || '"ubuntu-latest"')) }}
     permissions:
       contents: write
 
