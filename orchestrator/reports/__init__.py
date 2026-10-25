@@ -7,7 +7,7 @@ overwrite each other's artefacts):
   - report.md
   - bundle.stix.json
   - delta.json
-  - report.pdf (optional; best-effort via fpdf2)
+  - report.pdf (optional; best-effort via fpdf2, see reports/pdf.py)
 
 Also maintains daily_reports/YYYY-MM-DD/index.md.
 """
@@ -48,6 +48,16 @@ _TEXT: dict[str, dict[str, str]] = {
     "finished_at": {"es": "Fin", "en": "Finished"},
     "authorization": {"es": "Autorización", "en": "Authorization"},
     "purpose": {"es": "Propósito", "en": "Purpose"},
+    "classification": {"es": "Clasificación", "en": "Classification"},
+    "classification_osint": {"es": "fuentes abiertas (osint)", "en": "open sources (osint)"},
+    "classification_restricted": {"es": "reservada (restricted)", "en": "restricted"},
+    "processing": {"es": "Procesamiento de la síntesis", "en": "Synthesis processing"},
+    "processing_local": {"es": "modelo local (Ollama)", "en": "local model (Ollama)"},
+    "processing_none": {
+        "es": "sin síntesis (LLM_PROVIDER=none)",
+        "en": "no synthesis (LLM_PROVIDER=none)",
+    },
+    "processing_cloud": {"es": "nube: {provider}", "en": "cloud: {provider}"},
     # Executive part: what the model concluded, then the qualified sources,
     # then what is new. The reader decides from these three sections.
     "synthesis": {"es": "## Síntesis", "en": "## Synthesis"},
@@ -165,6 +175,11 @@ class RunReportData(BaseModel):
     target_fqdn: str
     authorization: str
     purpose: str
+    # Target.classification and where its model prompts go
+    # (synthesizer.providers.effective_provider), printed in the header so
+    # the document itself says what it may contain and where it was processed.
+    classification: str = "osint"
+    processing: str = "ollama"
     run_id: int
     run_status: str
     run_started_at: datetime
@@ -260,6 +275,21 @@ def _merge_bundles(bundles: list[dict[str, Any]]) -> dict[str, Any]:
     ordered = sorted(dedup.values(), key=lambda o: str(o.get("id", "")))
     bundle_id = _deterministic_bundle_id([str(o.get("id", "")) for o in ordered])
     return {"type": "bundle", "id": bundle_id, "objects": ordered}
+
+
+def _classification_label(classification: str, lang: str) -> str:
+    """Human label for Target.classification; an unknown value is shown as is."""
+    key = f"classification_{classification}"
+    return _msg(key, lang) if key in _TEXT else classification
+
+
+def _processing_label(processing: str, lang: str) -> str:
+    """Where the model prompts go: nowhere, the local Ollama or a cloud provider."""
+    if processing == "none":
+        return _msg("processing_none", lang)
+    if processing == "ollama":
+        return _msg("processing_local", lang)
+    return _msg("processing_cloud", lang).format(provider=processing)
 
 
 def _relevance_label(relevance: str, lang: str) -> str:
@@ -503,6 +533,8 @@ def _markdown_content(
         f"- **{_msg('finished_at', lang)}:** {_stamp(data.run_finished_at, lang)}",
         f"- **{_msg('authorization', lang)}:** {data.authorization}",
         f"- **{_msg('purpose', lang)}:** {data.purpose}",
+        f"- **{_msg('classification', lang)}:** {_classification_label(data.classification, lang)}",
+        f"- **{_msg('processing', lang)}:** {_processing_label(data.processing, lang)}",
         "",
         *_synthesis_section(finding, lang, synthesis_status),
         "",
@@ -547,35 +579,22 @@ def _json_default(value: Any) -> Any:
     return str(value)
 
 
-def _write_optional_pdf(path: Path, markdown: str) -> None:
+def _write_optional_pdf(path: Path, markdown: str, lang: str = "es") -> None:
     """Best-effort PDF rendering of the Markdown report via fpdf2.
 
     Never raises: a missing library or a rendering failure is logged as a
     warning and the run proceeds — report.md/bundle/delta are the artifacts
-    that matter. Markdown syntax is stripped and text is latin-1 encoded
-    (fpdf2 core-font limitation), so the PDF is a plain-text companion,
-    not a typeset document.
+    that matter. The layout itself lives in :mod:`orchestrator.reports.pdf`.
     """
     try:
-        from fpdf import FPDF
+        import fpdf  # noqa: F401  — probe the optional dependency first
     except Exception as exc:  # noqa: BLE001
         logger.warning("PDF not generated: fpdf2 unavailable (%s)", exc)
         return
     try:
-        pdf = FPDF()
-        pdf.set_auto_page_break(auto=True, margin=12)
-        pdf.add_page()
-        pdf.set_font("Helvetica", size=11)
-        for raw_line in markdown.splitlines():
-            line = raw_line.replace("`", "").replace("#", "").replace("*", "").strip()
-            if not line:
-                pdf.ln(4)
-                continue
-            line = line.encode("latin-1", "replace").decode("latin-1")
-            chunks = [line[i : i + 40] for i in range(0, len(line), 40)] or [""]
-            for chunk in chunks:
-                pdf.multi_cell(180, 6, chunk)
-        pdf.output(str(path))
+        from orchestrator.reports.pdf import render_pdf
+
+        render_pdf(path, markdown, lang)
     except Exception as exc:  # noqa: BLE001
         logger.warning("PDF generation failed: %s", exc)
 
@@ -726,7 +745,7 @@ async def generate_report(
     report_md_path.write_text(report_md, encoding="utf-8")
     _write_json(bundle_path, merged_bundle)
     _write_json(delta_path, delta)
-    _write_optional_pdf(pdf_path, report_md)
+    _write_optional_pdf(pdf_path, report_md, lang)
     risk_level = finding.risk_level if finding is not None else "—"
     _write_daily_index(
         date_dir, data.target_id, data.run_id, data.run_status, len(delta), risk_level, lang

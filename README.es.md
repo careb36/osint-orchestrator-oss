@@ -88,9 +88,10 @@ defecto, `llama3.2`, nombra un modelo de Ollama, no uno de Token Factory.
 ## Tavily
 
 El recolector de Tavily ([`collectors/tavily.py`](orchestrator/collectors/tavily.py))
-llama a la API de búsqueda en tiempo de ejecución con tres consultas de debida
-diligencia por término: prensa adversa y sanciones, estructura societaria, y
-procesos judiciales. Los términos son los nombres de la entidad configurados
+llama a la API de búsqueda en tiempo de ejecución con cinco consultas de debida
+diligencia por término: prensa adversa y sanciones, estructura societaria,
+procesos judiciales, antecedente penal y sanción administrativa, sin filtro
+temporal. Los términos son los nombres de la entidad configurados
 para el objetivo (por defecto, el dominio), entre comillas y buscados en
 fuentes de terceros. Cada página distinta genera un observable STIX `url` y una
 Nota, es calificada por Nemotron y queda registrada en

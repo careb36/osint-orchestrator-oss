@@ -80,6 +80,10 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "es": "No existe finding para la ejecución {run_id}",
         "en": "Finding for run {run_id} not found",
     },
+    "pdf_page_of": {
+        "es": "Página {page} de {total}",
+        "en": "Page {page} of {total}",
+    },
     "alert_subject": {
         "es": "Alerta OSINT: {target_fqdn} — {new_count} nuevo(s), riesgo {risk_level}",
         "en": "OSINT Alert: {target_fqdn} — {new_count} new, risk {risk_level}",
