@@ -32,7 +32,7 @@ import httpx
 from pydantic import BaseModel
 
 from orchestrator.config import settings
-from orchestrator.i18n import resolve_language, t
+from orchestrator.i18n import resolve_language, t, tv
 from orchestrator.models import AlertCaseReason, AlertsConfig, RunStatus
 
 logger = logging.getLogger(__name__)
@@ -207,7 +207,7 @@ class EmailNotifier(Notifier):
             language=lang,
             target_fqdn=event.target_fqdn,
             new_count=new_count,
-            risk_level=event.risk_level,
+            risk_level=tv(event.risk_level, language=lang),
         )
         obs_lines = ""
         if event.new_observables:
@@ -227,8 +227,8 @@ class EmailNotifier(Notifier):
             language=lang,
             target_fqdn=event.target_fqdn,
             run_id=event.run_id,
-            run_status=event.run_status,
-            risk_level=event.risk_level,
+            run_status=tv(event.run_status, language=lang),
+            risk_level=tv(event.risk_level, language=lang),
             new_count=new_count,
             generated_at=event.generated_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
             observables_section=obs_lines,

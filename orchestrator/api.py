@@ -41,7 +41,7 @@ from sqlalchemy import func
 from sqlalchemy import select as sa_select
 from sqlmodel import col, select
 
-from orchestrator import alert_cases, metrics
+from orchestrator import __version__, alert_cases, metrics
 from orchestrator.auth import log_auth_status, log_secret_key_status, require_api_key
 from orchestrator.config import NEBIUS_DEFAULT_BASE_URL, settings
 from orchestrator.contracts import load_schema
@@ -86,9 +86,10 @@ from orchestrator.targets import load_targets
 
 logger = logging.getLogger(__name__)
 
-# Keep in sync with [project].version in pyproject.toml (surfaced via
-# GET /health and the build_info metric).
-VERSION = "0.1.0"
+# Single source of truth: orchestrator.__version__ (kept in sync with
+# [project].version in pyproject.toml); surfaced via GET /health, the
+# build_info metric and the report's "document data" block.
+VERSION = __version__
 REQUEST_ID_HEADER = "X-Request-ID"
 _LLM_MODEL_PREFLIGHT_TIMEOUT_SECONDS = 10.0
 # A caller-supplied request id is echoed into a response header and every log

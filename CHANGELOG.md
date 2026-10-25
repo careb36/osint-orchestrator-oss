@@ -9,6 +9,32 @@ from [SECURITY.md](SECURITY.md).
 
 ## [Unreleased]
 
+### Changed
+
+- The daily report reads in the order a reviewer needs it: synthesis (risk
+  label with its code, what changed since the previous run, suggested pivots)
+  first, then the qualified evidence, then the new observables, then errors,
+  and only after that a technical annex with the collector status, the full
+  inventory with STIX identifiers and the relationships rendered as values
+  (`example.com -> 1.2.3.4`) with the identifiers beside them. A closing
+  "document data" block names the software version, the provider and model
+  that wrote the assessment, and states that the generated text is not an
+  opinion and must be validated by the compliance officer.
+- Stable identifiers are shown as labels wherever an operator reads them:
+  `orchestrator/i18n.py` gains `tv()` and a value catalogue (run status,
+  risk level, evidence category and relevance, collector outcome, STIX
+  types and relationship types, both languages), used by the report, the
+  daily index and the alert e-mail (`riesgo alto` instead of `riesgo high`,
+  `Estado: exitosa` instead of `success`). Evidence confidence is printed as
+  a percentage with a note on what it is. The persisted identifiers do not
+  change (ADR-004).
+- Report dates are printed in the operator's time zone with the UTC instant
+  beside them (`25/10/2026 00:20 -03 (2026-10-25T03:20:06Z)`); new setting
+  `ORCHESTRATOR_TIMEZONE` (IANA name, default `UTC`, unknown names fall back
+  to UTC with a warning). `Finding` carries `provider` and `model` so the
+  report can name them; `orchestrator.__version__` is the single source of
+  the version string (`api.VERSION` reads it).
+
 ### Added
 
 - README screenshots (both languages) now show the console after the showcase

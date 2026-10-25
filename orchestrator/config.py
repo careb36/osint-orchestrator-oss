@@ -98,6 +98,11 @@ class Settings(BaseSettings):
     # LANGUAGE — a standard GNU gettext variable set on most Linux hosts — and
     # the report language would silently follow the host locale.
     orchestrator_language: str = "es"
+    # IANA time zone for the human-readable timestamps of reports and e-mails
+    # (the machine timestamps stay UTC next to them). A compliance file is
+    # dated in the firm's local time; an unknown name falls back to UTC with
+    # a warning instead of failing the run.
+    orchestrator_timezone: str = "UTC"
     orchestrator_secret_key: str = "insecure-dev-key"
     # Comma-separated keys retired by a rotation. New manifests are signed
     # with orchestrator_secret_key only; chain verification also accepts a

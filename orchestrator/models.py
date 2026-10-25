@@ -460,6 +460,10 @@ class Finding(BaseModel):
     risk_justification: str = ""
     suggested_pivots: list[str] = Field(default_factory=list)
     generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    # Provenance for the report's "document data" block: which provider and
+    # model wrote this text. Filled by the synthesizer; empty when unknown.
+    provider: str = ""
+    model: str = ""
 
 
 # ─── Synthesizer persistence ──────────────────────────────────────────────────

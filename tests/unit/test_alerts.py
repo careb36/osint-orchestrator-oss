@@ -289,6 +289,13 @@ async def test_email_spanish_subject_and_multiple_recipients() -> None:
     )
     assert "Alerta OSINT" in subject
     assert subject.find("example.com") >= 0
+    # The risk level is a stable English identifier in the event; the reader
+    # gets its label.
+    assert "riesgo alto" in subject
+    assert "riesgo high" not in subject
+    body = msg_obj.get_payload(decode=True).decode("utf-8")
+    assert "Riesgo    : alto" in body
+    assert "Estado    : exitosa" in body
 
 
 @pytest.mark.asyncio

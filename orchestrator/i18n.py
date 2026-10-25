@@ -250,6 +250,66 @@ _MESSAGES: dict[str, dict[str, str]] = {
 }
 
 
+# Stable English identifiers (persisted, compared, filtered on) → the label an
+# operator reads. The identifier itself never changes (ADR-004); only the
+# rendering does. ``tv`` returns the identifier unchanged when it is not
+# listed, so a new enum value degrades to its code instead of raising inside
+# a report or an e-mail.
+_VALUES: dict[str, dict[str, str]] = {
+    # Run status
+    "pending": {"es": "pendiente", "en": "pending"},
+    "running": {"es": "en curso", "en": "running"},
+    "success": {"es": "exitosa", "en": "success"},
+    "partial": {"es": "parcial", "en": "partial"},
+    "failed": {"es": "fallida", "en": "failed"},
+    # Risk level and evidence relevance
+    "unknown": {"es": "desconocido", "en": "unknown"},
+    "low": {"es": "bajo", "en": "low"},
+    "medium": {"es": "medio", "en": "medium"},
+    "high": {"es": "alto", "en": "high"},
+    "critical": {"es": "crítico", "en": "critical"},
+    # Evidence category
+    "adverse_media": {"es": "prensa adversa", "en": "adverse media"},
+    "sanctions": {"es": "sanciones", "en": "sanctions"},
+    "litigation": {"es": "litigios", "en": "litigation"},
+    "regulatory_action": {"es": "acción regulatoria", "en": "regulatory action"},
+    "corporate_profile": {"es": "perfil societario", "en": "corporate profile"},
+    "unrelated": {"es": "no relacionado", "en": "unrelated"},
+    # Collector outcome
+    "ok": {"es": "correcto", "en": "ok"},
+    "error": {"es": "error", "en": "error"},
+    # STIX observable types the collectors emit
+    "domain-name": {"es": "dominio", "en": "domain"},
+    "ipv4-addr": {"es": "dirección IPv4", "en": "IPv4 address"},
+    "ipv6-addr": {"es": "dirección IPv6", "en": "IPv6 address"},
+    "email-addr": {"es": "correo electrónico", "en": "e-mail address"},
+    "url": {"es": "enlace", "en": "URL"},
+    "autonomous-system": {"es": "sistema autónomo", "en": "autonomous system"},
+    "x509-certificate": {"es": "certificado TLS", "en": "TLS certificate"},
+    "user-account": {"es": "cuenta de usuario", "en": "user account"},
+    "identity": {"es": "identidad", "en": "identity"},
+    "indicator": {"es": "indicador", "en": "indicator"},
+    "file": {"es": "archivo", "en": "file"},
+    # STIX relationship types
+    "resolves-to": {"es": "resuelve a", "en": "resolves to"},
+    "related-to": {"es": "relacionado con", "en": "related to"},
+    "belongs-to": {"es": "pertenece a", "en": "belongs to"},
+}
+
+
+def tv(value: str, *, language: str | None = None) -> str:
+    """Label for a stable identifier (status, risk, category, STIX type).
+
+    Unknown identifiers come back unchanged: an operator sees the code, the
+    run does not fail. Compare with ``t``, which raises for a typo in a
+    message key because that is a bug, not a value.
+    """
+    translations = _VALUES.get(value)
+    if translations is None:
+        return value
+    return translations[resolve_language(language)]
+
+
 def resolve_language(preferred: str | None = None) -> str:
     """
     Return the language to render in, most specific source first.

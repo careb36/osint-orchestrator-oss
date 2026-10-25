@@ -19,13 +19,16 @@ import json
 import logging
 import uuid
 from collections import defaultdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, tzinfo
 from pathlib import Path
 from typing import Any, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, Field
 
-from orchestrator.i18n import resolve_language, t
+from orchestrator import __version__
+from orchestrator.config import settings
+from orchestrator.i18n import resolve_language, t, tv
 from orchestrator.models import Finding
 
 try:
@@ -41,31 +44,82 @@ _TEXT: dict[str, dict[str, str]] = {
     "target": {"es": "Objetivo", "en": "Target"},
     "run_id": {"es": "Run ID", "en": "Run ID"},
     "status": {"es": "Estado", "en": "Status"},
-    "started_at": {"es": "Inicio (UTC)", "en": "Started (UTC)"},
-    "finished_at": {"es": "Fin (UTC)", "en": "Finished (UTC)"},
+    "started_at": {"es": "Inicio", "en": "Started"},
+    "finished_at": {"es": "Fin", "en": "Finished"},
     "authorization": {"es": "Autorización", "en": "Authorization"},
     "purpose": {"es": "Propósito", "en": "Purpose"},
-    "collectors": {"es": "## Estado por collector", "en": "## Collector status"},
-    "collector": {"es": "Collector", "en": "Collector"},
-    "ok": {"es": "Resultado", "en": "Result"},
-    "observables": {"es": "Observables", "en": "Observables"},
-    "error": {"es": "Error", "en": "Error"},
-    "new_first": {
-        "es": "## Nuevo desde la última corrida",
-        "en": "## New since previous run",
+    # Executive part: what the model concluded, then the qualified sources,
+    # then what is new. The reader decides from these three sections.
+    "synthesis": {"es": "## Síntesis", "en": "## Synthesis"},
+    "synthesis_risk": {"es": "**Riesgo**", "en": "**Risk**"},
+    "synthesis_new": {
+        "es": "**Novedades desde la corrida anterior**",
+        "en": "**New since the previous run**",
     },
-    "inventory": {"es": "## Inventario completo", "en": "## Full inventory"},
-    "relationships": {"es": "## Relaciones", "en": "## Relationships"},
+    "synthesis_pivots": {"es": "**Pivotes sugeridos**", "en": "**Suggested pivots**"},
+    "synthesis_hint": {
+        "es": "Esta corrida no incluye evaluación automática de riesgo; revise la evidencia calificada.",
+        "en": "This run carries no automatic risk assessment; review the qualified evidence.",
+    },
     "qualified_evidence": {"es": "## Evidencia calificada", "en": "## Qualified evidence"},
     "qualified_evidence_category": {"es": "Categoría", "en": "Category"},
     "qualified_evidence_relevance": {"es": "Relevancia", "en": "Relevance"},
     "qualified_evidence_confidence": {"es": "Confianza", "en": "Confidence"},
     "qualified_evidence_title": {"es": "Título", "en": "Title"},
     "qualified_evidence_rationale": {"es": "Justificación", "en": "Rationale"},
+    "qualified_evidence_note": {
+        "es": (
+            "_Categoría, relevancia y justificación las asigna el modelo clasificador;"
+            " la confianza es la certeza que declara, no una probabilidad verificada._"
+        ),
+        "en": (
+            "_Category, relevance and rationale are assigned by the classifier model;"
+            " confidence is the certainty it declares, not a verified probability._"
+        ),
+    },
+    "new_first": {
+        "es": "## Novedades desde la corrida anterior",
+        "en": "## New since the previous run",
+    },
     "errors": {"es": "## Errores", "en": "## Errors"},
-    "synthesis": {"es": "## Síntesis", "en": "## Synthesis"},
-    "synthesis_risk": {"es": "**Riesgo**", "en": "**Risk**"},
-    "synthesis_pivots": {"es": "**Pivots sugeridos**", "en": "**Suggested pivots**"},
+    # Technical annex: everything an analyst needs to verify or pivot, with
+    # the STIX identifiers, after the part a compliance officer reads.
+    "annex": {"es": "## Anexo técnico", "en": "## Technical annex"},
+    "annex_intro": {
+        "es": (
+            "_Estado de los recolectores, inventario con identificadores STIX y"
+            " relaciones, para verificación y trazabilidad._"
+        ),
+        "en": (
+            "_Collector status, inventory with STIX identifiers and relationships,"
+            " for verification and traceability._"
+        ),
+    },
+    "collectors": {"es": "### Estado por recolector", "en": "### Collector status"},
+    "collector": {"es": "Recolector", "en": "Collector"},
+    "ok": {"es": "Resultado", "en": "Result"},
+    "observables": {"es": "Observables", "en": "Observables"},
+    "error": {"es": "Error", "en": "Error"},
+    "inventory": {"es": "### Inventario completo", "en": "### Full inventory"},
+    "relationships": {"es": "### Relaciones", "en": "### Relationships"},
+    "new_marker": {"es": "[nuevo]", "en": "[new]"},
+    # Document data: who wrote this, with what, and what it is not.
+    "document": {"es": "## Datos del documento", "en": "## Document data"},
+    "doc_software": {"es": "Generado por", "en": "Generated by"},
+    "doc_assessment": {"es": "Evaluación automática", "en": "Automatic assessment"},
+    "doc_assessment_none": {"es": "sin evaluación automática", "en": "no automatic assessment"},
+    "doc_disclaimer": {
+        "es": (
+            "La síntesis y la clasificación de la evidencia las generó un modelo de"
+            " lenguaje a partir de las fuentes listadas. No constituyen dictamen:"
+            " el oficial de cumplimiento debe validarlas antes de cualquier decisión."
+        ),
+        "en": (
+            "The synthesis and the evidence classification were generated by a"
+            " language model from the sources listed. They are not an opinion:"
+            " the compliance officer must validate them before any decision."
+        ),
+    },
     "none": {"es": "_Sin elementos_", "en": "_No items_"},
     "index_title": {"es": "# Resumen diario", "en": "# Daily summary"},
     "index_target": {"es": "Objetivo", "en": "Target"},
@@ -181,6 +235,39 @@ def _ensure_utc(dt: datetime) -> datetime:
     return dt
 
 
+def _report_timezone() -> tzinfo:
+    """The operator's time zone (ORCHESTRATOR_TIMEZONE), or UTC when unknown.
+
+    A misspelt zone must not take a report down: the UTC stamp is printed
+    next to the local one anyway, so falling back loses convenience, not
+    evidence.
+    """
+    name = (settings.orchestrator_timezone or "UTC").strip()
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        logger.warning("Unknown ORCHESTRATOR_TIMEZONE %r; report dates fall back to UTC", name)
+        return UTC
+
+
+def _stamp(dt: datetime | None, lang: str) -> str:
+    """Local date and time for the reader, with the UTC instant beside it.
+
+    ``25/10/2026 00:20 America/Montevideo (2026-10-25T03:20:06Z)``: the
+    local form is what a file is dated by, the UTC form is what the manifest
+    and the database carry.
+    """
+    if dt is None:
+        return "-"
+    aware = _ensure_utc(dt)
+    zone = _report_timezone()
+    local = aware.astimezone(zone)
+    human = local.strftime("%d/%m/%Y %H:%M" if lang == "es" else "%Y-%m-%d %H:%M")
+    zone_name = local.tzname() or str(zone)
+    utc_iso = aware.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return f"{human} {zone_name} (`{utc_iso}`)"
+
+
 def _merge_bundles(bundles: list[dict[str, Any]]) -> dict[str, Any]:
     """Merge collector bundles into one deduplicated, deterministically ordered bundle.
 
@@ -208,7 +295,7 @@ def _collector_table(data: RunReportData, lang: str) -> list[str]:
         "|---|---|---:|---|",
     ]
     for result in sorted(data.collector_results, key=lambda r: r.collector):
-        outcome = "ok" if result.success else "error"
+        outcome = tv("ok" if result.success else "error", language=lang)
         lines.append(
             f"| {result.collector} | {outcome} | {result.observable_count} | {result.error or ''} |"
         )
@@ -216,19 +303,23 @@ def _collector_table(data: RunReportData, lang: str) -> list[str]:
 
 
 def _new_section(observables: list[ReportObservable], lang: str) -> list[str]:
-    """Render the delta-first section: observables new since the previous run."""
+    """What appeared since the previous run, one line per value.
+
+    Type labels are translated and the STIX identifiers stay in the annex:
+    this section is read to decide, the annex to verify.
+    """
     rows = [o for o in observables if o.is_new]
     lines = [_msg("new_first", lang)]
     if not rows:
         lines.append(_msg("none", lang))
         return lines
     for obs in sorted(rows, key=lambda o: (o.stix_type, o.value, o.stix_id)):
-        lines.append(f"- `{obs.stix_type}` `{obs.value}` ({obs.stix_id})")
+        lines.append(f"- {tv(obs.stix_type, language=lang)}: `{obs.value}`")
     return lines
 
 
 def _inventory_section(observables: list[ReportObservable], lang: str) -> list[str]:
-    """Render the full observable inventory, grouped by STIX type."""
+    """Render the full observable inventory, grouped by STIX type (annex)."""
     lines = [_msg("inventory", lang)]
     if not observables:
         lines.append(_msg("none", lang))
@@ -236,25 +327,38 @@ def _inventory_section(observables: list[ReportObservable], lang: str) -> list[s
     by_type: dict[str, list[ReportObservable]] = defaultdict(list)
     for obs in observables:
         by_type[obs.stix_type].append(obs)
+    new_marker = _msg("new_marker", lang)
     for stix_type in sorted(by_type):
-        lines.append(f"### {stix_type}")
+        lines.append("")
+        lines.append(f"**{tv(stix_type, language=lang)}** (`{stix_type}`)")
         for obs in sorted(by_type[stix_type], key=lambda o: (o.value, o.stix_id)):
-            suffix = " [new]" if obs.is_new else ""
+            suffix = f" {new_marker}" if obs.is_new else ""
             lines.append(f"- `{obs.value}` ({obs.stix_id}){suffix}")
     return lines
 
 
-def _relationships_section(bundle: dict[str, Any], lang: str) -> list[str]:
-    """Render STIX relationship objects from the merged bundle as a sorted list."""
-    rels = [
-        obj
-        for obj in bundle.get("objects", [])
-        if isinstance(obj, dict) and obj.get("type") == "relationship"
-    ]
+def _relationships_section(
+    bundle: dict[str, Any], observables: list[ReportObservable], lang: str
+) -> list[str]:
+    """Render STIX relationships as values, with the identifiers beside them.
+
+    ``resolves to: example.com -> 1.2.3.4`` reads; two uuids do not. The
+    value of each end comes from the run's observables, else from the bundle
+    object itself, else the identifier stands in.
+    """
+    objects = [obj for obj in bundle.get("objects", []) if isinstance(obj, dict)]
+    rels = [obj for obj in objects if obj.get("type") == "relationship"]
     lines = [_msg("relationships", lang)]
     if not rels:
         lines.append(_msg("none", lang))
         return lines
+    value_by_id: dict[str, str] = {}
+    for obj in objects:
+        value = stix_object_value(obj)
+        if value and obj.get("id"):
+            value_by_id[str(obj["id"])] = value
+    for obs in observables:
+        value_by_id[obs.stix_id] = obs.value
     for rel in sorted(
         rels,
         key=lambda r: (
@@ -263,9 +367,12 @@ def _relationships_section(bundle: dict[str, Any], lang: str) -> list[str]:
             str(r.get("target_ref", "")),
         ),
     ):
+        source = str(rel.get("source_ref", ""))
+        target = str(rel.get("target_ref", ""))
+        rel_type = str(rel.get("relationship_type", ""))
         lines.append(
-            f"- `{rel.get('relationship_type', '')}`: "
-            f"{rel.get('source_ref', '')} -> {rel.get('target_ref', '')}"
+            f"- {tv(rel_type, language=lang)}: `{value_by_id.get(source, source)}` -> "
+            f"`{value_by_id.get(target, target)}` ({source} -> {target})"
         )
     return lines
 
@@ -299,19 +406,22 @@ def _qualified_evidence_section(evidence: list[dict[str, Any]], lang: str) -> li
         title = str(item.get("title", "")).replace("|", " ")
         url = str(item.get("url", ""))
         title_cell = f"[{title}]({url})" if title and url else title
+        confidence = float(item.get("confidence", 0.0) or 0.0)
         lines.append(
             "| "
             + " | ".join(
                 [
-                    str(item.get("category", "")),
-                    str(item.get("relevance", "")),
-                    f"{float(item.get('confidence', 0.0) or 0.0):.2f}",
+                    tv(str(item.get("category", "")), language=lang),
+                    tv(str(item.get("relevance", "")), language=lang),
+                    f"{confidence * 100:.0f} %",
                     title_cell,
                     str(item.get("rationale", "")).replace("|", " "),
                 ]
             )
             + " |"
         )
+    lines.append("")
+    lines.append(_msg("qualified_evidence_note", lang))
     return lines
 
 
@@ -342,19 +452,48 @@ def _synthesis_section(
         # the report has no error text to give it, so it uses the plain key.
         key = "synthesis_skipped" if synthesis_status == "skipped" else "synthesis_unavailable"
         lines.append(t(key, language=lang))
+        lines.append("")
+        lines.append(_msg("synthesis_hint", lang))
         return lines
     lines.append(finding.summary)
     lines.append("")
+    # The label is what the reader acts on; the code in backticks is the
+    # stable identifier the database, the console filters and the API use.
     lines.append(
-        f"{_msg('synthesis_risk', lang)}: `{finding.risk_level}`"
+        f"{_msg('synthesis_risk', lang)}: {tv(finding.risk_level, language=lang)}"
+        f" (`{finding.risk_level}`)"
         + (f" — {finding.risk_justification}" if finding.risk_justification else "")
     )
+    if finding.new_since_last_run:
+        lines.append("")
+        lines.append(f"{_msg('synthesis_new', lang)}:")
+        for item in finding.new_since_last_run:
+            lines.append(f"- {item}")
     if finding.suggested_pivots:
         lines.append("")
         lines.append(f"{_msg('synthesis_pivots', lang)}:")
         for pivot in finding.suggested_pivots:
             lines.append(f"- {pivot}")
     return lines
+
+
+def _document_section(data: RunReportData, finding: Finding | None, lang: str) -> list[str]:
+    """Who produced this document, with what, and what it is not.
+
+    A filed report must say which software wrote it and which model wrote
+    the assessment; the disclaimer separates generated text from fact.
+    """
+    if finding is not None and (finding.provider or finding.model):
+        assessment = " · ".join(part for part in (finding.provider, finding.model) if part)
+    else:
+        assessment = _msg("doc_assessment_none", lang)
+    return [
+        _msg("document", lang),
+        f"- **{_msg('doc_software', lang)}:** OSINT Orchestrator {__version__}",
+        f"- **{_msg('doc_assessment', lang)}:** {assessment}",
+        "",
+        _msg("doc_disclaimer", lang),
+    ]
 
 
 def _markdown_content(
@@ -366,41 +505,43 @@ def _markdown_content(
 ) -> str:
     """Assemble the full report.md content in a fixed section order.
 
-    Header (traceability fields incl. authorization/purpose) → collector
-    status → delta → inventory → relationships → errors → synthesis. The
-    order is part of the operator contract; sections are always present.
+    Header (traceability fields incl. authorization/purpose) → synthesis →
+    qualified evidence → new since the previous run → errors → technical
+    annex (collector status, inventory with STIX ids, relationships) →
+    document data. The reader's questions come first (what happened, how
+    serious, what changed), the verification material last. The order is
+    part of the operator contract; sections are always present.
     """
-    started = _ensure_utc(data.run_started_at).astimezone(UTC).isoformat()
-    finished = (
-        _ensure_utc(data.run_finished_at).astimezone(UTC).isoformat()
-        if data.run_finished_at
-        else "-"
-    )
     lines = [
         _msg("title", lang),
         "",
         f"- **{_msg('target', lang)}:** `{data.target_id}` ({data.target_fqdn})",
         f"- **{_msg('run_id', lang)}:** `{data.run_id}`",
-        f"- **{_msg('status', lang)}:** `{data.run_status}`",
-        f"- **{_msg('started_at', lang)}:** `{started}`",
-        f"- **{_msg('finished_at', lang)}:** `{finished}`",
+        f"- **{_msg('status', lang)}:** {tv(data.run_status, language=lang)} (`{data.run_status}`)",
+        f"- **{_msg('started_at', lang)}:** {_stamp(data.run_started_at, lang)}",
+        f"- **{_msg('finished_at', lang)}:** {_stamp(data.run_finished_at, lang)}",
         f"- **{_msg('authorization', lang)}:** {data.authorization}",
         f"- **{_msg('purpose', lang)}:** {data.purpose}",
+        "",
+        *_synthesis_section(finding, lang, synthesis_status),
+        "",
+        *_qualified_evidence_section(data.evidence, lang),
+        "",
+        *_new_section(data.observables, lang),
+        "",
+        *_errors_section(data.errors, lang),
+        "",
+        _msg("annex", lang),
+        _msg("annex_intro", lang),
         "",
         _msg("collectors", lang),
         *_collector_table(data, lang),
         "",
-        *_new_section(data.observables, lang),
-        "",
         *_inventory_section(data.observables, lang),
         "",
-        *_relationships_section(bundle, lang),
+        *_relationships_section(bundle, data.observables, lang),
         "",
-        *_qualified_evidence_section(data.evidence, lang),
-        "",
-        *_errors_section(data.errors, lang),
-        "",
-        *_synthesis_section(finding, lang, synthesis_status),
+        *_document_section(data, finding, lang),
         "",
     ]
     return "\n".join(lines)
@@ -520,9 +661,9 @@ def _rewrite_daily_index(
     rows = _read_index_rows(index_path)
     link_text = _msg("index_view", lang)
     rows[target_id] = (
-        run_status,
+        tv(run_status, language=lang),
         str(new_count),
-        risk_level,
+        tv(risk_level, language=lang),
         f"[{link_text}](./{target_id}/run-{run_id}/report.md)",
     )
 
