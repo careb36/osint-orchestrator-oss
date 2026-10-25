@@ -120,7 +120,8 @@ config:
   tavily:
     searchDepth: basic
     maxResults: 5
-    maxCallsPerRun: 3
+    # 5 covers the five query templates for a single-term target.
+    maxCallsPerRun: 5
     timeoutSeconds: 120
   # Nightly purge of runs and report directories older than `days` (0 = off).
   retention:

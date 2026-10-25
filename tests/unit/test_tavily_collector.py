@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from unittest.mock import patch
 
 import httpx
@@ -250,7 +251,24 @@ def test_queries_search_the_target_as_a_term_not_a_site_scope() -> None:
 def test_default_call_budget_covers_every_template() -> None:
     queries = _collector(language="en").build_queries("example.com")
     assert len(queries) == CollectorSet().tavily.max_calls_per_run == 5
-    assert settings.tavily_max_calls_per_run >= len(queries)
+    # The class default, not the fixture's monkeypatched value: the global
+    # ceiling clamps the per-target budget, so a lower default would silently
+    # drop the last templates.
+    assert Settings.model_fields["tavily_max_calls_per_run"].default >= len(queries)
+
+
+def test_helm_default_budget_matches_the_settings_default() -> None:
+    """The chart renders TAVILY_MAX_CALLS_PER_RUN; a stale value there caps
+    every Helm deployment below the template count."""
+    import yaml
+
+    values = yaml.safe_load(
+        (
+            Path(__file__).resolve().parents[2] / "deploy/helm/osint-orchestrator/values.yaml"
+        ).read_text(encoding="utf-8")
+    )
+    helm_budget = values["config"]["tavily"]["maxCallsPerRun"]
+    assert helm_budget == Settings.model_fields["tavily_max_calls_per_run"].default
 
 
 def test_queries_cover_criminal_and_administrative_history() -> None:

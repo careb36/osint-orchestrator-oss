@@ -9,16 +9,23 @@ from [SECURITY.md](SECURITY.md).
 
 ## [Unreleased]
 
-### Added
+### Changed
 
 - Tavily collector: two more query templates per language look for the
   record itself rather than the news cycle: a criminal conviction or
   prosecution (money laundering, fraud) and administrative sanctions (fines,
   disqualification, proceedings). The default call budget
-  (`max_calls_per_run` and `TAVILY_MAX_CALLS_PER_RUN`) rises from 3 to 5 so
-  a single-term target still covers every template. A unit test now pins
-  that no request carries a recency filter (`topic`, `days`, `time_range`):
-  a due-diligence search looks back as far as the sources go.
+  (`max_calls_per_run`, `TAVILY_MAX_CALLS_PER_RUN` and the Helm chart's
+  `config.tavily.maxCallsPerRun`) rises from 3 to 5 so a single-term target
+  still covers every template; a single-term run now spends five Tavily
+  searches instead of three. Upgrade note: an `.env` copied from an earlier
+  `.env.example` still sets `TAVILY_MAX_CALLS_PER_RUN=3` and keeps capping
+  runs at three queries; raise it to 5. A unit test pins that no request
+  carries a recency filter (`topic`, `days`, `time_range`): a due-diligence
+  search looks back as far as the sources go.
+
+### Added
+
 
 - README screenshots (both languages) now show the console after the showcase
   run, served by the real API over a database seeded with the two recordings,

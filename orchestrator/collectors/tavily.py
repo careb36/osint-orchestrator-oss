@@ -66,7 +66,7 @@ _QUERY_TEMPLATES: dict[str, list[str]] = {
         "{target} noticias adversas OR sanciones OR litigios OR acciones regulatorias",
         "{target} estructura societaria accionistas beneficiario final",
         "{target} procesos judiciales demanda acuerdo investigación",
-        "{target} condenado OR procesado OR imputado OR prisión lavado de activos fraude",
+        "{target} condenado OR procesado OR imputado OR prisión lavado de activos OR blanqueo de capitales fraude",
         "{target} multa OR sanción administrativa OR inhabilitación OR sumario",
     ],
 }

@@ -85,8 +85,9 @@ served and sends `llm: openai` targets to Token Factory. Without the two
 ## Tavily
 
 The Tavily collector ([`collectors/tavily.py`](orchestrator/collectors/tavily.py))
-calls the search API at run time with three due-diligence queries per search
-term: adverse media and sanctions, ownership, and legal proceedings. Terms are
+calls the search API at run time with five due-diligence queries per search
+term: adverse media and sanctions, ownership, legal proceedings, criminal
+record and administrative sanctions, with no time filter. Terms are
 the entity names configured for the target (the domain by default), quoted and
 searched across third-party sources. Each distinct page becomes a STIX `url`
 observable and a Note, is qualified by Nemotron, and is recorded in
