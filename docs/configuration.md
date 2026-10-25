@@ -24,7 +24,7 @@ Defaults shown are the ones shipped in `.env.example` for Docker.
 | `ORCHESTRATOR_SECRET_KEY_PREVIOUS` | (empty) | Comma-separated keys retired by a rotation. `chain/verify` accepts manifests signed with any of them; new manifests are signed with `ORCHESTRATOR_SECRET_KEY` only. See the rotation procedure in [operations](operations.md#evidence-chain). |
 | `ORCHESTRATOR_DATABASE_URL` | `sqlite+aiosqlite:////app/data/orchestrator.db` | Container path is the persistent volume; use `./orchestrator.db` bare-metal. |
 | `TARGETS_FILE` | `targets.yaml` | Re-read on every API and scheduler call. |
-| `ORCHESTRATOR_RETENTION_DAYS` | `90` | Days to keep runs and report directories; `0` disables the purge. |
+| `ORCHESTRATOR_RETENTION_DAYS` | `0` | Days to keep runs and report directories; `0` (default) never purges. For each target, its first run that met an alert rule and every run after it are kept whatever the period (the evidence chain must stay a contiguous run of manifests). |
 | `ORCHESTRATOR_RETENTION_CRON` | `30 3 * * *` | UTC cron of the purge job. |
 | `ORCHESTRATOR_API_KEY` | *(empty)* | API keys, comma-separated while rotating. Empty leaves the API **open** (WARNING at startup). |
 | `ORCHESTRATOR_LOG_LEVEL` | `INFO` | `DEBUG` \| `INFO` \| `WARNING` \| `ERROR`. |

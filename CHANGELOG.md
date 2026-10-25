@@ -9,6 +9,21 @@ from [SECURITY.md](SECURITY.md).
 
 ## [Unreleased]
 
+### Changed
+
+- Retention is off by default: `ORCHESTRATOR_RETENTION_DAYS` is now `0` in
+  `config.py`, `.env.example` and the Helm values (it was `90`). Runs, reports,
+  findings, qualified evidence and alert cases are the evidence a compliance
+  file is built on, and record-keeping rules count their retention in years,
+  so a fresh deployment no longer deletes anything on its own. When an
+  operator does set a period, each target keeps its first run that met an
+  alert rule (the alert case is where the review is recorded) and every run
+  after it, so the purged runs are always a contiguous prefix of the
+  target's evidence chain and `chain/verify` keeps reporting it intact;
+  a purged run's own `run-<id>` directory is removed even when its day
+  directory stays. The purge summary reports `runs_retained_with_case`
+  instead of `alert_cases_deleted`, which is now always zero.
+
 ### Fixed
 
 - `report.pdf` is legible again. The previous renderer cut every line into

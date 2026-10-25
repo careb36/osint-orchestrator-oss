@@ -53,7 +53,9 @@ class RetentionSummary:
     alert_deliveries_deleted: int = 0
     opencti_outbox_deleted: int = 0
     evidence_qualifications_deleted: int = 0
-    alert_cases_deleted: int = 0
+    # Runs past the cutoff kept because their target has an alert case at or
+    # before them (a snapshot taken at each purge, not a delta).
+    runs_retained_with_case: int = 0
     report_dirs_deleted: int = 0
     errors: list[str] = field(default_factory=list)
 
@@ -63,12 +65,22 @@ async def purge_expired(now: datetime | None = None) -> RetentionSummary:
     Delete run rows older than ``retention_days`` and their dependent rows,
     then remove matching ``daily_reports/YYYY-MM-DD`` directories.
 
-    ``seen_observables`` is intentionally left untouched — it is the delta
-    memory between runs and must survive a purge cycle.
+    Two kinds of rows survive every purge on purpose:
+
+    - ``seen_observables``, the delta memory between runs;
+    - for every target, the first run that met an alert rule (and so opened
+      an alert case) and every run after it, with all their dependents and
+      report directories. A case is where the operator records who reviewed
+      the run and what they decided, so it belongs to the compliance file;
+      keeping everything after the first case, not just the case runs, keeps
+      the purged runs a contiguous prefix of the target's evidence chain,
+      which chain verification accepts (a gap in the middle reads as
+      tampering).
 
     Returns a :class:`RetentionSummary` and logs a single structured line.
     """
     summary = RetentionSummary()
+    purged_run_dirs: list[tuple[str, Path]] = []
     retention_days = settings.orchestrator_retention_days
 
     if retention_days <= 0:
@@ -85,12 +97,47 @@ async def purge_expired(now: datetime | None = None) -> RetentionSummary:
         async with get_session() as session:
             # Identify expired run ids.  Use finished_at when available,
             # fall back to started_at for runs that never completed.
-            stmt = select(col(Run.id)).where(
-                col(Run.finished_at).isnot(None) & (col(Run.finished_at) < cutoff)
-                | col(Run.finished_at).is_(None) & (col(Run.started_at) < cutoff)
+            expired_by_age = col(Run.finished_at).isnot(None) & (
+                col(Run.finished_at) < cutoff
+            ) | col(Run.finished_at).is_(None) & (col(Run.started_at) < cutoff)
+            result = await session.exec(  # type: ignore[call-overload]  # SQLModel's exec stubs exclude SQLAlchemy Select, which it supports at runtime.
+                select(col(Run.id), col(Run.target_id), col(Run.started_at)).where(expired_by_age)
             )
-            result = await session.exec(stmt)  # type: ignore[call-overload]  # SQLModel's exec stubs exclude SQLAlchemy Select, which it supports at runtime.
-            expired_ids = [row[0] if not isinstance(row, int) else row for row in result.all()]
+            candidates = [(row[0], row[1], row[2]) for row in result.all()]
+
+            # The first run of each target that opened an alert case, in the
+            # evidence chain's own order (started_at, id). Everything from it
+            # on is kept: purging only a contiguous prefix of a target's runs
+            # is what verify_target_chain accepts as "retention removed the
+            # oldest runs"; a hole in the middle reads as tampering.
+            case_runs = await session.exec(  # type: ignore[call-overload]  # Same SQLModel stub gap as above.
+                select(col(Run.target_id), col(Run.started_at), col(Run.id)).where(
+                    col(Run.id).in_(select(col(AlertCase.run_id)))
+                )
+            )
+            first_filed: dict[str, tuple[datetime, int]] = {}
+            for target_id, started_at, run_id in case_runs.all():
+                key = (_ensure_aware(started_at), run_id)
+                if target_id not in first_filed or key < first_filed[target_id]:
+                    first_filed[target_id] = key
+
+            expired_ids: list[int] = []
+            for run_id, target_id, started_at in candidates:
+                floor = first_filed.get(target_id)
+                if floor is not None and (_ensure_aware(started_at), run_id) >= floor:
+                    summary.runs_retained_with_case += 1
+                    continue
+                expired_ids.append(run_id)
+
+            # The purged runs' own directories go too: the day directory is
+            # only removed when no surviving run started that day, so a kept
+            # run would otherwise leave its purged neighbours' files on disk.
+            path_rows = await session.exec(  # type: ignore[call-overload]  # Same SQLModel stub gap as above.
+                select(col(Run.id), col(Run.target_id), col(Run.report_path)).where(
+                    col(Run.id).in_(expired_ids or [-1])
+                )
+            )
+            purged_run_dirs = [(row[1], Path(row[2]).parent) for row in path_rows.all() if row[2]]
 
             if expired_ids:
                 # Delete dependents first to satisfy FK constraints (SQLite
@@ -102,7 +149,6 @@ async def purge_expired(now: datetime | None = None) -> RetentionSummary:
                     (OpenCTIOutbox, OpenCTIOutbox.run_id, "opencti_outbox_deleted"),
                     (AlertDelivery, AlertDelivery.run_id, "alert_deliveries_deleted"),
                     (AlertRecord, AlertRecord.run_id, "alerts_deleted"),
-                    (AlertCase, AlertCase.run_id, "alert_cases_deleted"),
                     (FindingRecord, FindingRecord.run_id, "findings_deleted"),
                     (RunObservable, RunObservable.run_id, "run_observables_deleted"),
                     (
@@ -130,6 +176,18 @@ async def purge_expired(now: datetime | None = None) -> RetentionSummary:
     except Exception:
         logger.exception("Retention: database purge failed")
         summary.errors.append("database")
+
+    for target_id, run_dir in purged_run_dirs:
+        # Only a run directory laid out by the report generator
+        # (<report_dir>/<date>/<target_id>/run-<id>) is removed.
+        if not (run_dir.name.startswith("run-") and run_dir.parent.name == target_id):
+            continue
+        try:
+            if run_dir.is_dir():
+                shutil.rmtree(run_dir)
+        except OSError as exc:
+            logger.error("Retention: failed to remove %s: %s", run_dir, exc)
+            summary.errors.append(str(run_dir))
 
     # ── Report directory purge ────────────────────────────────────────────────
     # A directory is named after the UTC start date of its runs, while a run row
@@ -186,7 +244,7 @@ async def purge_expired(now: datetime | None = None) -> RetentionSummary:
             "alert_deliveries_deleted": summary.alert_deliveries_deleted,
             "opencti_outbox_deleted": summary.opencti_outbox_deleted,
             "evidence_qualifications_deleted": summary.evidence_qualifications_deleted,
-            "alert_cases_deleted": summary.alert_cases_deleted,
+            "runs_retained_with_case": summary.runs_retained_with_case,
             "report_dirs_deleted": summary.report_dirs_deleted,
             "errors": summary.errors,
         },
@@ -206,6 +264,11 @@ async def _surviving_run_dates(cutoff: datetime) -> set[str]:
             ),
         )
         return {_bundle_date(started_at) for started_at in result.scalars().all()}
+
+
+def _ensure_aware(value: datetime) -> datetime:
+    """SQLite returns naive datetimes; compare everything as UTC-aware."""
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
 def _collect_report_dirs() -> set[str]:
