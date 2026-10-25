@@ -268,6 +268,10 @@ _VALUES: dict[str, dict[str, str]] = {
     "medium": {"es": "medio", "en": "medium"},
     "high": {"es": "alto", "en": "high"},
     "critical": {"es": "crítico", "en": "critical"},
+    # Evidence relevance (agrees with "relevancia", feminine in Spanish)
+    "relevance.high": {"es": "alta", "en": "high"},
+    "relevance.medium": {"es": "media", "en": "medium"},
+    "relevance.low": {"es": "baja", "en": "low"},
     # Evidence category
     "adverse_media": {"es": "prensa adversa", "en": "adverse media"},
     "sanctions": {"es": "sanciones", "en": "sanctions"},

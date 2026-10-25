@@ -255,7 +255,7 @@ Each run writes its own directory,
 
 | File | Content |
 | --- | --- |
-| `report.md` / `report.pdf` | Operator report: collector status, what is new, inventory, qualified evidence, synthesis |
+| `report.md` / `report.pdf` | Operator report: synthesis, qualified evidence, what is new, errors, then a technical annex (collector status, inventory with STIX ids, relationships) and the document data (software version, model, disclaimer) |
 | `bundle.stix.json` | The run's STIX 2.1 bundle, deterministic ids |
 | `delta.json` | Observables new since the previous run |
 | `qualified_evidence.json` | Each web result with its category, relevance, confidence and rationale |

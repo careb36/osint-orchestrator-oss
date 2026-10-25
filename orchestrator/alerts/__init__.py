@@ -34,6 +34,7 @@ from pydantic import BaseModel
 from orchestrator.config import settings
 from orchestrator.i18n import resolve_language, t, tv
 from orchestrator.models import AlertCaseReason, AlertsConfig, RunStatus
+from orchestrator.timefmt import local_stamp
 
 logger = logging.getLogger(__name__)
 
@@ -207,7 +208,7 @@ class EmailNotifier(Notifier):
             language=lang,
             target_fqdn=event.target_fqdn,
             new_count=new_count,
-            risk_level=tv(event.risk_level, language=lang),
+            risk_level=f"{tv(event.risk_level, language=lang)} ({event.risk_level})",
         )
         obs_lines = ""
         if event.new_observables:
@@ -227,10 +228,10 @@ class EmailNotifier(Notifier):
             language=lang,
             target_fqdn=event.target_fqdn,
             run_id=event.run_id,
-            run_status=tv(event.run_status, language=lang),
-            risk_level=tv(event.risk_level, language=lang),
+            run_status=f"{tv(event.run_status, language=lang)} ({event.run_status})",
+            risk_level=f"{tv(event.risk_level, language=lang)} ({event.risk_level})",
             new_count=new_count,
-            generated_at=event.generated_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            generated_at=local_stamp(event.generated_at, lang),
             observables_section=obs_lines,
             finding_section=finding_section,
         )

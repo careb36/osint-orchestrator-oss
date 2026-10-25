@@ -175,14 +175,14 @@ async def test_report_reads_executive_part_first_and_annex_last(tmp_path: Path) 
     # Labels for the reader, identifiers for the record.
     assert "- **Estado:** exitosa (`success`)" in text
     assert "**Riesgo**: alto (`high`) — Motivo de prueba." in text
-    assert "**Novedades desde la corrida anterior**:\n- Dominio nuevo example.com" in text
+    assert "**Lo nuevo según el modelo**:\n- Dominio nuevo example.com" in text
     assert "**Pivotes sugeridos**:\n- Registro mercantil" in text
     assert "| openosint | correcto | 2 |" in text
     assert "**dominio** (`domain-name`)" in text
     assert "- resuelve a: `example.com` -> `1.2.3.4` (domain-name--1 -> ipv4-addr--1)" in text
     assert "- **Generado por:** OSINT Orchestrator " in text
     assert "- **Evaluación automática:** nebius · nvidia/test-model" in text
-    assert "no constituyen dictamen" in text.lower() or "No constituyen dictamen" in text
+    assert "No constituyen dictamen" in text
 
 
 @pytest.mark.asyncio
@@ -191,13 +191,13 @@ async def test_report_dates_follow_the_configured_timezone(
 ) -> None:
     """The local stamp is what a file is dated by; the UTC instant stays
     beside it. An unknown zone falls back to UTC instead of failing."""
-    monkeypatch.setattr("orchestrator.reports.settings.orchestrator_timezone", "America/Montevideo")
+    monkeypatch.setattr("orchestrator.timefmt.settings.orchestrator_timezone", "America/Montevideo")
     text = (await generate_report(_sample_report_data(), report_dir=str(tmp_path))).read_text(
         encoding="utf-8"
     )
     assert "- **Inicio:** 08/09/2026 07:00 -03 (`2026-09-08T10:00:00Z`)" in text
 
-    monkeypatch.setattr("orchestrator.reports.settings.orchestrator_timezone", "Mars/Olympus")
+    monkeypatch.setattr("orchestrator.timefmt.settings.orchestrator_timezone", "Mars/Olympus")
     text = (
         await generate_report(_sample_report_data(target_id="beta"), report_dir=str(tmp_path))
     ).read_text(encoding="utf-8")
@@ -221,7 +221,7 @@ async def test_qualified_evidence_shows_labels_and_percent(tmp_path: Path) -> No
         }
     )
     text = (await generate_report(data, report_dir=str(tmp_path))).read_text(encoding="utf-8")
-    assert "| prensa adversa | alto | 86 % | [Investigation](https://news.example/x) |" in text
+    assert "| prensa adversa | alta | 86 % | [Investigation](https://news.example/x) |" in text
     assert "las asigna el modelo clasificador" in text
 
 
@@ -241,7 +241,20 @@ async def test_daily_index_shows_labels(tmp_path: Path) -> None:
     finding = Finding(target_id="alpha", run_id=101, summary="s", risk_level="high")
     await generate_report(_sample_report_data(), report_dir=str(tmp_path), finding=finding)
     text = (tmp_path / "2026-09-08" / "index.md").read_text(encoding="utf-8")
-    assert "| alpha | exitosa | 1 | alto |" in text
+    assert "| alpha | exitosa (`success`) | 1 | alto (`high`) |" in text
+
+
+@pytest.mark.asyncio
+async def test_daily_index_keeps_one_language_when_targets_differ(tmp_path: Path) -> None:
+    """Rows written by a target reporting in another language are re-rendered
+    from their codes, so the index never mixes languages."""
+    await generate_report(_sample_report_data(target_id="alpha"), report_dir=str(tmp_path))
+    await generate_report(
+        _sample_report_data(target_id="beta"), report_dir=str(tmp_path), language="en"
+    )
+    text = (tmp_path / "2026-09-08" / "index.md").read_text(encoding="utf-8")
+    assert "| alpha | success (`success`) |" in text
+    assert "exitosa" not in text
 
 
 @pytest.mark.asyncio

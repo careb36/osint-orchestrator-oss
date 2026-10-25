@@ -25,11 +25,17 @@ from [SECURITY.md](SECURITY.md).
   risk level, evidence category and relevance, collector outcome, STIX
   types and relationship types, both languages), used by the report, the
   daily index and the alert e-mail (`riesgo alto` instead of `riesgo high`,
-  `Estado: exitosa` instead of `success`). Evidence confidence is printed as
-  a percentage with a note on what it is. The persisted identifiers do not
-  change (ADR-004).
-- Report dates are printed in the operator's time zone with the UTC instant
-  beside them (`25/10/2026 00:20 -03 (2026-10-25T03:20:06Z)`); new setting
+  `Estado: exitosa (success)`; the code stays next to the label, so mail
+  rules matching `high` keep working). Relevance uses its own feminine
+  labels in Spanish (alta, media, baja). The daily index writes
+  `label (\`code\`)` and re-renders earlier rows from their codes, so targets
+  reporting in different languages no longer mix languages in one file.
+  Evidence confidence is printed as a percentage with a note on what it is.
+  The persisted identifiers do not change (ADR-004).
+- Report and alert e-mail dates are printed in the operator's time zone with
+  the UTC instant beside them (`25/10/2026 00:20 -03 (2026-10-25T03:20:06Z)`,
+  `orchestrator/timefmt.py`); report directories stay named by the UTC day;
+  new setting
   `ORCHESTRATOR_TIMEZONE` (IANA name, default `UTC`, unknown names fall back
   to UTC with a warning). `Finding` carries `provider` and `model` so the
   report can name them; `orchestrator.__version__` is the single source of

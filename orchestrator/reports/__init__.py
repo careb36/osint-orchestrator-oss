@@ -17,19 +17,19 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import re
 import uuid
 from collections import defaultdict
-from datetime import UTC, datetime, tzinfo
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, Field
 
 from orchestrator import __version__
-from orchestrator.config import settings
 from orchestrator.i18n import resolve_language, t, tv
 from orchestrator.models import Finding
+from orchestrator.timefmt import local_stamp
 
 try:
     import fcntl
@@ -53,8 +53,8 @@ _TEXT: dict[str, dict[str, str]] = {
     "synthesis": {"es": "## Síntesis", "en": "## Synthesis"},
     "synthesis_risk": {"es": "**Riesgo**", "en": "**Risk**"},
     "synthesis_new": {
-        "es": "**Novedades desde la corrida anterior**",
-        "en": "**New since the previous run**",
+        "es": "**Lo nuevo según el modelo**",
+        "en": "**What the model reports as new**",
     },
     "synthesis_pivots": {"es": "**Pivotes sugeridos**", "en": "**Suggested pivots**"},
     "synthesis_hint": {
@@ -155,7 +155,8 @@ class ReportObservable(BaseModel):
 class RunReportData(BaseModel):
     """Everything ``generate_report`` needs — run data only, no I/O.
 
-    Reporting is deterministic: same input, byte-identical artifacts. The
+    Reporting is deterministic: the same input and settings (language,
+    ORCHESTRATOR_TIMEZONE, software version) give byte-identical artifacts. The
     pipeline builds this from the Run row, collector results and merged
     observables; ``bundles`` are the raw STIX bundles emitted per collector.
     """
@@ -235,37 +236,10 @@ def _ensure_utc(dt: datetime) -> datetime:
     return dt
 
 
-def _report_timezone() -> tzinfo:
-    """The operator's time zone (ORCHESTRATOR_TIMEZONE), or UTC when unknown.
-
-    A misspelt zone must not take a report down: the UTC stamp is printed
-    next to the local one anyway, so falling back loses convenience, not
-    evidence.
-    """
-    name = (settings.orchestrator_timezone or "UTC").strip()
-    try:
-        return ZoneInfo(name)
-    except (ZoneInfoNotFoundError, ValueError):
-        logger.warning("Unknown ORCHESTRATOR_TIMEZONE %r; report dates fall back to UTC", name)
-        return UTC
-
-
 def _stamp(dt: datetime | None, lang: str) -> str:
-    """Local date and time for the reader, with the UTC instant beside it.
-
-    ``25/10/2026 00:20 America/Montevideo (2026-10-25T03:20:06Z)``: the
-    local form is what a file is dated by, the UTC form is what the manifest
-    and the database carry.
-    """
-    if dt is None:
-        return "-"
-    aware = _ensure_utc(dt)
-    zone = _report_timezone()
-    local = aware.astimezone(zone)
-    human = local.strftime("%d/%m/%Y %H:%M" if lang == "es" else "%Y-%m-%d %H:%M")
-    zone_name = local.tzname() or str(zone)
-    utc_iso = aware.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    return f"{human} {zone_name} (`{utc_iso}`)"
+    """Local date and time for the reader with the UTC instant beside it,
+    e.g. ``25/10/2026 00:20 -03 (`2026-10-25T03:20:06Z`)``."""
+    return local_stamp(dt, lang, code=True)
 
 
 def _merge_bundles(bundles: list[dict[str, Any]]) -> dict[str, Any]:
@@ -286,6 +260,13 @@ def _merge_bundles(bundles: list[dict[str, Any]]) -> dict[str, Any]:
     ordered = sorted(dedup.values(), key=lambda o: str(o.get("id", "")))
     bundle_id = _deterministic_bundle_id([str(o.get("id", "")) for o in ordered])
     return {"type": "bundle", "id": bundle_id, "objects": ordered}
+
+
+def _relevance_label(relevance: str, lang: str) -> str:
+    """Relevance agrees with a feminine noun in Spanish (alta, media, baja),
+    unlike the risk level (alto, medio, bajo); unknown values pass through."""
+    label = tv(f"relevance.{relevance}", language=lang)
+    return relevance if label.startswith("relevance.") else label
 
 
 def _collector_table(data: RunReportData, lang: str) -> list[str]:
@@ -412,7 +393,7 @@ def _qualified_evidence_section(evidence: list[dict[str, Any]], lang: str) -> li
             + " | ".join(
                 [
                     tv(str(item.get("category", "")), language=lang),
-                    tv(str(item.get("relevance", "")), language=lang),
+                    _relevance_label(str(item.get("relevance", "")), lang),
                     f"{confidence * 100:.0f} %",
                     title_cell,
                     str(item.get("rationale", "")).replace("|", " "),
@@ -477,7 +458,7 @@ def _synthesis_section(
     return lines
 
 
-def _document_section(data: RunReportData, finding: Finding | None, lang: str) -> list[str]:
+def _document_section(finding: Finding | None, lang: str) -> list[str]:
     """Who produced this document, with what, and what it is not.
 
     A filed report must say which software wrote it and which model wrote
@@ -541,7 +522,7 @@ def _markdown_content(
         "",
         *_relationships_section(bundle, data.observables, lang),
         "",
-        *_document_section(data, finding, lang),
+        *_document_section(finding, lang),
         "",
     ]
     return "\n".join(lines)
@@ -597,6 +578,24 @@ def _write_optional_pdf(path: Path, markdown: str) -> None:
         pdf.output(str(path))
     except Exception as exc:  # noqa: BLE001
         logger.warning("PDF generation failed: %s", exc)
+
+
+_INDEX_CODE = re.compile(r"\(`([^`]+)`\)\s*\Z")
+
+
+def _index_value(cell: str, lang: str) -> str:
+    """Re-render a status or risk cell in *lang*: ``label (`code`)``.
+
+    Rows written by another target's run (possibly in another language) are
+    copied back into the index; keying on the code keeps one language per
+    file. A cell from before this format (a bare code or label) is treated
+    as a code, which ``tv`` passes through when it does not know it.
+    """
+    match = _INDEX_CODE.search(cell)
+    code = match.group(1) if match else cell.strip()
+    if code in {"", "—", "-"}:
+        return code or "—"
+    return f"{tv(code, language=lang)} (`{code}`)"
 
 
 def _read_index_rows(path: Path) -> dict[str, tuple[str, str, str, str]]:
@@ -661,9 +660,9 @@ def _rewrite_daily_index(
     rows = _read_index_rows(index_path)
     link_text = _msg("index_view", lang)
     rows[target_id] = (
-        tv(run_status, language=lang),
+        run_status,
         str(new_count),
-        tv(risk_level, language=lang),
+        risk_level,
         f"[{link_text}](./{target_id}/run-{run_id}/report.md)",
     )
 
@@ -679,7 +678,9 @@ def _rewrite_daily_index(
     ]
     for key in sorted(rows):
         status, count, risk, report = rows[key]
-        lines.append(f"| {key} | {status} | {count} | {risk} | {report} |")
+        lines.append(
+            f"| {key} | {_index_value(status, lang)} | {count} | {_index_value(risk, lang)} | {report} |"
+        )
     lines.append("")
     index_path.write_text("\n".join(lines), encoding="utf-8")
 
