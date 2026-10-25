@@ -18,7 +18,7 @@ permissions:
 jobs:
   complete:
     name: PR is complete
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, osint]
     steps:
       - name: Not a work in progress and not empty
         env:
