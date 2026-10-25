@@ -56,6 +56,19 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- `classification` per target in `targets.yaml`: `osint` (the default; open
+  sources only, may go to the cloud provider `llm` names) or `restricted` (an
+  investigation that mixes in material that must stay on premises). A
+  restricted target requires `llm: local` and cannot enable SocialOSINT (its
+  own cloud LLM) or Tavily's `include_answer` (written by Tavily's model); the
+  loader rejects the block with the reason named, so the policy no longer
+  depends on nobody mistyping the YAML. `GET /targets` adds `processing`,
+  where the prompts actually go after `LLM_PROVIDER` (`none`, `ollama` or the
+  cloud provider, with the `openai` to Nebius remap applied). The console's
+  target card shows the classification (translated) and that processing
+  location instead of the bare `llm` value, and the report header carries
+  both lines.
+
 
 - README screenshots (both languages) now show the console after the showcase
   run, served by the real API over a database seeded with the two recordings,

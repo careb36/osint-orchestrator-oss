@@ -101,6 +101,18 @@ targets:
     # llm: openai a Nebius, que entonces necesitan NEBIUS_API_KEY.
     llm: local
 
+    # Clasificación de lo que llevan los prompts de este objetivo.
+    # osint (por defecto): solo fuentes abiertas; puede ir a la nube si `llm`
+    #   lo indica.
+    # restricted: la investigación mezcla material que no debe salir del
+    #   equipo; obliga a `llm: local` y no admite SocialOSINT (usa su propio
+    #   modelo en la nube) ni `tavily.include_answer` (la respuesta la escribe
+    #   el modelo de Tavily); el cargador rechaza el bloque si no se cumple.
+    #   Los recolectores siguen consultando fuentes públicas con el nombre o
+    #   el dominio. La consola y el informe muestran la clasificación y dónde
+    #   se procesa la síntesis.
+    classification: osint
+
     # Idioma de los informes y de la síntesis de este objetivo.
     # es | en. Omítelo para usar ORCHESTRATOR_LANGUAGE del .env.
     language: es
@@ -215,4 +227,5 @@ targets:
         enabled: true
         search_terms: ["Meridian Ridge Holdings"]
     llm: nebius
+    classification: osint          # fuentes abiertas: puede procesarse en la nube
     report_dir: "daily_reports"

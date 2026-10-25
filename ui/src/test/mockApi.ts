@@ -24,6 +24,8 @@ export const sampleTargets: TargetSummary[] = [
     collectors: { openosint: { enabled: true }, spiderfoot: { enabled: true } },
     schedule: { cron: '0 6 * * *' },
     llm: 'local',
+    classification: 'restricted',
+    processing: 'ollama',
     language: 'es',
   },
   {
@@ -35,6 +37,8 @@ export const sampleTargets: TargetSummary[] = [
     collectors: { openosint: { enabled: true } },
     schedule: { cron: '0 7 * * *' },
     llm: 'local',
+    classification: 'osint',
+    processing: 'nebius',
     language: 'en',
   },
 ];

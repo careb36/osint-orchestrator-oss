@@ -99,6 +99,11 @@ Before any deployment beyond a laptop:
   `openai` or `anthropic` sends the run's observables and the web evidence
   being qualified to that cloud provider. Make each cloud opt-in, and the
   `LLM_PROVIDER` value, an explicit, documented decision in your jurisdiction.
+- A target marked `classification: restricted` is pinned to `llm: local` and
+  cannot enable SocialOSINT or Tavily's `include_answer`, the two collector
+  paths that hand text to a hosted model; the loader rejects a block that
+  breaks the rule. Its collectors still query public sources with the
+  entity's name or domain.
 - Tavily receives the search terms configured for a target (entity names or
   the domain).
 - Model output (qualification and risk synthesis) is decision support for an
