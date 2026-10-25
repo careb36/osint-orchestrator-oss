@@ -196,8 +196,12 @@ class Settings(BaseSettings):
     tavily_exclude_domains: str = ""
 
     # ─── Retention ───────────────────────────────────────────────────────────
-    # Days to keep run rows and daily_reports directories (0 = disabled).
-    orchestrator_retention_days: int = 90
+    # Days to keep run rows and daily_reports directories; 0 (the default)
+    # never purges. Runs and reports are the evidence a compliance file is
+    # built on, and record-keeping rules measure its retention in years, so
+    # nothing is deleted unless an operator sets a period on purpose. Runs that
+    # opened an alert case are kept even then (see retention.py).
+    orchestrator_retention_days: int = 0
     # UTC cron expression for the nightly purge job.
     orchestrator_retention_cron: str = "30 3 * * *"
 

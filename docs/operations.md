@@ -339,15 +339,19 @@ increase(osint_orchestrator_alert_case_time_to_acknowledge_seconds_sum[1d])
 
 ## Retention
 
-A nightly job (`ORCHESTRATOR_RETENTION_CRON`) deletes runs that finished more
-than `ORCHESTRATOR_RETENTION_DAYS` ago (default `90`, `0` disables it) with their
-observables, findings, qualified evidence, alert cases, alerts and queued
-deliveries. A
-`daily_reports/<date>` directory is deleted once its whole day is older than the
-cutoff and no remaining run started that day, so a kept run never loses its
-report or manifest. The delta memory (`seen_observables`) is never purged. The default is operational, not a legal retention period: when reports
-are due-diligence evidence, set the period your regulation requires or archive
-the run directories before the purge.
+Nothing is purged by default: `ORCHESTRATOR_RETENTION_DAYS` is `0`. Runs and
+reports are the evidence a compliance file is built on, and record-keeping
+rules count their retention in years, so deletion is opt-in. When a period is
+set, a nightly job (`ORCHESTRATOR_RETENTION_CRON`) deletes runs that finished
+more than that many days ago with their observables, findings, qualified
+evidence, alerts and queued deliveries, except runs that opened an alert
+case: those are the file itself (who reviewed what, with which note) and are
+kept with their dependents whatever their age. A `daily_reports/<date>`
+directory is deleted once its whole day is older than the cutoff and no
+remaining run started that day, so a kept run never loses its report or
+manifest. The delta memory (`seen_observables`) is never purged. Before
+enabling a period, archive the run directories you must keep, or set the
+period your regulation requires rather than an operational one.
 
 ## Observability
 

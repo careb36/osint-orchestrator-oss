@@ -53,7 +53,8 @@ class RetentionSummary:
     alert_deliveries_deleted: int = 0
     opencti_outbox_deleted: int = 0
     evidence_qualifications_deleted: int = 0
-    alert_cases_deleted: int = 0
+    # Runs past the cutoff that stayed because they opened an alert case.
+    runs_kept_with_case: int = 0
     report_dirs_deleted: int = 0
     errors: list[str] = field(default_factory=list)
 
@@ -63,8 +64,15 @@ async def purge_expired(now: datetime | None = None) -> RetentionSummary:
     Delete run rows older than ``retention_days`` and their dependent rows,
     then remove matching ``daily_reports/YYYY-MM-DD`` directories.
 
-    ``seen_observables`` is intentionally left untouched — it is the delta
-    memory between runs and must survive a purge cycle.
+    Two kinds of rows survive every purge on purpose:
+
+    - ``seen_observables``, the delta memory between runs;
+    - any run that opened an alert case, with all its dependents. A case
+      records who reviewed the run and what they noted: together with the
+      run's report and manifest it is the compliance file itself, and a
+      file is kept for as long as the record-keeping rules say, not for an
+      operational window. Its report directory survives with it (see the
+      directory purge below).
 
     Returns a :class:`RetentionSummary` and logs a single structured line.
     """
@@ -85,12 +93,17 @@ async def purge_expired(now: datetime | None = None) -> RetentionSummary:
         async with get_session() as session:
             # Identify expired run ids.  Use finished_at when available,
             # fall back to started_at for runs that never completed.
-            stmt = select(col(Run.id)).where(
-                col(Run.finished_at).isnot(None) & (col(Run.finished_at) < cutoff)
-                | col(Run.finished_at).is_(None) & (col(Run.started_at) < cutoff)
-            )
+            expired_by_age = col(Run.finished_at).isnot(None) & (
+                col(Run.finished_at) < cutoff
+            ) | col(Run.finished_at).is_(None) & (col(Run.started_at) < cutoff)
+            with_case = select(col(AlertCase.run_id))
+            stmt = select(col(Run.id)).where(expired_by_age, col(Run.id).notin_(with_case))
             result = await session.exec(stmt)  # type: ignore[call-overload]  # SQLModel's exec stubs exclude SQLAlchemy Select, which it supports at runtime.
             expired_ids = [row[0] if not isinstance(row, int) else row for row in result.all()]
+
+            kept_stmt = select(col(Run.id)).where(expired_by_age, col(Run.id).in_(with_case))
+            kept_result = await session.exec(kept_stmt)  # type: ignore[call-overload]  # Same SQLModel stub gap as above.
+            summary.runs_kept_with_case = len(kept_result.all())
 
             if expired_ids:
                 # Delete dependents first to satisfy FK constraints (SQLite
@@ -102,7 +115,6 @@ async def purge_expired(now: datetime | None = None) -> RetentionSummary:
                     (OpenCTIOutbox, OpenCTIOutbox.run_id, "opencti_outbox_deleted"),
                     (AlertDelivery, AlertDelivery.run_id, "alert_deliveries_deleted"),
                     (AlertRecord, AlertRecord.run_id, "alerts_deleted"),
-                    (AlertCase, AlertCase.run_id, "alert_cases_deleted"),
                     (FindingRecord, FindingRecord.run_id, "findings_deleted"),
                     (RunObservable, RunObservable.run_id, "run_observables_deleted"),
                     (
@@ -186,7 +198,7 @@ async def purge_expired(now: datetime | None = None) -> RetentionSummary:
             "alert_deliveries_deleted": summary.alert_deliveries_deleted,
             "opencti_outbox_deleted": summary.opencti_outbox_deleted,
             "evidence_qualifications_deleted": summary.evidence_qualifications_deleted,
-            "alert_cases_deleted": summary.alert_cases_deleted,
+            "runs_kept_with_case": summary.runs_kept_with_case,
             "report_dirs_deleted": summary.report_dirs_deleted,
             "errors": summary.errors,
         },

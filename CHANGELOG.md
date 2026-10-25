@@ -9,6 +9,19 @@ from [SECURITY.md](SECURITY.md).
 
 ## [Unreleased]
 
+### Changed
+
+- Retention is off by default: `ORCHESTRATOR_RETENTION_DAYS` is now `0` in
+  `config.py`, `.env.example` and the Helm values (it was `90`). Runs, reports,
+  findings, qualified evidence and alert cases are the evidence a compliance
+  file is built on, and record-keeping rules count their retention in years,
+  so a fresh deployment no longer deletes anything on its own. When an
+  operator does set a period, runs that opened an alert case are kept with
+  their dependents and their report day whatever their age: the case records
+  who reviewed the run and what they noted, which is the file itself. The
+  purge summary reports `runs_kept_with_case` instead of
+  `alert_cases_deleted`, which is now always zero by construction.
+
 ### Added
 
 - README screenshots (both languages) now show the console after the showcase
