@@ -11,6 +11,15 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- Tavily collector: two more query templates per language look for the
+  record itself rather than the news cycle: a criminal conviction or
+  prosecution (money laundering, fraud) and administrative sanctions (fines,
+  disqualification, proceedings). The default call budget
+  (`max_calls_per_run` and `TAVILY_MAX_CALLS_PER_RUN`) rises from 3 to 5 so
+  a single-term target still covers every template. A unit test now pins
+  that no request carries a recency filter (`topic`, `days`, `time_range`):
+  a due-diligence search looks back as far as the sources go.
+
 - README screenshots (both languages) now show the console after the showcase
   run, served by the real API over a database seeded with the two recordings,
   instead of the unit tests' fixtures; the captions say so.

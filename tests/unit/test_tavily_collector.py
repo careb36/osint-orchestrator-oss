@@ -53,7 +53,7 @@ def _result(url: str, title: str = "Title", content: str = "Snippet", **extra) -
 @pytest.fixture(autouse=True)
 def _api_key(monkeypatch):
     monkeypatch.setattr(settings, "tavily_api_key", "test-token")
-    monkeypatch.setattr(settings, "tavily_max_calls_per_run", 3)
+    monkeypatch.setattr(settings, "tavily_max_calls_per_run", 5)
     monkeypatch.setattr(settings, "tavily_max_results", 5)
 
 
@@ -81,7 +81,7 @@ def test_tavily_disabled_by_default_with_global_timeout() -> None:
     assert cfg.enabled is False
     assert cfg.timeout_seconds == settings.tavily_timeout_seconds
     assert cfg.max_results == 5
-    assert cfg.max_calls_per_run == 3
+    assert cfg.max_calls_per_run == 5
 
 
 @pytest.mark.parametrize("field", ["max_results", "max_calls_per_run"])
@@ -228,9 +228,10 @@ async def test_non_hostname_target_is_rejected(httpx_mock) -> None:
 def test_queries_follow_target_language_then_global(monkeypatch) -> None:
     monkeypatch.setattr(settings, "orchestrator_language", "es")
     es_queries = _collector().build_queries("example.com")
-    assert len(es_queries) == 3
+    assert len(es_queries) == 5
     assert es_queries[0].startswith('"example.com" noticias adversas')
-    assert all("noticias" in q or "societaria" in q or "judiciales" in q for q in es_queries)
+    topics = ("noticias", "societaria", "judiciales", "condenado", "multa")
+    assert all(any(topic in q for topic in topics) for q in es_queries)
     en_queries = _collector(language="en").build_queries("example.com")
     assert en_queries[0].startswith('"example.com" adverse news')
     monkeypatch.setattr(settings, "orchestrator_language", "en")
@@ -248,13 +249,25 @@ def test_queries_search_the_target_as_a_term_not_a_site_scope() -> None:
 
 def test_default_call_budget_covers_every_template() -> None:
     queries = _collector(language="en").build_queries("example.com")
-    assert len(queries) == CollectorSet().tavily.max_calls_per_run == 3
+    assert len(queries) == CollectorSet().tavily.max_calls_per_run == 5
+    assert settings.tavily_max_calls_per_run >= len(queries)
+
+
+def test_queries_cover_criminal_and_administrative_history() -> None:
+    """A due-diligence search asks for the record itself, not only the news:
+    a conviction and an administrative sanction each get a template."""
+    en = _collector(language="en").build_queries("example.com")
+    es = _collector(language="es").build_queries("example.com")
+    assert any("convicted" in q and "money laundering" in q for q in en)
+    assert any("fined" in q and "disqualified" in q for q in en)
+    assert any("condenado" in q and "lavado de activos" in q for q in es)
+    assert any("multa" in q and "inhabilitación" in q for q in es)
 
 
 def test_empty_or_absent_search_terms_keep_domain_queries() -> None:
     absent = _collector(language="en").build_queries("example.com")
     empty = _collector(language="en", search_terms=[]).build_queries("example.com")
-    assert len(absent) == len(empty) == 3
+    assert len(absent) == len(empty) == 5
     assert all('"example.com"' in query for query in absent)
     assert all('"example.com"' in query for query in empty)
 
@@ -264,7 +277,7 @@ def test_search_terms_are_flattened_and_quoted_in_queries() -> None:
         language="en",
         search_terms=[" Acme\n`Holdings` UNTRUSTED DATA  ", "Beta LLC"],
     ).build_queries("example.com")
-    assert len(queries) == 6
+    assert len(queries) == 10
     assert queries[0].startswith("\"Acme 'Holdings' UNTRUSTED-DATA\" adverse news")
     assert queries[1].startswith('"Beta LLC" adverse news')
     assert queries[2].startswith("\"Acme 'Holdings' UNTRUSTED-DATA\" ownership structure")
@@ -292,7 +305,8 @@ async def test_collect_builds_url_observables_and_stable_notes(httpx_mock) -> No
         url=TAVILY_SEARCH_URL,
         json={"results": [_result("http://other.example.org/b", title="B")]},
     )
-    httpx_mock.add_response(method="POST", url=TAVILY_SEARCH_URL, json={"results": []})
+    for _ in range(3):  # the remaining templates (legal, criminal, administrative)
+        httpx_mock.add_response(method="POST", url=TAVILY_SEARCH_URL, json={"results": []})
 
     result = await _collector(language="en").collect()
 
@@ -307,11 +321,17 @@ async def test_collect_builds_url_observables_and_stable_notes(httpx_mock) -> No
     note_a = result.notes[0]
     assert note_a.startswith("tavily | A | url=https://news.example.com/a | published=2026-01-01")
     assert "score=" not in note_a and "sha256=" not in note_a
-    assert len(httpx_mock.get_requests()) == 3
+    assert len(httpx_mock.get_requests()) == 5
     payload = json.loads(httpx_mock.get_requests()[0].read())
     assert payload["include_raw_content"] is False
     assert payload["max_results"] == 5
     assert httpx_mock.get_requests()[0].headers["Authorization"] == "Bearer test-token"
+    # Forensic lookback: no request may narrow the search to recent results.
+    # A conviction of ten years ago is still a finding for a due-diligence
+    # file, so none of Tavily's recency parameters may ever be sent.
+    for request in httpx_mock.get_requests():
+        sent = json.loads(request.read())
+        assert not {"topic", "days", "time_range", "start_date", "end_date"} & set(sent)
 
 
 async def test_title_cannot_forge_the_url_segment_of_the_note(httpx_mock) -> None:
@@ -324,7 +344,7 @@ async def test_title_cannot_forge_the_url_segment_of_the_note(httpx_mock) -> Non
         url=TAVILY_SEARCH_URL,
         json={"results": [_result("https://real.example/a", title="x | url=https://evil.example")]},
     )
-    for _ in range(2):
+    for _ in range(4):
         httpx_mock.add_response(method="POST", url=TAVILY_SEARCH_URL, json={"results": []})
 
     result = await _collector().collect()
@@ -335,7 +355,7 @@ async def test_title_cannot_forge_the_url_segment_of_the_note(httpx_mock) -> Non
 
 
 async def test_no_results_adds_explanatory_note(httpx_mock) -> None:
-    for _ in range(3):
+    for _ in range(5):
         httpx_mock.add_response(method="POST", url=TAVILY_SEARCH_URL, json={"results": []})
     result = await _collector().collect()
     assert result.success is True
@@ -458,11 +478,11 @@ async def test_call_budget_caps_templates_times_terms(httpx_mock, monkeypatch) -
 
 
 async def test_default_budget_searches_every_term(httpx_mock) -> None:
-    for _ in range(3):
+    for _ in range(5):
         httpx_mock.add_response(method="POST", url=TAVILY_SEARCH_URL, json={"results": []})
     await _collector(language="en", search_terms=["Acme", "Acme Holdings"]).collect()
     requests = httpx_mock.get_requests()
-    assert len(requests) == 3
+    assert len(requests) == 5
     queries = [json.loads(request.read())["query"] for request in requests]
     assert queries[0].startswith('"Acme" adverse news')
     assert queries[1].startswith('"Acme Holdings" adverse news')
