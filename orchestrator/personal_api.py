@@ -5,7 +5,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field, SecretStr
-from sqlalchemy import delete
+from sqlalchemy import delete, update
 from sqlmodel import col, select
 
 from orchestrator import accounts
@@ -88,10 +88,21 @@ async def change_password(body: PasswordBody, request: Request, response: Respon
             accounts.verify_password, body.current_password.get_secret_value(), user.password_hash
         ):
             raise HTTPException(400, t("password_invalid"))
-        user.password_hash = await asyncio.to_thread(
+        encoded = await asyncio.to_thread(
             accounts.digest_password, body.password.get_secret_value()
         )
-        session.add(user)
+        result = await session.exec(
+            update(UserAccount)
+            .where(
+                col(UserAccount.id) == user.id,
+                col(UserAccount.password_hash) == user.password_hash,
+                col(UserAccount.active).is_(True),
+            )
+            .values(password_hash=encoded, failed_logins=0, locked_until=None)
+            .execution_options(synchronize_session=False)
+        )
+        if result.rowcount != 1:
+            raise HTTPException(400, t("password_invalid"))
         await session.exec(delete(UserSession).where(col(UserSession.user_id) == user.id))
         await session.commit()
     response.delete_cookie(accounts.COOKIE_NAME, path="/")

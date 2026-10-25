@@ -437,6 +437,7 @@ def _write_optional_pdf(path: Path, markdown: str, *, created_at: datetime | Non
 
         from fpdf import FPDF
         from fpdf.enums import XPos, YPos
+        from fpdf.fonts import TTFFont
 
         fonts = Path(__file__).parent / "fonts"
         pdf = FPDF()
@@ -453,10 +454,13 @@ def _write_optional_pdf(path: Path, markdown: str, *, created_at: datetime | Non
             # Preserve the destination of every citation when removing markup.
             line = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1 (\2)", raw)
             line = line.lstrip("# ") if heading else line
-            line = line.replace("`", "").replace("**", "")
+            line = line.replace("`", "").replace("**", "").expandtabs(4)
             if re.fullmatch(r"[|: \-]+", line):
                 continue
             pdf.set_font("Report", style="B" if heading else "", size=14 if heading else 10)
+            assert isinstance(pdf.current_font, TTFFont)
+            if any(ord(character) not in pdf.current_font.cmap for character in line):
+                raise ValueError("Report contains characters unsupported by the bundled font")
             pdf.set_x(pdf.l_margin)
             pdf.multi_cell(w=0, h=6, text=line, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.set_creation_date(_ensure_utc(created_at) if created_at else datetime.now(UTC))

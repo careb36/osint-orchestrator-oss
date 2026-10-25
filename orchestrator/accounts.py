@@ -12,7 +12,7 @@ import secrets
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, Request
-from sqlalchemy import case, delete, update
+from sqlalchemy import case, delete, or_, update
 from sqlmodel import col, select
 
 from orchestrator.database import get_session
@@ -98,7 +98,16 @@ async def login(username: str, password: str) -> tuple[str, dict]:
             if user and not locked:
                 await session.exec(
                     update(UserAccount)
-                    .where(col(UserAccount.id) == user.id)
+                    .where(
+                        col(UserAccount.id) == user.id,
+                        col(UserAccount.password_hash) == user.password_hash,
+                        col(UserAccount.active).is_(True),
+                        or_(
+                            col(UserAccount.locked_until).is_(None),
+                            col(UserAccount.locked_until) <= now,
+                        ),
+                    )
+                    .execution_options(synchronize_session=False)
                     .values(
                         failed_logins=UserAccount.failed_logins + 1,
                         locked_until=case(
@@ -109,8 +118,25 @@ async def login(username: str, password: str) -> tuple[str, dict]:
                 )
                 await session.commit()
             raise HTTPException(401, t("login_invalid"))
-        user.failed_logins = 0
-        user.locked_until = None
+        # Password derivation yields to other requests. Lock the current
+        # credential version before issuing a session so a reset/lockout that
+        # completed during verification cannot be undone by this login.
+        result = await session.exec(
+            update(UserAccount)
+            .where(
+                col(UserAccount.id) == user.id,
+                col(UserAccount.password_hash) == user.password_hash,
+                col(UserAccount.active).is_(True),
+                or_(
+                    col(UserAccount.locked_until).is_(None),
+                    col(UserAccount.locked_until) <= now,
+                ),
+            )
+            .values(failed_logins=0, locked_until=None)
+            .execution_options(synchronize_session=False)
+        )
+        if result.rowcount != 1:
+            raise HTTPException(401, t("login_invalid"))
         token = secrets.token_urlsafe(32)
         assert user.id is not None
         # Expired sessions are removed on successful login; only digests persist.
@@ -122,7 +148,6 @@ async def login(username: str, password: str) -> tuple[str, dict]:
                 expires_at=now + timedelta(seconds=SESSION_SECONDS),
             )
         )
-        session.add(user)
         await session.commit()
         return token, public_user(user)
 

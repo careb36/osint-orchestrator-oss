@@ -116,8 +116,8 @@ def log_auth_status() -> None:
     else:
         logger.warning(
             "API authentication is DISABLED: ORCHESTRATOR_API_KEY is empty. "
-            "Every endpoint is open. Set a key before exposing the orchestrator "
-            "beyond localhost."
+            "Without personal accounts, legacy endpoints allow anonymous access. "
+            "Configure personal accounts or a key before exposing the orchestrator beyond localhost."
         )
 
 

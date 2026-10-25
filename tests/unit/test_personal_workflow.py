@@ -1,11 +1,13 @@
 """Offline acceptance tests for identities, permissions and professional dossiers."""
 
+import asyncio
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
 import pytest
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel, select
@@ -18,6 +20,8 @@ from orchestrator.models import (
     AlertsConfig,
     DossierEvent,
     DossierReport,
+    DossierRun,
+    EvidenceQualification,
     Run,
     Target,
     UserAccount,
@@ -337,7 +341,8 @@ async def test_invalid_session_cannot_fall_back_to_a_machine_key(personal):
         assert (await browser.get("/targets")).status_code == 401
 
 
-async def test_tampered_source_and_pdf_are_rejected(personal, tmp_path):
+@pytest.mark.parametrize("artifact", ["pdf", "markdown"])
+async def test_tampered_source_and_report_are_rejected(personal, tmp_path, artifact):
     run_id = await _source(tmp_path)
     async with personal() as browser:
         case = (await browser.post("/cases", json=CASE)).json()
@@ -367,11 +372,98 @@ async def test_tampered_source_and_pdf_are_rejected(personal, tmp_path):
         ).status_code == 201
         async with database.get_session() as session:
             report = (await session.exec(select(DossierReport))).one()
-            report.pdf = b"%PDF-test-tampered"
+            if artifact == "pdf":
+                report.pdf = b"%PDF-test-tampered"
+            else:
+                report.markdown += "\nAltered professional conclusion"
             session.add(report)
             await session.commit()
         assert not (await browser.get(url + "/reports/1")).json()["signature_verified"]
         assert (await browser.get(url + "/reports/1/pdf")).status_code == 409
+
+
+@pytest.mark.parametrize("operation", ["login", "password_change"])
+async def test_password_reset_invalidates_in_flight_credentials(personal, monkeypatch, operation):
+    async with personal("admin") as admin, personal() as accountant:
+        user_id = (await accountant.get("/auth/me")).json()["id"]
+        checked, resume = asyncio.Event(), asyncio.Event()
+        original_to_thread = asyncio.to_thread
+
+        async def pause_password_check(function, *args, **kwargs):
+            result = await original_to_thread(function, *args, **kwargs)
+            if function is accounts.verify_password and not checked.is_set():
+                checked.set()
+                await resume.wait()
+            return result
+
+        monkeypatch.setattr(accounts.asyncio, "to_thread", pause_password_check)
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app), base_url="https://testserver", headers=HEADERS
+        ) as anonymous:
+            request = (
+                anonymous.post("/auth/login", json={"username": "analyst", "password": PASSWORD})
+                if operation == "login"
+                else accountant.post(
+                    "/auth/password",
+                    json={"current_password": PASSWORD, "password": "test-stale-new-password"},
+                )
+            )
+            pending = asyncio.create_task(request)
+            try:
+                await asyncio.wait_for(checked.wait(), timeout=5)
+                reset = await admin.post(
+                    f"/accounts/{user_id}",
+                    json={"active": True, "password": "test-admin-reset-password"},
+                )
+                assert reset.status_code == 200
+            finally:
+                resume.set()
+                response = await pending
+            assert response.status_code in (400, 401)
+            assert (await accountant.get("/auth/me")).status_code == 401
+            assert (await anonymous.get("/auth/me")).status_code == 401
+        async with database.get_session() as session:
+            user = await session.get(UserAccount, user_id)
+            assert accounts.verify_password("test-admin-reset-password", user.password_hash)
+            assert not (
+                await session.exec(select(UserSession).where(UserSession.user_id == user_id))
+            ).all()
+
+
+@pytest.mark.parametrize("missing", ["source", "evidence", "altered_evidence"])
+async def test_missing_linked_data_blocks_final_report(personal, tmp_path, missing):
+    run_id = await _source(tmp_path)
+    async with personal() as browser:
+        case = (await browser.post("/cases", json=CASE)).json()
+        url = f"/cases/{case['id']}"
+        await browser.post(url + "/sources", json={"run_id": run_id, "revision": 1})
+        item = (await browser.get(url)).json()["evidence"][0]
+        await browser.post(
+            url + "/reviews",
+            json={
+                "revision": 2,
+                "evidence_id": item["id"],
+                "decision": "confirmed",
+                "reason": "Identity matched against the fictitious source identifier",
+            },
+        )
+        async with database.get_session() as session:
+            if missing == "source":
+                session.add(DossierRun(dossier_id=case["id"], run_id=999999))
+            elif missing == "evidence":
+                await session.exec(
+                    delete(EvidenceQualification).where(EvidenceQualification.run_id == run_id)
+                )
+            else:
+                evidence = await session.get(EvidenceQualification, item["id"])
+                evidence.rationale = "Altered after the source was sealed"
+                session.add(evidence)
+            await session.commit()
+        assert (
+            await browser.post(url + "/finalize", json={**FINAL, "revision": 3})
+        ).status_code == 409
+        async with database.get_session() as session:
+            assert not (await session.exec(select(DossierReport))).all()
 
 
 async def test_dossier_source_survives_operational_retention(personal, tmp_path, monkeypatch):

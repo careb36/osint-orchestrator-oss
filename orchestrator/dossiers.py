@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -117,11 +118,13 @@ def _reviewer(request: Request) -> dict:
     return actor
 
 
-async def _sources(session, case_id: int):
+async def _sources(session, case_id: int, *, require_complete: bool = False):
     ids = (
         await session.exec(select(DossierRun.run_id).where(DossierRun.dossier_id == case_id))
     ).all()
     runs = list((await session.exec(select(Run).where(col(Run.id).in_(ids)))).all()) if ids else []
+    if require_complete and len(runs) != len(ids):
+        raise HTTPException(409, t("case_source"))
     evidence = (
         list(
             (
@@ -134,6 +137,32 @@ async def _sources(session, case_id: int):
         else []
     )
     return runs, evidence
+
+
+def _evidence_matches_seal(run: Run, evidence: list[EvidenceQualification]) -> bool:
+    """Check database evidence against the artifact covered by the source seal."""
+    if not run.report_path:
+        return False
+    path = Path(run.report_path).with_name("qualified_evidence.json")
+    rows = [row.model_dump(mode="json") for row in evidence if row.run_id == run.id]
+    if not rows and not path.exists():
+        return True
+
+    def normalized(items):
+        result = []
+        for item in items:
+            item = dict(item)
+            timestamp = datetime.fromisoformat(item["created_at"])
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=UTC)
+            item["created_at"] = timestamp.astimezone(UTC).isoformat()
+            result.append(canonical_json(item))
+        return sorted(result)
+
+    try:
+        return normalized(json.loads(path.read_text(encoding="utf-8"))) == normalized(rows)
+    except (OSError, ValueError, TypeError, KeyError):
+        return False
 
 
 @router.get("")
@@ -281,7 +310,7 @@ async def finalize_case(case_id: int, body: FinalBody, request: Request):
         raise HTTPException(422, t("case_reason"))
     async with get_session() as session:
         dossier = await _get(session, case_id)
-        runs, evidence = await _sources(session, case_id)
+        runs, evidence = await _sources(session, case_id, require_complete=True)
         if not runs or any(
             r.status != "success"
             or r.collection_status != "ok"
@@ -297,7 +326,9 @@ async def finalize_case(case_id: int, body: FinalBody, request: Request):
         ).all()
         reviewed = {r.evidence_id for r in reviews}
         if any(e.id not in reviewed for e in evidence) or any(
-            r.evidence_collected is None or r.evidence_qualified != r.evidence_collected
+            r.evidence_collected is None
+            or r.evidence_qualified != r.evidence_collected
+            or len({e.url for e in evidence if e.run_id == r.id}) != r.evidence_qualified
             for r in runs
         ):
             raise HTTPException(409, t("case_evidence"))
@@ -310,6 +341,8 @@ async def finalize_case(case_id: int, body: FinalBody, request: Request):
             )
             if not check["ok"] or not check["checked"]:
                 raise HTTPException(409, t("case_integrity"))
+        if any(not _evidence_matches_seal(run, evidence) for run in runs):
+            raise HTTPException(409, t("case_integrity"))
         if settings.orchestrator_secret_key in ("", "insecure-dev-key"):
             raise HTTPException(409, t("case_integrity"))
         previous = (
@@ -321,8 +354,6 @@ async def finalize_case(case_id: int, body: FinalBody, request: Request):
             )
         ).first()
         version = (previous or 0) + 1
-        from datetime import UTC, datetime
-
         findings = (
             await session.exec(
                 select(FindingRecord).where(col(FindingRecord.run_id).in_([r.id for r in runs]))
@@ -341,13 +372,6 @@ async def finalize_case(case_id: int, body: FinalBody, request: Request):
             "reviews": [r.model_dump(mode="json") for r in reviews],
             "automated_findings": [f.to_api_dict() for f in findings],
         }
-        # Canonical JSON handles datetime values in model-dumped findings explicitly.
-        snapshot_json = json.dumps(
-            snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
-        )
-        signature = hmac.new(
-            settings.orchestrator_secret_key.encode(), snapshot_json.encode(), hashlib.sha256
-        ).hexdigest()
         lang = resolve_language(
             request.headers.get("accept-language", "es").split(",")[0].split("-")[0]
         )
@@ -359,6 +383,8 @@ async def finalize_case(case_id: int, body: FinalBody, request: Request):
                 raise HTTPException(503, t("case_source"))
             pdf = path.read_bytes()
         snapshot["pdf_sha256"] = hashlib.sha256(pdf).hexdigest()
+        snapshot["markdown_sha256"] = hashlib.sha256(text.encode()).hexdigest()
+        # Canonical JSON handles datetime values in model-dumped findings explicitly.
         snapshot_json = json.dumps(
             snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
         )
@@ -497,18 +523,26 @@ async def get_pdf(case_id: int, version: int, request: Request):
 
 def _verified(report: DossierReport) -> bool:
     try:
-        pdf_ok = hmac.compare_digest(
-            json.loads(report.snapshot_json)["pdf_sha256"], hashlib.sha256(report.pdf).hexdigest()
+        snapshot = json.loads(report.snapshot_json)
+        pdf_ok = hmac.compare_digest(snapshot["pdf_sha256"], hashlib.sha256(report.pdf).hexdigest())
+        markdown_ok = hmac.compare_digest(
+            snapshot["markdown_sha256"], hashlib.sha256(report.markdown.encode()).hexdigest()
         )
-        return pdf_ok and any(
-            hmac.compare_digest(
-                report.signature,
-                hmac.new(key.encode(), report.snapshot_json.encode(), hashlib.sha256).hexdigest(),
+        return (
+            pdf_ok
+            and markdown_ok
+            and any(
+                hmac.compare_digest(
+                    report.signature,
+                    hmac.new(
+                        key.encode(), report.snapshot_json.encode(), hashlib.sha256
+                    ).hexdigest(),
+                )
+                for key in [
+                    settings.orchestrator_secret_key,
+                    *split_keys(settings.orchestrator_secret_key_previous),
+                ]
             )
-            for key in [
-                settings.orchestrator_secret_key,
-                *split_keys(settings.orchestrator_secret_key_previous),
-            ]
         )
     except (ValueError, KeyError, TypeError):
         return False

@@ -76,9 +76,17 @@ administration is not a substitute for professional review.
 ## Operations and integrity
 
 The backend verifies retained source chains before finalization. The final
-snapshot's HMAC covers the PDF digest; downloads are rejected if that integrity
+snapshot's HMAC covers both the PDF and Markdown digests; downloads are rejected if that integrity
 check fails. Preserve current and previous signing keys when rotating them.
 This does not certify source truth or provide public-key nonrepudiation.
+
+PDFs use bundled DejaVu Sans fonts for consistent rendering, including Spanish
+accents. If a report needs a character outside their repertoire, PDF generation
+fails instead of silently dropping that character. The run is incomplete or
+professional issuance is blocked; the full Unicode text remains in Markdown.
+Missing linked runs or evidence records also block professional issuance.
+Database evidence must match the artifact covered by its source seal, with
+SQLite's naive UTC timestamps normalized for comparison.
 
 Operational retention skips runs linked to dossiers. Issued snapshots/PDFs
 and event histories live in SQLite. Back up that database together with source
