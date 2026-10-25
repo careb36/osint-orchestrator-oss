@@ -123,7 +123,8 @@ config:
     maxCallsPerRun: 3
     timeoutSeconds: 120
   # Nightly purge of runs and report directories older than `days`. 0 (the
-  # default) never purges; runs that opened an alert case are kept regardless.
+  # default) never purges; per target, the first run that met an alert rule
+  # and every later run are kept regardless.
   retention:
     days: 0
     cron: "30 3 * * *"

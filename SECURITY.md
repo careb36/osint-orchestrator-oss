@@ -48,7 +48,7 @@ advisory with any fix. Security fixes are released and back-referenced in
 | Metrics | Label values are bounded; never an observable value, run id or error string | [Operations → Observability](docs/operations.md#observability) |
 | Logs | JSON logs with request ids; no secret material is logged | `orchestrator/logging_config.py` |
 | Container | The orchestrator image runs as uid 1000, never root; images are pinned to a patch release or a commit; compose publishes every port on `127.0.0.1` only | `Dockerfile`, `docker-compose*.yml`, `tests/unit/test_compose_hardening.py` |
-| Retention | No purge by default (`ORCHESTRATOR_RETENTION_DAYS=0`); an opt-in nightly purge never deletes runs that opened an alert case | [Operations → Retention](docs/operations.md#retention) |
+| Retention | No purge by default (`ORCHESTRATOR_RETENTION_DAYS=0`); an opt-in nightly purge keeps, per target, the first run that met an alert rule and everything after it | [Operations → Retention](docs/operations.md#retention) |
 | Main branch | Ruleset requiring green CI (lint, unit tests, Helm chart, public-release guard) and forbidding force pushes | repository settings |
 
 Retention is disabled by default because the artifacts form part of AML/CFT

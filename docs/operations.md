@@ -344,12 +344,16 @@ reports are the evidence a compliance file is built on, and record-keeping
 rules count their retention in years, so deletion is opt-in. When a period is
 set, a nightly job (`ORCHESTRATOR_RETENTION_CRON`) deletes runs that finished
 more than that many days ago with their observables, findings, qualified
-evidence, alerts and queued deliveries, except runs that opened an alert
-case: those are the file itself (who reviewed what, with which note) and are
-kept with their dependents whatever their age. A `daily_reports/<date>`
-directory is deleted once its whole day is older than the cutoff and no
-remaining run started that day, so a kept run never loses its report or
-manifest. The delta memory (`seen_observables`) is never purged. Before
+evidence, alerts, queued deliveries and their own `run-<id>` directory.
+For each target, the first run that met an alert rule (and so opened an
+alert case, where the operator records the review) and every run after it
+are kept whatever their age: the purged runs are always the oldest ones of a
+target, a contiguous prefix of its chain, which `chain/verify` reports as an
+anchor rather than as tampering. A `daily_reports/<date>` directory is
+deleted once its whole day is older than the cutoff and no remaining run
+started that day, so a kept run never loses its report or manifest. The
+summary's `runs_retained_with_case` counts the expired runs kept this way at
+each purge (a snapshot, not a delta). The delta memory (`seen_observables`) is never purged. Before
 enabling a period, archive the run directories you must keep, or set the
 period your regulation requires rather than an operational one.
 

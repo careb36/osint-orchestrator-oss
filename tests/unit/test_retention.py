@@ -193,7 +193,7 @@ async def test_purge_deletes_old_run_and_dependents(tmp_path, monkeypatch):
     assert summary.alert_deliveries_deleted == 1
     assert summary.opencti_outbox_deleted == 1
     assert summary.evidence_qualifications_deleted == 1
-    assert summary.runs_kept_with_case == 0
+    assert summary.runs_retained_with_case == 0
 
     # Verify DB state
     async with AsyncSession(engine, expire_on_commit=False) as session:
@@ -294,7 +294,7 @@ async def test_purge_keeps_runs_that_opened_an_alert_case(tmp_path, monkeypatch)
     summary = await purge_expired(now=NOW)
 
     assert summary.runs_deleted == 1
-    assert summary.runs_kept_with_case == 1
+    assert summary.runs_retained_with_case == 1
     assert summary.findings_deleted == 1
     assert summary.evidence_qualifications_deleted == 1
     assert summary.report_dirs_deleted == 1
