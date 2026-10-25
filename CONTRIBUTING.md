@@ -184,6 +184,38 @@ targets, fixtures or examples that point at real third parties, never add code
 that interacts with a target beyond public-source collection, and keep every
 example domain under `example.com` / `example.org`.
 
+## CI runner
+
+Every workflow picks its runner with the same `runs-on` expression:
+
+| Condition | Jobs run on |
+|---|---|
+| repository variable `CI_RUNS_ON` set | that value, as JSON (`"ubuntu-latest"`, or a label list) |
+| variable unset, private repository | the self-hosted runner labelled `osint` |
+| variable unset, public repository | `ubuntu-latest` (GitHub-hosted) |
+
+The variable lives in Settings → Secrets and variables → Actions → Variables.
+Setting it to `"ubuntu-latest"` (with the quotes) moves CI back to
+GitHub-hosted; deleting it returns to the default above. Job names do not
+change with the runner, so the required checks on `main` stay the same.
+
+The self-hosted runner is registered **for this repository**
+with the labels `self-hosted, linux, x64, osint`. On a personal account a
+runner belongs to one repository; the runner of another repository does not
+pick these jobs up. It has no sudo and keeps its disk between runs, so the
+steps install their tools (uv and Python 3.11, gitleaks) and write their files
+under `RUNNER_TEMP`, which the runner empties for every job. The *Build &
+push* job needs Docker with the runner user in the `docker` group. A pull
+request has one run at a time: a new push cancels the run of the commit it
+replaces.
+
+The runner executes the code of every pull request, workflow files included.
+It is for a private repository with trusted collaborators only: review any
+change under `.github/workflows/` before running it. That is why a public
+repository falls back to GitHub-hosted; never set `CI_RUNS_ON` to the
+self-hosted labels on a public repository, where a fork's pull request would
+run code on that machine.
+
 ## Security issues
 
 Do **not** open a public issue for a vulnerability. Follow the private

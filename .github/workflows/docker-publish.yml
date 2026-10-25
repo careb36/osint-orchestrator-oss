@@ -27,6 +27,14 @@ on:
       - .github/workflows/docker-publish.yml
   workflow_dispatch:
 
+concurrency:
+  # One run per pull request: a new push cancels the run of the commit it
+  # replaces, so the single self-hosted runner does not build stale images.
+  # Every other event (main, tags, dispatch) gets its own group and is never
+  # cancelled, so each commit on main keeps its required checks.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   image:
     name: Build & push
@@ -34,7 +42,7 @@ jobs:
     if: >-
       github.event_name != 'workflow_run' ||
       github.event.workflow_run.conclusion == 'success'
-    runs-on: [self-hosted, linux, x64, osint]
+    runs-on: ${{ fromJSON(vars.CI_RUNS_ON || (github.event.repository.private && '["self-hosted","linux","x64","osint"]' || '"ubuntu-latest"')) }}
     permissions:
       contents: read
       packages: write

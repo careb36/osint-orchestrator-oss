@@ -11,6 +11,15 @@ from [SECURITY.md](SECURITY.md).
 
 ### Changed
 
+- CI runs on the self-hosted runner while GitHub-hosted minutes are exhausted.
+  Every workflow takes its runner from the repository variable `CI_RUNS_ON`;
+  unset, a private repository uses the runner labelled `osint` and a public
+  one `ubuntu-latest`. A new push to a pull request cancels the run it
+  replaces. Python 3.11 comes from a pinned uv release instead of
+  setup-python, and nothing is written outside `RUNNER_TEMP`: gitleaks, the
+  venv, the migration check database and the Helm renders. See *CI runner* in
+  CONTRIBUTING.md.
+
 - The daily report reads in the order a reviewer needs it: synthesis (risk
   label with its code, what changed since the previous run, suggested pivots)
   first, then the qualified evidence, then the new observables, then errors,

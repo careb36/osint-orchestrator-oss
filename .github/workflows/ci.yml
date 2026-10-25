@@ -1,27 +1,54 @@
 name: CI
 
+# Runner: the repository variable CI_RUNS_ON (JSON) wins when it is set, e.g.
+# '"ubuntu-latest"' to go back to GitHub-hosted. Unset, a private repository
+# uses the self-hosted runner labelled `osint` and a public one GitHub-hosted:
+# a self-hosted runner must never run pull requests from forks. The same
+# expression is in every workflow. A self-hosted runner keeps its disk and has
+# no sudo, so steps write only to the workspace and RUNNER_TEMP. See
+# "CI runner" in CONTRIBUTING.md.
+
 on:
   push:
     branches: [main]
   pull_request:
 
+concurrency:
+  # One run per pull request: a new push cancels the run of the commit it
+  # replaces, so the single self-hosted runner does not build stale images.
+  # Every other event (main, tags, dispatch) gets its own group and is never
+  # cancelled, so each commit on main keeps its required checks.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   lint-and-test:
     name: Lint & Unit Tests
-    runs-on: [self-hosted, linux, x64, osint]
+    runs-on: ${{ fromJSON(vars.CI_RUNS_ON || (github.event.repository.private && '["self-hosted","linux","x64","osint"]' || '"ubuntu-latest"')) }}
     permissions:
       contents: read
 
     steps:
       - uses: actions/checkout@v4
 
+      # uv instead of setup-python, which has no Python builds for the
+      # self-hosted runner's Ubuntu release. Pinned release with checksum,
+      # installed under RUNNER_TEMP with the interpreter it downloads
+      # (--no-bin skips the ~/.local/bin link): nothing is added to the runner
+      # user's environment. The venv is fresh per run, so packages left by another
+      # branch cannot hide a missing dependency.
       - name: Set up Python 3.11 (uv)
         shell: bash
         run: |
-          python3 -m pip install --user --break-system-packages uv >/dev/null
-          ~/.local/bin/uv python install 3.11
-          ~/.local/bin/uv venv --python 3.11 --seed "$RUNNER_TEMP/venv-3.11"
-          echo "$RUNNER_TEMP/venv-3.11/bin" >> "$GITHUB_PATH"
+          cd "${RUNNER_TEMP}"
+          curl -sSfL -o uv.tgz \
+            https://github.com/astral-sh/uv/releases/download/0.12.24/uv-x86_64-unknown-linux-gnu.tar.gz
+          echo "b4dfaef47d491a7296981f8374a4595f55dbf84e8937c8ecd2983574d8bb3da6  uv.tgz" | sha256sum -c -
+          tar -xzf uv.tgz --strip-components=1 uv-x86_64-unknown-linux-gnu/uv
+          export UV_PYTHON_INSTALL_DIR="${RUNNER_TEMP}/uv-python"
+          ./uv python install --no-bin 3.11
+          ./uv venv --python 3.11 --managed-python --seed "${RUNNER_TEMP}/venv-3.11"
+          echo "${RUNNER_TEMP}/venv-3.11/bin" >> "${GITHUB_PATH}"
 
       - name: Install dependencies
         run: |
@@ -44,7 +71,10 @@ jobs:
       - name: Verify migrations match models
         run: |
           # Apply all migrations to a temporary SQLite database.
-          export ORCHESTRATOR_DATABASE_URL="sqlite+aiosqlite:////tmp/ci_migration_check.db"
+          # Under RUNNER_TEMP, emptied per job: on the self-hosted runner a
+          # database left in /tmp by another branch's migrations would fail
+          # the upgrade.
+          export ORCHESTRATOR_DATABASE_URL="sqlite+aiosqlite:///${RUNNER_TEMP}/ci_migration_check.db"
           alembic upgrade head
           # Fail if any model change was made without a corresponding migration.
           alembic check
@@ -61,7 +91,7 @@ jobs:
 
   frontend:
     name: Dashboard (lint, tests, build)
-    runs-on: [self-hosted, linux, x64, osint]
+    runs-on: ${{ fromJSON(vars.CI_RUNS_ON || (github.event.repository.private && '["self-hosted","linux","x64","osint"]' || '"ubuntu-latest"')) }}
     permissions:
       contents: read
     defaults:
@@ -98,7 +128,7 @@ jobs:
 
   public-release-guard:
     name: Public-release guard
-    runs-on: [self-hosted, linux, x64, osint]
+    runs-on: ${{ fromJSON(vars.CI_RUNS_ON || (github.event.repository.private && '["self-hosted","linux","x64","osint"]' || '"ubuntu-latest"')) }}
     permissions:
       contents: read
 
@@ -122,7 +152,7 @@ jobs:
 
   helm-chart:
     name: Helm chart
-    runs-on: [self-hosted, linux, x64, osint]
+    runs-on: ${{ fromJSON(vars.CI_RUNS_ON || (github.event.repository.private && '["self-hosted","linux","x64","osint"]' || '"ubuntu-latest"')) }}
     permissions:
       contents: read
 
@@ -139,7 +169,7 @@ jobs:
         run: helm lint deploy/helm/osint-orchestrator --strict
 
       - name: Render chart (defaults)
-        run: helm template osint deploy/helm/osint-orchestrator --kube-version 1.30.0 > /tmp/rendered-defaults.yaml
+        run: helm template osint deploy/helm/osint-orchestrator --kube-version 1.30.0 > "${RUNNER_TEMP}/rendered-defaults.yaml"
 
       - name: Render chart (every optional resource on)
         run: |
@@ -151,7 +181,7 @@ jobs:
             --set 'targets.targets[0].fqdn=example.com' \
             --set 'targets.targets[0].authorization=ci' \
             --set 'targets.targets[0].purpose=ci' \
-            > /tmp/rendered-full.yaml
-          grep -q "kind: Ingress" /tmp/rendered-full.yaml
-          grep -q "kind: ServiceMonitor" /tmp/rendered-full.yaml
-          grep -q "fqdn: example.com" /tmp/rendered-full.yaml
+            > "${RUNNER_TEMP}/rendered-full.yaml"
+          grep -q "kind: Ingress" "${RUNNER_TEMP}/rendered-full.yaml"
+          grep -q "kind: ServiceMonitor" "${RUNNER_TEMP}/rendered-full.yaml"
+          grep -q "fqdn: example.com" "${RUNNER_TEMP}/rendered-full.yaml"
