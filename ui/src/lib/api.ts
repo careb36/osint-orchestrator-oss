@@ -1,4 +1,8 @@
 import type {
+  PersonalUser,
+  Dossier,
+  DossierBody,
+  DossierDetail,
   AlertCase,
   AlertCaseAction,
   AlertCaseList,
@@ -125,6 +129,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   if (language) {
     headers['Accept-Language'] = language;
   }
+  if (method === 'POST') headers['X-Requested-With'] = 'XMLHttpRequest';
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json';
   }
@@ -132,6 +137,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   try {
     const response = await fetch(url, {
       method,
+      credentials: 'same-origin',
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -183,6 +189,22 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 }
 
 export const api = {
+  getAccess: () => request<{ personal_access: boolean }>('/auth/status', { quiet: true, optional: true }),
+  getMe: () => request<PersonalUser>('/auth/me', { quiet: true }),
+  login: (username: string, password: string) => request<PersonalUser>('/auth/login', { method: 'POST', body: { username, password }, quiet: true }),
+  logout: () => request('/auth/logout', { method: 'POST' }),
+  changePassword: (current_password: string, password: string) => request('/auth/password', { method: 'POST', body: { current_password, password } }),
+  getAccounts: () => request<PersonalUser[]>('/accounts'),
+  createAccount: (body: { username: string; display_name: string; password: string; role: string }) => request<PersonalUser>('/accounts', { method: 'POST', body }),
+  updateAccount: (id: number, active: boolean, password?: string) => request(`/accounts/${id}`, { method: 'POST', body: { active, password } }),
+  getCases: (offset = 0) => request<Dossier[]>(`/cases?offset=${offset}&limit=100`),
+  getCase: (id: string) => request<DossierDetail>(`/cases/${id}`),
+  createCase: (body: DossierBody) => request<Dossier>('/cases', { method: 'POST', body }),
+  updateCase: (id: string, revision: number, body: DossierBody) => request(`/cases/${id}`, { method: 'POST', body: { ...body, revision } }),
+  attachSource: (id: string, revision: number, run_id: number) => request(`/cases/${id}/sources`, { method: 'POST', body: { revision, run_id } }),
+  reviewEvidence: (id: string, revision: number, evidence_id: number, decision: string, reason: string) => request(`/cases/${id}/reviews`, { method: 'POST', body: { revision, evidence_id, decision, reason } }),
+  finalizeCase: (id: string, revision: number, risk_level: string, conclusion: string) => request(`/cases/${id}/finalize`, { method: 'POST', body: { revision, risk_level, conclusion, acknowledge_limitations: true } }),
+  reopenCase: (id: string, revision: number, reason: string) => request(`/cases/${id}/reopen`, { method: 'POST', body: { revision, reason } }),
   getHealth: () => request<HealthStatus>('/health'),
   getTargets: (options?: Pick<RequestOptions, 'apiKey' | 'quiet'>) =>
     request<TargetSummary[]>('/targets', options),
@@ -249,4 +271,8 @@ async function downloadFile(path: string, fallbackName: string) {
   // Revoking in the same task as click() can abort the transfer (Firefox,
   // some Safari versions): let the browser start reading the blob first.
   setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+export async function downloadDossierPdf(caseId: string, version: number) {
+  await downloadFile(`/cases/${caseId}/reports/${version}/pdf`, `case-${caseId}-v${version}.pdf`);
 }

@@ -252,20 +252,19 @@ def recordings_in(seed_dir: Path) -> list[Path]:
 async def artefacts_missing(run_id: int) -> str | None:
     """Why the replayed run is not what the showcase promises, or None.
 
-    The pipeline keeps a run SUCCESS when the report or the manifest could not
-    be written (the failure is in ``Run.error``); the showcase exists for
-    those artefacts, so it checks the persisted row before claiming success.
+    Check artifacts before the terminal status so the failure explains what
+    the operator is missing. A failed report or seal also degrades the run.
     """
     async with get_session() as session:
         run = await session.get(Run, run_id)
     if run is None:
         return "the run row is gone"
-    if run.status != RunStatus.SUCCESS:
-        return f"status {run.status.value}: {run.error or 'no error recorded'}"
     if not run.report_path:
         return f"no report written: {run.error or 'no error recorded'}"
     if not run.manifest_sha256:
         return f"run left unsealed: {run.error or 'no error recorded'}"
+    if run.status != RunStatus.SUCCESS:
+        return f"status {run.status.value}: {run.error or 'no error recorded'}"
     return None
 
 

@@ -25,6 +25,7 @@ from orchestrator.models import (
     AlertCase,
     AlertDelivery,
     AlertRecord,
+    DossierRun,
     EvidenceQualification,
     FindingRecord,
     OpenCTIOutbox,
@@ -89,6 +90,7 @@ async def purge_expired(now: datetime | None = None) -> RetentionSummary:
                 col(Run.finished_at).isnot(None) & (col(Run.finished_at) < cutoff)
                 | col(Run.finished_at).is_(None) & (col(Run.started_at) < cutoff)
             )
+            stmt = stmt.where(~col(Run.id).in_(select(col(DossierRun.run_id))))
             result = await session.exec(stmt)  # type: ignore[call-overload]  # SQLModel's exec stubs exclude SQLAlchemy Select, which it supports at runtime.
             expired_ids = [row[0] if not isinstance(row, int) else row for row in result.all()]
 

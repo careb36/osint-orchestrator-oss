@@ -34,6 +34,7 @@ from fastapi import (
     Request,
     Response,
 )
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
@@ -46,6 +47,7 @@ from orchestrator.auth import log_auth_status, log_secret_key_status, require_ap
 from orchestrator.config import NEBIUS_DEFAULT_BASE_URL, settings
 from orchestrator.contracts import load_schema
 from orchestrator.database import create_db_and_tables, get_session
+from orchestrator.dossiers import router as dossiers_router
 from orchestrator.evidence import (
     load_manifest_file,
     manifest_path_for_report,
@@ -63,6 +65,7 @@ from orchestrator.models import (
     Run,
     Target,
 )
+from orchestrator.personal_api import router as personal_router
 from orchestrator.pipeline import (
     drain_opencti_outbox,
     get_run_delta,
@@ -617,10 +620,18 @@ async def get_alert_case(case_id: int) -> dict[str, Any]:
 
 
 @router.post("/alerts/{case_id}/ack", response_model=dict[str, Any], tags=["alerts"])
-async def acknowledge_alert_case(case_id: int, action: AlertCaseAction) -> dict[str, Any]:
+async def acknowledge_alert_case(
+    case_id: int, action: AlertCaseAction, request: Request
+) -> dict[str, Any]:
     """open → acknowledged: an operator is looking at it."""
     try:
-        case = await alert_cases.acknowledge_case(case_id, by=action.by, note=action.note)
+        case = await alert_cases.acknowledge_case(
+            case_id,
+            by=f"{request.state.actor['display_name']} ({request.state.actor['username']})"
+            if getattr(request.state, "actor", None)
+            else action.by,
+            note=action.note,
+        )
     except alert_cases.AlertCaseNotFoundError:
         raise HTTPException(status_code=404, detail=t("alert_not_found", case_id=case_id)) from None
     except alert_cases.AlertCaseStateConflictError as exc:
@@ -631,10 +642,18 @@ async def acknowledge_alert_case(case_id: int, action: AlertCaseAction) -> dict[
 
 
 @router.post("/alerts/{case_id}/resolve", response_model=dict[str, Any], tags=["alerts"])
-async def resolve_alert_case(case_id: int, action: AlertCaseAction) -> dict[str, Any]:
+async def resolve_alert_case(
+    case_id: int, action: AlertCaseAction, request: Request
+) -> dict[str, Any]:
     """open | acknowledged → resolved: nothing more to do."""
     try:
-        case = await alert_cases.resolve_case(case_id, by=action.by, note=action.note)
+        case = await alert_cases.resolve_case(
+            case_id,
+            by=f"{request.state.actor['display_name']} ({request.state.actor['username']})"
+            if getattr(request.state, "actor", None)
+            else action.by,
+            note=action.note,
+        )
     except alert_cases.AlertCaseNotFoundError:
         raise HTTPException(status_code=404, detail=t("alert_not_found", case_id=case_id)) from None
     except alert_cases.AlertCaseStateConflictError as exc:
@@ -1208,6 +1227,28 @@ async def verify_target_chain_endpoint(target_id: str) -> dict[str, Any]:
 
 
 app.include_router(router)
+
+
+app.include_router(personal_router)
+app.include_router(dossiers_router)
+
+
+@app.exception_handler(RequestValidationError)
+async def personal_validation_error(request: Request, exc: RequestValidationError):
+    # Do not echo passwords or identity inputs in validation responses.
+    if request.url.path.startswith(("/auth/", "/accounts", "/cases")):
+        return JSONResponse(status_code=422, content={"detail": t("form_invalid")})
+    from fastapi.exception_handlers import request_validation_exception_handler
+
+    return await request_validation_exception_handler(request, exc)
+
+
+@app.middleware("http")
+async def protect_personal_responses(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith(("/auth/", "/accounts", "/cases")):
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 def main() -> None:

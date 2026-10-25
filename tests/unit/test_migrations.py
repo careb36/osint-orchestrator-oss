@@ -242,3 +242,41 @@ def test_0010_fails_stale_active_runs_before_adding_the_unique_index(tmp_db_url)
         }
     finally:
         engine_.dispose()
+
+
+def test_professional_migrations_preserve_legacy_runs_without_inventing_readiness(tmp_db_url):
+    cfg = _make_alembic_cfg(tmp_db_url)
+    alembic_command.upgrade(cfg, "0010")
+    engine = create_engine(tmp_db_url)
+    metadata = sa.MetaData()
+    runs = sa.Table("runs", metadata, autoload_with=engine)
+    from datetime import UTC, datetime
+
+    with engine.begin() as conn:
+        conn.execute(
+            runs.insert().values(
+                target_id="legacy-example",
+                started_at=datetime.now(UTC),
+                status="SUCCESS",
+                collectors_run="test",
+                new_observables=0,
+            )
+        )
+    alembic_command.upgrade(cfg, "head")
+    with engine.connect() as conn:
+        row = conn.execute(
+            sa.text("SELECT target_id, status, qualification_status, evidence_collected FROM runs")
+        ).one()
+        assert tuple(row) == ("legacy-example", "SUCCESS", "not_recorded", None)
+        assert {
+            "user_accounts",
+            "user_sessions",
+            "dossiers",
+            "dossier_reports",
+            "dossier_events",
+        } <= set(inspect(engine).get_table_names())
+    alembic_command.downgrade(cfg, "0010")
+    with engine.connect() as conn:
+        assert conn.execute(sa.text("SELECT target_id FROM runs")).scalar_one() == "legacy-example"
+    alembic_command.upgrade(cfg, "head")
+    engine.dispose()

@@ -104,7 +104,22 @@ Before any deployment beyond a laptop:
   analyst. It is stored with the provider and model that produced it and is
   not a determination about any person or entity.
 
-## 5. Supported versions
+## 5. Personal access and professional identity
+
+[ADR-012](docs/adr/ADR-012-personal-compliance-workflow.md) introduces personal
+sessions and server-enforced accountant/administrator permissions. Read the
+[provisioning and recovery guide](docs/compliance-workflow.md) before rollout.
+Once personal accounts exist, an empty API key does not permit anonymous access.
+Legacy machine keys remain privileged; rotate any previously shared with staff.
+The optional OIDC front door does not automatically provision native accounts.
+
+Professional dossiers and source data are shared within one practice. This is
+not a multi-tenant isolation mechanism. HMAC-signed final snapshots protect
+internal integrity, including the PDF digest, and do not certify source truth
+or provide externally certified signatures. Accounts, source archives, dossier
+snapshots and signing keys all belong in the backup/recovery policy.
+
+## 6. Supported versions
 
 Only the current `main` branch and the latest `vX.Y.Z` tag receive security
 fixes, as a new tag. The project is pre-1.0; deployments pin the tag or the

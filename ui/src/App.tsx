@@ -20,6 +20,9 @@ const TargetDetailPage = lazy(() => import('./pages/TargetDetailPage').then((m) 
 const RunsPage = lazy(() => import('./pages/RunsPage').then((m) => ({ default: m.RunsPage })));
 const RunWorkspacePage = lazy(() => import('./pages/RunWorkspacePage').then((m) => ({ default: m.RunWorkspacePage })));
 const AlertsPage = lazy(() => import('./pages/AlertsPage').then((m) => ({ default: m.AlertsPage })));
+const DossiersPage = lazy(() => import('./pages/DossiersPage').then((m) => ({ default: m.DossiersPage })));
+const DossierPage = lazy(() => import('./pages/DossierPage').then((m) => ({ default: m.DossierPage })));
+const AccountsPage = lazy(() => import('./pages/AccountsPage').then((m) => ({ default: m.AccountsPage })));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage').then((m) => ({ default: m.NotFoundPage })));
 
 /**
@@ -113,7 +116,7 @@ function SystemStatusChip() {
 }
 
 function AppShell() {
-  const { mode, hasKey, unavailableReason, forgetKey, retry } = useApiKey();
+  const { mode, hasKey, user, unavailableReason, forgetKey, retry } = useApiKey();
   const { locale, setLocale, t } = useLocale();
 
   return (
@@ -176,9 +179,9 @@ function AppShell() {
               </button>
             ))}
           </div>
-          {hasKey ? (
+          {hasKey || user ? (
             <button className="ghost-button" type="button" onClick={forgetKey}>
-              {t('forgetKey')}
+              {user ? `${user.display_name} · ${t('personal.logout')}` : t('forgetKey')}
             </button>
           ) : null}
         </div>
@@ -187,7 +190,7 @@ function AppShell() {
       <div className="workbench">
         <nav className="rail" aria-label={t('mainNavigation')}>
           <p className="rail-title">{t('rail.title')}</p>
-          {APP_ROUTES.filter((route) => route.showInNav).map((route) => (
+          {APP_ROUTES.filter((route) => route.showInNav && (!route.personalOnly || user)).map((route) => (
             <NavLink key={route.path} to={route.path} end={route.path === '/'} className="rail-link">
               <span className="rail-icon">{RAIL_ICONS[route.path]}</span>
               <span className="rail-label">{t(route.labelKey as MessageKey)}</span>
@@ -219,6 +222,9 @@ function AppShell() {
                 <Route path="/runs" element={<RunsPage />} />
                 <Route path="/runs/:runId" element={<RunWorkspaceRoute />} />
                 <Route path="/alerts" element={<AlertsPage />} />
+                <Route path="/cases" element={<DossiersPage />} />
+                <Route path="/cases/:caseId" element={<DossierPage />} />
+                <Route path="/account" element={<AccountsPage />} />
                 <Route path="*" element={<NotFoundPage />} />
               </Routes>
             </ViewBoundary>

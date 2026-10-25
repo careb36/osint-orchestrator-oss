@@ -234,6 +234,10 @@ is an aid for an analyst, not a determination. See [SECURITY](SECURITY.md).
 | Document NLP (filings, court records) | Planned |
 | Authoritative sources (registries, sanctions lists) | Planned |
 
+## Professional Compliance reviews
+
+Personal sign-in, accountant and administrator permissions, dossiers, reasoned evidence decisions and versioned final reports are available. Start with the [professional workflow](docs/compliance-workflow.md); existing automation keys retain their privileges and must be rotated if previously shared with human operators.
+
 ## Documentation
 
 [Architecture](docs/architecture.md) · [Configuration](docs/configuration.md) ·

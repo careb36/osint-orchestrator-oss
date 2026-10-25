@@ -387,6 +387,8 @@ def _markdown_content(
         f"- **{_msg('authorization', lang)}:** {data.authorization}",
         f"- **{_msg('purpose', lang)}:** {data.purpose}",
         "",
+        *_synthesis_section(finding, lang, synthesis_status),
+        "",
         _msg("collectors", lang),
         *_collector_table(data, lang),
         "",
@@ -399,8 +401,6 @@ def _markdown_content(
         *_qualified_evidence_section(data.evidence, lang),
         "",
         *_errors_section(data.errors, lang),
-        "",
-        *_synthesis_section(finding, lang, synthesis_status),
         "",
     ]
     return "\n".join(lines)
@@ -425,36 +425,43 @@ def _json_default(value: Any) -> Any:
     return str(value)
 
 
-def _write_optional_pdf(path: Path, markdown: str) -> None:
-    """Best-effort PDF rendering of the Markdown report via fpdf2.
+def _write_optional_pdf(path: Path, markdown: str, *, created_at: datetime | None = None) -> None:
+    """Render a readable Unicode PDF, resetting the cursor after every block.
 
-    Never raises: a missing library or a rendering failure is logged as a
-    warning and the run proceeds — report.md/bundle/delta are the artifacts
-    that matter. Markdown syntax is stripped and text is latin-1 encoded
-    (fpdf2 core-font limitation), so the PDF is a plain-text companion,
-    not a typeset document.
+    Fonts are bundled so Docker and local runs use the same licensed typeface.
+    Failure remains best-effort here; the pipeline records an incomplete report
+    if the PDF was not produced. Existing sealed artifacts are never rewritten.
     """
     try:
+        import re
+
         from fpdf import FPDF
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("PDF not generated: fpdf2 unavailable (%s)", exc)
-        return
-    try:
+        from fpdf.enums import XPos, YPos
+
+        fonts = Path(__file__).parent / "fonts"
         pdf = FPDF()
-        pdf.set_auto_page_break(auto=True, margin=12)
+        pdf.set_margins(16, 16, 16)
+        pdf.set_auto_page_break(auto=True, margin=16)
+        pdf.add_font("Report", fname=str(fonts / "DejaVuSans.ttf"))
+        pdf.add_font("Report", style="B", fname=str(fonts / "DejaVuSans-Bold.ttf"))
         pdf.add_page()
-        pdf.set_font("Helvetica", size=11)
-        for raw_line in markdown.splitlines():
-            line = raw_line.replace("`", "").replace("#", "").replace("*", "").strip()
-            if not line:
-                pdf.ln(4)
+        for raw in markdown.splitlines():
+            if not raw.strip():
+                pdf.ln(3)
                 continue
-            line = line.encode("latin-1", "replace").decode("latin-1")
-            chunks = [line[i : i + 40] for i in range(0, len(line), 40)] or [""]
-            for chunk in chunks:
-                pdf.multi_cell(180, 6, chunk)
+            heading = raw.startswith("#")
+            # Preserve the destination of every citation when removing markup.
+            line = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1 (\2)", raw)
+            line = line.lstrip("# ") if heading else line
+            line = line.replace("`", "").replace("**", "")
+            if re.fullmatch(r"[|: \-]+", line):
+                continue
+            pdf.set_font("Report", style="B" if heading else "", size=14 if heading else 10)
+            pdf.set_x(pdf.l_margin)
+            pdf.multi_cell(w=0, h=6, text=line, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_creation_date(_ensure_utc(created_at) if created_at else datetime.now(UTC))
         pdf.output(str(path))
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 — the caller checks the required artifact
         logger.warning("PDF generation failed: %s", exc)
 
 
@@ -584,7 +591,7 @@ async def generate_report(
     report_md_path.write_text(report_md, encoding="utf-8")
     _write_json(bundle_path, merged_bundle)
     _write_json(delta_path, delta)
-    _write_optional_pdf(pdf_path, report_md)
+    _write_optional_pdf(pdf_path, report_md, created_at=data.run_finished_at or data.run_started_at)
     risk_level = finding.risk_level if finding is not None else "—"
     _write_daily_index(
         date_dir, data.target_id, data.run_id, data.run_status, len(delta), risk_level, lang

@@ -11,6 +11,17 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- Personal accounts with revocable HttpOnly sessions, accountant/administrator
+  permissions, local administrator provisioning and password/session controls.
+- Professional dossiers with entity identity, reasoned evidence decisions,
+  authenticated event history, optimistic revisions and immutable final PDF
+  versions with verified source chains and signed snapshots (ADR-012).
+- Persisted per-stage outcomes and evidence coverage; linked source runs are
+  retained with their dossiers. Historical stages remain explicitly unrecorded.
+- PDF rendering with bundled licensed Unicode fonts and margin-aware wrapping;
+  summaries precede technical appendices. Qualification errors and missing
+  reports/PDFs/seals now remain visible and degrade the terminal run outcome.
+
 - README screenshots (both languages) now show the console after the showcase
   run, served by the real API over a database seeded with the two recordings,
   instead of the unit tests' fixtures; the captions say so.

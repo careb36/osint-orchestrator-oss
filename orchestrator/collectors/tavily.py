@@ -202,6 +202,8 @@ class TavilyCollector(BaseCollector):
             notes=notes,
             evidence=evidence,
             success=True,
+            complete=not failures,
+            error=f"Tavily: {len(failures)} of {len(queries)} queries failed" if failures else None,
         )
 
     # ─── Queries ──────────────────────────────────────────────────────────────

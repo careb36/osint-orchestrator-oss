@@ -1,35 +1,10 @@
-"""
-API authentication — static API keys (Phase 5).
+"""Authentication for personal browser sessions and legacy automation keys.
 
-The orchestrator API can trigger collection runs against authorised targets
-and exposes their results, so it must not sit open on a network. The model
-is deliberately small: one or more shared API keys, presented either in the
-``X-API-Key`` header or as a bearer token in the ``Authorization`` header.
-
-Why not OAuth / OIDC / per-user accounts: the callers are operators and
-automation (cron, CI, a SOAR playbook), not end users, and the platform of
-record — OpenCTI — already has its own RBAC. A static key keeps the surface
-auditable and the deployment dependency-free. See ADR-005.
-
-Rules:
-  - ORCHESTRATOR_API_KEY empty → authentication DISABLED. Every endpoint is
-    open and a warning is logged once at startup. This keeps `docker compose
-    up` on a laptop working, but a production deployment must set a key.
-  - Several keys may be configured, comma-separated, so a key can be rotated
-    without a cut-over window.
-  - Always public: GET /health and GET /metrics (probe/scraper endpoints); the
-    documentation/landing endpoints GET /, GET /docs (and /docs/*), GET
-    /openapi.json, GET /redoc; and the dashboard shell, GET /console with its
-    client routes and assets, which carries no target or run data — a browser
-    cannot attach a header to its first navigation, so the page that asks for
-    the key must itself be open. Every data and control endpoint,
-    including everything the dashboard fetches, remains protected.
-  - Comparison is constant-time (hmac.compare_digest) and every configured
-    key is checked so timing does not reveal which slot matched.
-  - When a request carries both headers, either one matching is enough: a
-    stale X-API-Key left in a client config must not shadow a valid bearer
-    token (or vice versa) during a rotation or behind a proxy that injects
-    one of them.
+Personal sessions carry an authenticated actor and enforce administrative
+permissions on technical operations. Dossier decisions additionally require
+an accountant identity. Machine keys cannot impersonate a professional.
+Anonymous development mode is available only before any account is provisioned
+and when no API key is configured. ADR-012 amends ADR-005/006/010.
 """
 
 from __future__ import annotations
@@ -37,7 +12,7 @@ from __future__ import annotations
 import hmac
 import logging
 
-from fastapi import HTTPException, Security, status
+from fastapi import HTTPException, Request, Security, status
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 
 from orchestrator.config import settings
@@ -79,6 +54,7 @@ def _matches_any(presented: str) -> bool:
 
 
 async def require_api_key(
+    request: Request,
     header_key: str | None = _API_KEY_DEP,
     bearer: HTTPAuthorizationCredentials | None = _BEARER_DEP,
 ) -> None:
@@ -87,7 +63,29 @@ async def require_api_key(
 
     A no-op when no key is configured (see module docstring).
     """
+    from orchestrator.accounts import (
+        COOKIE_NAME,
+        accounts_exist,
+        check_browser_request,
+        session_user,
+    )
+
+    if request.cookies.get(COOKIE_NAME):
+        user = await session_user(request)
+        if not user:
+            raise HTTPException(401, t("access_required"))
+        check_browser_request(request)
+        request.state.actor = user
+        if (
+            request.url.path.startswith(("/scheduler/", "/opencti/", "/alerts/dlq", "/bundles"))
+            and user["role"] != "admin"
+        ):
+            raise HTTPException(403, t("access_denied"))
+        return
+    request.state.actor = None
     if not auth_enabled():
+        if await accounts_exist():
+            raise HTTPException(401, t("access_required"))
         return
 
     presented = [
@@ -136,3 +134,18 @@ def log_secret_key_status() -> None:
             "before deployment.",
             extra={"setting": "ORCHESTRATOR_SECRET_KEY"},
         )
+
+
+def require_person(request: Request) -> dict:
+    """Professional decisions require personal identity, never a shared machine key."""
+    actor = getattr(request.state, "actor", None)
+    if not actor:
+        raise HTTPException(401, t("access_required"))
+    return actor
+
+
+def require_admin(request: Request) -> dict:
+    actor = require_person(request)
+    if actor["role"] != "admin":
+        raise HTTPException(403, t("access_denied"))
+    return actor

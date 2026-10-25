@@ -3,6 +3,18 @@
 Running, securing and observing a deployment. Settings named here are described
 in [configuration.md](configuration.md).
 
+## Professional dossiers and personal access
+
+Use the [Compliance workflow guide](compliance-workflow.md) for personal login,
+account provisioning, permissions, dossier creation, human evidence decisions,
+finalization and versioned PDF exports. Run responses now expose
+`collection_status`, `qualification_status`, `synthesis_status`, `report_status`,
+`integrity_status`, `evidence_collected` and `evidence_qualified`. Old runs say
+`not_recorded`; a successful technical run is not professional approval.
+Incomplete qualification, failed synthesis and missing artifacts can no longer
+silently claim a complete result. Runs linked to dossiers are excluded from
+operational retention; back up the SQLite dossier snapshots and PDFs as well.
+
 ## Full stack
 
 Requirements: Docker Engine 24+ with Compose v2.20+, 16 GB of RAM (OpenCTI and

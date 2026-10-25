@@ -31,6 +31,13 @@ export type TargetSummary = {
 export type RunStatus = 'pending' | 'running' | 'success' | 'partial' | 'failed' | string;
 
 export type RunSummary = {
+  collection_status?: string;
+  qualification_status?: string;
+  synthesis_status?: string;
+  report_status?: string;
+  integrity_status?: string;
+  evidence_collected?: number | null;
+  evidence_qualified?: number | null;
   id: number;
   target_id: string;
   started_at: string;
@@ -155,3 +162,13 @@ export type AlertCaseList = {
 
 /** Body of POST /alerts/{id}/ack and /resolve: free text, there are no users (ADR-005). */
 export type AlertCaseAction = { by: string; note?: string };
+
+export type PersonalUser = { id: number; username: string; display_name: string; role: 'admin' | 'accountant'; active: boolean };
+export type Dossier = { id: number; title: string; entity_name: string; entity_type: 'person' | 'company'; identifier: string; country: string; purpose: string; state: string; revision: number; owner_id: number };
+export type DossierBody = Pick<Dossier, 'title' | 'entity_name' | 'entity_type' | 'identifier' | 'country' | 'purpose'>;
+export type DossierDetail = {
+  case: Dossier; runs: RunSummary[]; evidence: EvidenceRow[];
+  reviews: { evidence_id: number; decision: string; reason: string; actor_id: number }[];
+  events: { id: number; actor_name: string; action: string; created_at: string; details: Record<string, unknown> }[];
+  reports: { version: number; created_at: string }[];
+};

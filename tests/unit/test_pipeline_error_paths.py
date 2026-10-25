@@ -473,13 +473,13 @@ class _Collector:
         )
 
 
-async def test_report_failure_keeps_the_status_and_records_the_error(
+async def test_report_failure_marks_run_failed_and_records_the_error(
     db, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """
     Two collectors report the same domain; it must be stored once. The report
-    then fails to render: the run keeps its collection status, records why
-    there is no report, and is left unsealed instead of stuck RUNNING.
+    then fails to render: the run fails, records why there is no report,
+    and is left unsealed instead of claiming a successful deliverable.
     """
     monkeypatch.setattr(settings, "opencti_enabled", False)
     monkeypatch.setattr(
@@ -509,7 +509,9 @@ async def test_report_failure_keeps_the_status_and_records_the_error(
             await session.exec(select(RunObservable).where(RunObservable.run_id == run_id))
         ).all()
     assert run is not None
-    assert run.status == RunStatus.SUCCESS
+    assert run.status == RunStatus.FAILED
+    assert run.collection_status == "ok"
+    assert run.report_status == "failed"
     assert run.error == "report-generation: read-only file system"
     assert run.report_path is None
     assert run.manifest_sha256 is None

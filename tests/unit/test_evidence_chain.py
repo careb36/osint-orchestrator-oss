@@ -399,7 +399,8 @@ async def test_run_failing_before_manifest_is_unsealed_and_next_run_chains_past_
         unsealed = await harness.run(1)
     last = await harness.run(2)
 
-    assert unsealed.status == RunStatus.SUCCESS  # the final status survived
+    assert unsealed.status == RunStatus.PARTIAL  # missing integrity is not success
+    assert unsealed.integrity_status == "failed"
     assert unsealed.manifest_sha256 is None
     assert (Path(unsealed.report_path).parent / "report.md").exists()
     assert _manifest(last)["previous_manifest_sha256"] == first.manifest_sha256

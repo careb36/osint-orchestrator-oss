@@ -109,6 +109,7 @@ class CollectorResult(BaseModel):
     evidence: list[EvidenceItem] = Field(default_factory=list)
     # Whether the collector ran successfully
     success: bool = True
+    complete: bool = True
     error: str | None = None
 
     def observable_hash(self) -> str:
@@ -405,6 +406,13 @@ class Run(SQLModel, table=True):
     error: str | None = None
     report_path: str | None = None
     manifest_sha256: str | None = SQLField(default=None, index=True, nullable=True)
+    collection_status: str = "not_recorded"
+    qualification_status: str = "not_recorded"
+    synthesis_status: str = "not_recorded"
+    report_status: str = "not_recorded"
+    integrity_status: str = "not_recorded"
+    evidence_collected: int | None = None
+    evidence_qualified: int | None = None
 
 
 class SeenObservable(SQLModel, table=True):
@@ -733,4 +741,104 @@ class OpenCTIOutbox(SQLModel, table=True):
     updated_at: datetime = SQLField(
         default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True)),
+    )
+
+
+class UserAccount(SQLModel, table=True):
+    """Personal identity; password digests are never returned by API serializers."""
+
+    __tablename__ = "user_accounts"
+    id: int | None = SQLField(default=None, primary_key=True)
+    username: str = SQLField(unique=True, index=True)
+    display_name: str
+    role: str = "accountant"
+    password_hash: str
+    active: bool = True
+    failed_logins: int = 0
+    locked_until: datetime | None = SQLField(
+        default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
+    )
+    created_at: datetime = SQLField(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+
+
+class UserSession(SQLModel, table=True):
+    __tablename__ = "user_sessions"
+    id: str = SQLField(primary_key=True)
+    user_id: int = SQLField(index=True)
+    expires_at: datetime = SQLField(sa_column=Column(DateTime(timezone=True), nullable=False))
+
+
+class Dossier(SQLModel, table=True):
+    """A professional review, independent of collector configuration."""
+
+    __tablename__ = "dossiers"
+    id: int | None = SQLField(default=None, primary_key=True)
+    title: str
+    entity_name: str
+    entity_type: str
+    identifier: str = ""
+    country: str = ""
+    purpose: str
+    owner_id: int
+    state: str = "draft"
+    revision: int = 1
+    created_at: datetime = SQLField(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+
+
+class DossierRun(SQLModel, table=True):
+    __tablename__ = "dossier_runs"
+    __table_args__ = (Index("ux_dossier_run", "dossier_id", "run_id", unique=True),)
+    id: int | None = SQLField(default=None, primary_key=True)
+    dossier_id: int = SQLField(index=True)
+    run_id: int
+
+
+class EvidenceReview(SQLModel, table=True):
+    __tablename__ = "evidence_reviews"
+    __table_args__ = (Index("ux_dossier_evidence", "dossier_id", "evidence_id", unique=True),)
+    id: int | None = SQLField(default=None, primary_key=True)
+    dossier_id: int = SQLField(index=True)
+    evidence_id: int
+    decision: str
+    reason: str
+    actor_id: int
+
+
+class DossierEvent(SQLModel, table=True):
+    """Append-only application audit: no update/delete endpoints are provided."""
+
+    __tablename__ = "dossier_events"
+    id: int | None = SQLField(default=None, primary_key=True)
+    dossier_id: int = SQLField(index=True)
+    actor_id: int
+    actor_name: str
+    action: str
+    details_json: str
+    created_at: datetime = SQLField(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+
+
+class DossierReport(SQLModel, table=True):
+    """Immutable version: freezes sources, decisions and attribution at approval."""
+
+    __tablename__ = "dossier_reports"
+    __table_args__ = (Index("ux_dossier_version", "dossier_id", "version", unique=True),)
+    id: int | None = SQLField(default=None, primary_key=True)
+    dossier_id: int = SQLField(index=True)
+    version: int
+    snapshot_json: str
+    markdown: str
+    pdf: bytes
+    signature: str
+    created_at: datetime = SQLField(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
     )

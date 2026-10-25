@@ -28,6 +28,117 @@ SUPPORTED_LANGUAGES = frozenset({"es", "en"})
 # key → language → template. Every key MUST carry every supported language;
 # test_catalogue_is_complete enforces it.
 _MESSAGES: dict[str, dict[str, str]] = {
+    "form_invalid": {
+        "es": "Revise los campos y las longitudes indicadas antes de continuar.",
+        "en": "Check the fields and their required lengths before continuing.",
+    },
+    "dossier_risk_low": {"es": "bajo", "en": "low"},
+    "dossier_risk_medium": {"es": "medio", "en": "medium"},
+    "dossier_risk_high": {"es": "alto", "en": "high"},
+    "dossier_risk_critical": {"es": "crítico", "en": "critical"},
+    "dossier_risk_unknown": {"es": "desconocido", "en": "unknown"},
+    "qualification_incomplete": {
+        "es": "Se evaluaron {qualified} de {collected} evidencias.",
+        "en": "Assessed {qualified} of {collected} evidence items.",
+    },
+    "qualification_unavailable": {
+        "es": "No hay un modelo disponible para evaluar las evidencias.",
+        "en": "No usable model is available to assess the evidence.",
+    },
+    "collection_not_requested": {
+        "es": "No se ejecutó ninguna fuente de recopilación.",
+        "en": "No collection source was executed.",
+    },
+    "reviewer_required": {
+        "es": "Esta decisión debe registrarla una cuenta de contador.",
+        "en": "A personal accountant account must record this decision.",
+    },
+    "dossier_report_title": {
+        "es": "# Informe de revisión de Compliance",
+        "en": "# Compliance review report",
+    },
+    "dossier_report_conclusion": {
+        "es": "## Conclusión profesional",
+        "en": "## Professional conclusion",
+    },
+    "dossier_report_risk": {
+        "es": "Riesgo determinado por el profesional",
+        "en": "Risk determined by the professional",
+    },
+    "dossier_report_author": {"es": "Revisado y emitido por", "en": "Reviewed and issued by"},
+    "dossier_report_limits": {
+        "es": "La conclusión se limita a las fuentes y fechas documentadas. La evaluación automática es asistencia; no acredita por sí sola ausencia de sanciones ni la veracidad de una publicación. La firma interna acredita integridad del expediente, no una firma digital con certificación externa.",
+        "en": "The conclusion is limited to the documented sources and dates. Automated assessment is assistance; it does not by itself establish absence of sanctions or the truth of a publication. The internal signature protects dossier integrity; it is not an externally certified digital signature.",
+    },
+    "dossier_report_evidence": {
+        "es": "## Evidencias y decisiones",
+        "en": "## Evidence and decisions",
+    },
+    "dossier_report_sources": {
+        "es": "## Revisiones de origen e integridad",
+        "en": "## Source runs and integrity",
+    },
+    "dossier_report_confirmed": {
+        "es": "Coincidencia confirmada por el profesional",
+        "en": "Match confirmed by the professional",
+    },
+    "dossier_report_dismissed": {
+        "es": "Coincidencia descartada por el profesional",
+        "en": "Match dismissed by the professional",
+    },
+    "access_required": {
+        "es": "Inicie sesión con su cuenta personal.",
+        "en": "Sign in with your personal account.",
+    },
+    "access_denied": {
+        "es": "Esta acción requiere permisos de administración.",
+        "en": "This action requires administrator permissions.",
+    },
+    "login_invalid": {
+        "es": "Usuario o contraseña incorrectos, o acceso temporalmente bloqueado.",
+        "en": "Invalid credentials or temporarily locked account.",
+    },
+    "request_untrusted": {
+        "es": "La solicitud no pudo validarse. Recargue la página e inténtelo de nuevo.",
+        "en": "The request could not be verified. Reload and try again.",
+    },
+    "account_invalid": {
+        "es": "Revise el usuario, nombre y contraseña (mínimo 12 caracteres).",
+        "en": "Check the username, name and password (at least 12 characters).",
+    },
+    "account_exists": {
+        "es": "Ese nombre de usuario ya existe.",
+        "en": "That username already exists.",
+    },
+    "last_admin": {
+        "es": "Debe conservar al menos una cuenta administradora activa.",
+        "en": "At least one active administrator account must remain.",
+    },
+    "case_missing": {"es": "No existe ese expediente.", "en": "Dossier not found."},
+    "case_conflict": {
+        "es": "El expediente cambió o está finalizado. Actualice la página antes de continuar.",
+        "en": "The dossier changed or is finalized. Refresh before continuing.",
+    },
+    "case_source": {
+        "es": "La revisión seleccionada no está disponible o tiene etapas incompletas.",
+        "en": "The selected run is unavailable or has incomplete stages.",
+    },
+    "case_reason": {
+        "es": "Complete la identificación, el motivo y la conclusión de la revisión.",
+        "en": "Complete the identity, reason and review conclusion.",
+    },
+    "case_evidence": {
+        "es": "Revise todas las evidencias y documente cada decisión antes de finalizar.",
+        "en": "Review every evidence item and document each decision before finalizing.",
+    },
+    "case_integrity": {
+        "es": "No se pudo verificar la integridad de las fuentes. Solicite asistencia a administración.",
+        "en": "Source integrity could not be verified. Contact administration.",
+    },
+    "password_invalid": {
+        "es": "La contraseña actual no es correcta.",
+        "en": "The current password is incorrect.",
+    },
     "target_not_found": {
         "es": "No existe el objetivo '{target_id}'",
         "en": "Target '{target_id}' not found",

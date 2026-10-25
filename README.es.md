@@ -243,6 +243,10 @@ salida de los modelos es una ayuda para el analista, no una determinación. Ver
 | NLP de documentos (balances, expedientes) | Planificado |
 | Fuentes autoritativas (registros, listas de sanciones) | Planificado |
 
+## Revisiones profesionales de Compliance
+
+El acceso personal distingue contadores y administración. Los expedientes conservan decisiones fundamentadas por evidencia e informes finales versionados. Consulte el [flujo profesional](docs/compliance-workflow.md) (en inglés); las claves de automatización conservan sus permisos y deben rotarse si antes se compartieron con operadores.
+
 ## Documentación
 
 La documentación de referencia está en inglés:

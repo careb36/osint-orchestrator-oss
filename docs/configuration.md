@@ -26,7 +26,8 @@ Defaults shown are the ones shipped in `.env.example` for Docker.
 | `TARGETS_FILE` | `targets.yaml` | Re-read on every API and scheduler call. |
 | `ORCHESTRATOR_RETENTION_DAYS` | `90` | Days to keep runs and report directories; `0` disables the purge. |
 | `ORCHESTRATOR_RETENTION_CRON` | `30 3 * * *` | UTC cron of the purge job. |
-| `ORCHESTRATOR_API_KEY` | *(empty)* | API keys, comma-separated while rotating. Empty leaves the API **open** (WARNING at startup). |
+| `ORCHESTRATOR_API_KEY` | *(empty)* | API keys, comma-separated while rotating. Empty permits anonymous development only before any personal account exists; see [personal access](compliance-workflow.md). |
+| `ORCHESTRATOR_COOKIE_SECURE` | `true` | Require HTTPS for personal session cookies; use `false` only on local HTTP development. |
 | `ORCHESTRATOR_LOG_LEVEL` | `INFO` | `DEBUG` \| `INFO` \| `WARNING` \| `ERROR`. |
 | `ORCHESTRATOR_LOG_FORMAT` | `text` | `text` for a terminal, `json` for a log shipper. |
 | `ORCHESTRATOR_METRICS_ENABLED` | `true` | `false` makes `GET /metrics` return 404. |
