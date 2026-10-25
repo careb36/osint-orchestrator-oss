@@ -93,7 +93,7 @@ actually change:
 | `config.llm.provider` | `ollama` | `LLM_PROVIDER`: a global switch, not the provider of a target. Each target picks its provider with `llm` in `targets.targets` (default `local`, the Ollama at `config.llm.baseUrl`). `none` turns synthesis off for every target; `nebius` sends `llm: openai` targets to Token Factory and, like `openai`, enables the startup model check. Cloud providers take their key from `secrets.values` |
 | `config.llm.modelReasoning` / `modelFast` | `""` | The two model routes of the cloud providers (required for `nebius`) |
 | `config.tavily.*` | `basic` / 5 / 5 / 120 | Search depth, results per query, calls per run, timeout |
-| `config.retention.days` / `cron` | 90 / `30 3 * * *` | Nightly purge of old runs and reports (0 disables) |
+| `config.retention.days` / `cron` | 0 / `30 3 * * *` | Nightly purge of old runs and reports; 0 (default) never purges, and a target's first run that met an alert rule and every later run are kept whatever the period |
 | `config.alertRetry.*` | `*/5 * * * *` / 4 / 30 / 0.25 | Alert delivery retry schedule, attempts, base delay, jitter |
 | `config.spiderfootUrl` | `http://spiderfoot:5001` | In-cluster SpiderFoot URL |
 | `config.language` | `es` | Operator-facing language (ADR-004) |
