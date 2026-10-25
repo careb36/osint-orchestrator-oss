@@ -95,7 +95,7 @@ queries.
 | `TAVILY_API_KEY` | *(empty)* | Required when `collectors.tavily.enabled=true`; blank records a collector failure on every run. Use `TAVILY_MAX_CALLS_PER_RUN=0` to switch the collector off. |
 | `TAVILY_SEARCH_DEPTH` | `basic` | Tavily query depth: `basic` or `advanced`. |
 | `TAVILY_MAX_RESULTS` | `5` | Global ceiling for results per query, 1–20; the per-target `max_results` is clamped to it. |
-| `TAVILY_MAX_CALLS_PER_RUN` | `3` | Global ceiling for search requests per run, 0–20; the per-target `max_calls_per_run` is clamped to it and `0` switches the collector off for every target (skipped, not failed). |
+| `TAVILY_MAX_CALLS_PER_RUN` | `5` | Global ceiling for search requests per run, 0–20; the per-target `max_calls_per_run` is clamped to it and `0` switches the collector off for every target (skipped, not failed). `5` covers the five query templates for a single-term target. |
 | `TAVILY_TIMEOUT_SECONDS` | `120` | Default wall-clock budget of a whole Tavily run per target, retries included (`timeout_seconds` in `targets.yaml` overrides it). |
 | `TAVILY_INCLUDE_DOMAINS` | *(empty)* | Optional comma-separated allowlist of result domains (`example.com,news.example.com`). |
 | `TAVILY_EXCLUDE_DOMAINS` | *(empty)* | Optional comma-separated denylist of result domains. |
@@ -222,7 +222,7 @@ scheduled run can expand without limit.
 | `include_domains` / `exclude_domains` | `[]` | Result-domain allowlist / denylist; empty falls back to the global settings |
 | `search_terms` | `[]` | Optional list of quoted query terms (for example trade names), up to 5 entries of at most 80 characters each; empty keeps the default domain term |
 | `include_answer` | `false` | Also request Tavily's synthesised answer, kept as one bounded note per query |
-| `max_calls_per_run` | `3` | Search requests per run, 1–20, clamped by `TAVILY_MAX_CALLS_PER_RUN`. Three query templates ship; queries are built template by template (every term for template 1, then template 2, then template 3) and truncated to the budget, so a multi-term target can exhaust the budget before the last template |
+| `max_calls_per_run` | `5` | Search requests per run, 1–20, clamped by `TAVILY_MAX_CALLS_PER_RUN`. Five query templates ship (adverse news and sanctions, ownership, legal proceedings, criminal record, administrative sanctions); queries are built template by template (every term for template 1, then template 2, and so on) and truncated to the budget, so a multi-term target can exhaust the budget before the last template. No query carries a time filter: a conviction or a sanction of years ago is still a finding for a due-diligence file |
 | `timeout_seconds` | `TAVILY_TIMEOUT_SECONDS` (`120`) | Wall-clock budget for the whole collector run, retries and backoff included |
 
 `alerts`:

@@ -188,7 +188,9 @@ class CollectorConfig(BaseModel):
         default_factory=list, max_length=5
     )
     include_answer: bool = False
-    max_calls_per_run: int = Field(default=3, ge=1, le=20)
+    # Five query templates ship (collectors/tavily.py); the default budget
+    # covers all of them for a single-term target.
+    max_calls_per_run: int = Field(default=5, ge=1, le=20)
 
 
 def _socialosint_default_timeout() -> int:

@@ -186,7 +186,7 @@ class Settings(BaseSettings):
     # Global ceilings for the per-target ``max_results`` / ``max_calls_per_run``.
     # A call ceiling of 0 disables the collector for every target.
     tavily_max_results: int = Field(default=5, ge=1, le=20)
-    tavily_max_calls_per_run: int = Field(default=3, ge=0, le=20)
+    tavily_max_calls_per_run: int = Field(default=5, ge=0, le=20)
     # Default wall-clock budget (seconds) of a whole Tavily run per target,
     # retries included; targets.yaml ``timeout_seconds`` overrides it.
     tavily_timeout_seconds: int = 120
