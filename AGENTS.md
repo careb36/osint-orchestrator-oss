@@ -18,17 +18,20 @@ A FastAPI + APScheduler service that runs OSINT collectors (OpenOSINT, SpiderFoo
 
 ## Running it locally
 
-`docker compose up -d --build` brings up the stack (README *Quick start*). For
-the API alone:
+`docker compose up -d --build` brings up the stack (README *Quick start*). It
+interpolates `docker-compose*.yml` for every service the files declare, profile
+or not, so a blank `${VAR:?}` — OpenCTI, MinIO, RabbitMQ, MISP and OIDC
+credentials included — stops `up` before anything runs; `.env.example` lists
+them all. For the API alone:
 
-    cp targets.example.yaml targets.yaml   # gitignored; every example target ships disabled
+    cp targets.example.yaml targets.yaml   # gitignored; example-domain ships enabled
     uvicorn orchestrator.api:app --reload  # :8000; /health and /metrics need no key
 
 `/console` answers `503` until a dashboard build sits in
 `orchestrator/static/ui-dist` (the Dockerfiles copy it there from `ui/dist`).
-For dashboard work run `npm run dev` in `ui/`: Vite proxies `/health`,
-`/targets`, `/runs` and `/analytics` to `:8000` and serves
-`http://localhost:5173/console/`.
+For dashboard work run `npm run dev` in `ui/`: Vite proxies the prefixes in
+`src/lib/apiPaths.ts` (`/health`, `/targets`, `/runs`, `/analytics`, `/alerts`)
+to `:8000` and serves `http://localhost:5173/console/`.
 
 ## Before you open or update a PR
 
@@ -67,11 +70,12 @@ If you touched `deploy/helm/`, also run:
     helm template osint deploy/helm/osint-orchestrator --kube-version 1.30.0
 
 Both flags matter. `--strict` is what CI runs, so a lint without it can pass
-locally and still block the PR. `--kube-version` is required because the chart
-declares `kubeVersion: >=1.25.0-0`, and `helm template` otherwise assumes an
-older default and refuses to render. CI also renders the chart a second time
-with every optional resource switched on (`.github/workflows/ci.yml`); if you
-changed a conditional template, copy that step too.
+locally and still block the PR. `--kube-version` is the flag CI passes, so a
+render without it follows helm's built-in default instead, which changes with
+the helm release (the chart declares `kubeVersion: >=1.25.0-0`). CI also
+renders the chart a second time with every optional resource switched on
+(`.github/workflows/ci.yml`); if you changed a conditional template, copy that
+step too.
 
 If you touched `ui/`, from `ui/`:
 
