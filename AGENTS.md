@@ -8,23 +8,58 @@ form.
 
 ## What this project is
 
-A FastAPI + APScheduler service that runs OSINT collectors (OpenOSINT, SpiderFoot and, opt-in per target, Tavily, Amass and SocialOSINT), qualifies web evidence and synthesises a risk read with an LLM, normalises findings to STIX 2.1 and ingests them into OpenCTI, then writes a signed report per run and sends alerts. Architecture decisions live in `docs/adr/` and are summarised in `docs/architecture.md`: modular monolith (ADR-001), STIX 2.1 as the internal contract (ADR-002), OpenCTI as the single source of truth (ADR-003), Spanish for operators / English for code (ADR-004), static API keys and a single-instance deployment (ADR-005), optional OIDC proxy (ADR-006), signed evidence chain (ADR-007), optional OpenCTI sink (ADR-008), documentation language (ADR-009). Read the relevant ADR before changing architecture; do not contradict one without proposing a new ADR.
+A FastAPI + APScheduler service that runs OSINT collectors (OpenOSINT, SpiderFoot and, opt-in per target, Tavily, Amass and SocialOSINT), qualifies web evidence and synthesises a risk read with an LLM, normalises findings to STIX 2.1 and ingests them into OpenCTI, then writes a signed report per run and sends alerts. The same process serves the operator dashboard (`ui/`) under `/console`. Architecture decisions live in `docs/adr/` and are summarised in `docs/architecture.md`: modular monolith (ADR-001), STIX 2.1 as the internal contract (ADR-002), OpenCTI as the single source of truth (ADR-003), Spanish for operators / English for code (ADR-004), static API keys and a single-instance deployment (ADR-005), optional OIDC proxy (ADR-006), signed evidence chain (ADR-007), optional OpenCTI sink (ADR-008), documentation language (ADR-009), the dashboard as a React SPA served by the API (ADR-010), external STIX 2.1 bundles as an intake path (ADR-011). Read the relevant ADR before changing architecture; do not contradict one without proposing a new ADR.
 
 ## Language policy (ADR-004) — non-negotiable
 
 - Code, comments, log messages, commit messages, `README.md`, ADRs, and developer-facing docs: **English**.
-- Operator-facing prose (API error `detail`, report bodies, alert subjects/bodies, LLM synthesis) is localised through `orchestrator/i18n.py`. Every message key must carry both `es` and `en`; `tests/unit/test_i18n.py` fails otherwise. Default language is `es`.
+- Operator-facing prose (API error `detail`, report bodies, alert subjects/bodies, LLM synthesis) is localised through `orchestrator/i18n.py`. Every message key must carry both `es` and `en`; `tests/unit/test_i18n.py` fails otherwise. Default language is `es`. The dashboard is separate: its catalogue is `ui/src/i18n.tsx`, checked by `src/i18n.test.ts`.
 - Identifiers that are persisted or compared (`risk_level`, `RunStatus`, STIX types, enum values) stay English in every language.
+
+## Running it locally
+
+`docker compose up -d --build` brings up the stack (README *Quick start*). For
+the API alone:
+
+    cp targets.example.yaml targets.yaml   # gitignored; every example target ships disabled
+    uvicorn orchestrator.api:app --reload  # :8000; /health and /metrics need no key
+
+`/console` answers `503` until a dashboard build sits in
+`orchestrator/static/ui-dist` (the Dockerfiles copy it there from `ui/dist`).
+For dashboard work run `npm run dev` in `ui/`: Vite proxies `/health`,
+`/targets`, `/runs` and `/analytics` to `:8000` and serves
+`http://localhost:5173/console/`.
 
 ## Before you open or update a PR
 
 Run these from the repository root and paste the output in the PR description:
 
-    ruff check orchestrator/ tests/unit/
-    ruff format --check orchestrator/ tests/unit/
+    ruff check orchestrator/ tests/
+    ruff format --check orchestrator/ tests/
+    mypy orchestrator/ --ignore-missing-imports
     pytest tests/unit/ -v -m "not integration"
 
-CI runs the same commands. A PR with red lint or failing tests is not ready for review.
+CI runs the same commands (`ruff` over all of `tests/`, not only `tests/unit/`,
+and mypy is blocking). A PR with red lint, a type error or failing tests is not
+ready for review.
+
+Any change to `orchestrator/models.py` also needs an Alembic migration
+(`alembic revision --autogenerate`) in `orchestrator/migrations/versions/`; CI
+applies the migrations to a fresh database and fails on `alembic check`:
+
+    export ORCHESTRATOR_DATABASE_URL="sqlite+aiosqlite:////tmp/migration_check.db"
+    alembic upgrade head && alembic check
+
+Integration tests need the compose stack and the API key it was started with
+(the protected routes answer `401` without it):
+`docker compose up -d && ORCHESTRATOR_API_KEY=<key> pytest tests/integration/ -m integration -v`.
+
+CI also runs the *Public-release guard*, `bash scripts/check_public_release.sh`
+(gitleaks plus a forbidden-reference pattern that lives in that script only;
+`CHECK_HISTORY=1` extends it to the git history). Run it before opening a PR
+that adds prose. No tracked file — code, doc, fixture or commit message — may
+name a specific public body, regulator or official government portal. See
+*Public release guard* in `CONTRIBUTING.md`.
 
 If you touched `deploy/helm/`, also run:
 
@@ -38,10 +73,21 @@ older default and refuses to render. CI also renders the chart a second time
 with every optional resource switched on (`.github/workflows/ci.yml`); if you
 changed a conditional template, copy that step too.
 
+If you touched `ui/`, from `ui/`:
+
+    npm ci
+    npm run lint && npm run test:run && npm run build
+
+That is the CI *Dashboard* job: ESLint with `--max-warnings 0`, Vitest
+(including axe-core accessibility and end-to-end view tests) and a `tsc && vite
+build`. CI then fails a build whose `index.html` gains an inline script,
+because the API serves the dashboard with `script-src 'self'`.
+
 ## Conventions
 
-- Python 3.11. Async SQLModel over `aiosqlite`; `orchestrator/database.py::get_session()` is the only way to get a session.
-- Tests: pytest with `asyncio_mode = auto`, `pytest_httpx` for HTTP, and an in-memory SQLite engine per test (copy the `_make_engine` / `_session_factory` pattern in `tests/unit/test_alerts.py`). Tests must never touch the real `orchestrator.db` or the network.
+- Python 3.11, FastAPI, APScheduler. Async SQLModel over `aiosqlite`; `orchestrator/database.py::get_session()` is the only way to get a session.
+- Dashboard: React 18 + TypeScript + Vite SPA in `ui/`, served by the API at `/console` with no second process or port (ADR-010). It is a client of the public REST API and holds no rule of its own; the backend stays the source of truth.
+- Tests: pytest with `asyncio_mode = auto`, `pytest_httpx` for HTTP, and an in-memory SQLite engine per test (copy the `_make_engine` / `_session_factory` pattern in `tests/unit/test_alerts.py`). Tests must never touch the real `orchestrator.db` or the network; `tests/conftest.py` pins `ORCHESTRATOR_ENV_FILE=""` so a developer's `.env` cannot change their result.
 - Every collector returns a `CollectorResult`; raw tool output never leaves the collector module. STIX objects are built only in `orchestrator/normalizer/stix.py`, with deterministic ids. Do not build STIX elsewhere.
 - Dependencies are pinned on purpose: git dependencies by full 40-character SHA (see `openosint` in `pyproject.toml`), Docker images by explicit tag, never `:latest`. Bump a pin in its own commit and say why.
 - Secrets: nothing that looks like a credential may appear in `.env.example`, docs, fixtures or tests. Use blank values with `# Generate: openssl rand -hex 32`, or `<placeholder>` strings. Test tokens are short and obviously fake (`"test-token"`). GitGuardian scans every PR and a hit blocks it.
