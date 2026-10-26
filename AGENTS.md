@@ -19,10 +19,12 @@ A FastAPI + APScheduler service that runs OSINT collectors (OpenOSINT, SpiderFoo
 ## Running it locally
 
 `docker compose up -d --build` brings up the stack (README *Quick start*). It
-interpolates `docker-compose*.yml` for every service the files declare, profile
-or not, so a blank `${VAR:?}` — OpenCTI, MinIO, RabbitMQ, MISP and OIDC
-credentials included — stops `up` before anything runs; `.env.example` lists
-them all. For the API alone:
+interpolates `docker-compose.yml` for every service the file declares, profile
+or not, so a blank `${VAR:?}` — OpenCTI, MinIO and RabbitMQ credentials — stops
+`up` before anything runs. MISP and OIDC credentials are `${VAR:?}` only inside
+`docker-compose.misp.yml` and `docker-compose.auth.yml`, so they stop `up` only
+when those overlays are loaded with `-f`. `.env.example` lists them all. For the
+API alone:
 
     cp targets.example.yaml targets.yaml   # gitignored; example-domain ships enabled
     uvicorn orchestrator.api:app --reload  # :8000; /health and /metrics need no key
