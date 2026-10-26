@@ -61,12 +61,24 @@ updates:
       testing-library:
         patterns: ["@testing-library/*"]
 
-  # Base images. The docker ecosystem takes every file in the directory whose
-  # name contains "dockerfile" -- Dockerfile, Dockerfile.misp and
-  # Dockerfile.socialosint -- and the `image:` values of the YAML files beside
-  # them, which is docker-compose.yml and its .misp, .auth and .engine
-  # overlays. deploy/helm/ sits in a subdirectory and is not covered here.
+  # Base images of the Dockerfiles. The docker ecosystem reads every file in
+  # the directory whose name contains "dockerfile" -- Dockerfile,
+  # Dockerfile.misp and Dockerfile.socialosint -- and only their `FROM` lines.
+  # It also fetches companion YAML, but keeps only Kubernetes manifests and
+  # Helm values; compose files are skipped, which is why they get the
+  # `docker-compose` entry below. deploy/helm/ sits in a subdirectory and is
+  # not covered by either entry.
   - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels: ["security"]
+
+  # The `image:` pins of docker-compose.yml and its .misp, .auth and .engine
+  # overlays. Docker Compose is a separate ecosystem in Dependabot: the
+  # `docker` entry above never reads these files.
+  - package-ecosystem: "docker-compose"
     directory: "/"
     schedule:
       interval: "weekly"
@@ -80,6 +92,12 @@ updates:
       # test_pycti_pin_matches_the_opencti_platform_tag). A PR that moves one
       # side alone turns CI red by design.
       - dependency-name: "opencti/*"
+      # Built from this repository, never pulled from a registry, so there is
+      # no upstream release to propose. The misp image tag mirrors the
+      # Dockerfile.misp base image and moves with it.
+      - dependency-name: "osint-orchestrator-misp"
+      - dependency-name: "investigation-assistant"
+      - dependency-name: "spiderfoot"
 
   # actions/checkout, actions/setup-node, docker/* and azure/setup-helm in
   # .github/workflows/, which track moving major tags today: each major arrives
