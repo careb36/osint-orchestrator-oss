@@ -64,17 +64,41 @@ updates:
   # Base images of the Dockerfiles. The docker ecosystem reads every file in
   # the directory whose name contains "dockerfile" -- Dockerfile,
   # Dockerfile.misp and Dockerfile.socialosint -- and only their `FROM` lines.
-  # It also fetches companion YAML, but keeps only Kubernetes manifests (a
-  # file with both `apiVersion` and `kind`); docker-compose.yml and its .misp,
-  # .auth and .engine overlays are not Kubernetes resources, and Dependabot
-  # has no docker-compose ecosystem, so the compose `image:` pins stay
-  # manually managed. deploy/helm/ sits in a subdirectory and is not covered.
+  # It also fetches companion YAML, but keeps only Helm charts or Kubernetes
+  # manifests (a file with both `apiVersion` and `kind`), so the compose
+  # `image:` pins are not covered here; the docker-compose entry below reads
+  # them. deploy/helm/ sits in a subdirectory and is not covered.
   - package-ecosystem: "docker"
     directory: "/"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
     labels: ["security"]
+
+  # Compose `image:` pins in docker-compose.yml and its .misp, .auth and
+  # .engine overlays: the docker-compose ecosystem matches every
+  # `(docker-)?compose(-<word>)?.yaml` file in the directory.
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels: ["security"]
+    ignore:
+      # platform, worker and the connectors share one release tag, and
+      # tests/unit/test_image_dependencies.py::
+      # test_pycti_pin_matches_the_opencti_platform_tag ties that tag to the
+      # pycti pin (see the pip entry). None of them may move here alone.
+      - dependency-name: "opencti/*"
+      # Built from this repository or from a local Dockerfile, so there is no
+      # upstream release to propose. Dockerfile.misp's base tag mirrors the
+      # misp image, and
+      # tests/unit/test_misp_compose.py::
+      # test_misp_uses_the_passwordless_backport_image asserts the
+      # `v2.4.198-passwordless` tag.
+      - dependency-name: "osint-orchestrator-misp"
+      - dependency-name: "investigation-assistant"
+      - dependency-name: "spiderfoot"
 
   # actions/checkout, actions/setup-node, docker/* and azure/setup-helm in
   # .github/workflows/, which track moving major tags today: each major arrives
