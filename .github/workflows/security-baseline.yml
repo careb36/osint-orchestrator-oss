@@ -8,6 +8,10 @@ name: Security baseline – secrets, SAST, dependencies
 # gitleaks in osint, Bandit/pip-audit in investigation, Safety/Trivy in
 # la-fabrique, OWASP Dependency Check in Monitor). Findings from this baseline
 # are tracked by the factory instead of being silently ignored.
+#
+# SECURITY_RUNS_ON is a repository variable containing a JSON runner selector.
+# The four repositories with self-hosted runners set it to their runner labels;
+# Monitor keeps the GitHub-hosted default until a runner or billing is fixed.
 
 on:
   schedule:
@@ -24,7 +28,7 @@ concurrency:
 jobs:
   secrets:
     name: Secrets (gitleaks)
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.SECURITY_RUNS_ON || '"ubuntu-latest"') }}
     timeout-minutes: 10
     steps:
       - name: Checkout full history
@@ -56,23 +60,27 @@ jobs:
 
   sast:
     name: SAST (Semgrep)
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.SECURITY_RUNS_ON || '"ubuntu-latest"') }}
     timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install Semgrep (pinned)
-        run: python -m pip install "semgrep==1.182.1"
+      - name: Install uv (pinned + checksum)
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -sSfL -o uv.tgz \
+            https://github.com/astral-sh/uv/releases/download/0.12.24/uv-x86_64-unknown-linux-gnu.tar.gz
+          echo "b4dfaef47d491a7296981f8374a4595f55dbf84e8937c8ecd2983574d8bb3da6  uv.tgz" | sha256sum -c -
+          tar -xzf uv.tgz --strip-components=1 uv-x86_64-unknown-linux-gnu/uv
+          mkdir -p "$RUNNER_TEMP/bin"
+          install -m 0755 uv "$RUNNER_TEMP/bin/uv"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/bin/uv" --version
 
       - name: Scan for security issues
         run: |
-          semgrep scan \
+          uv tool run --from "semgrep==1.182.1" semgrep scan \
             --config p/security-audit \
             --severity ERROR \
             --error \
@@ -92,7 +100,7 @@ jobs:
 
   dependencies:
     name: Dependencies (Trivy)
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.SECURITY_RUNS_ON || '"ubuntu-latest"') }}
     timeout-minutes: 15
     steps:
       - name: Checkout
