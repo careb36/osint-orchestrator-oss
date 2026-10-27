@@ -1,0 +1,121 @@
+name: Security baseline – secrets, SAST, dependencies
+
+# Homogeneous scheduled control for all five repositories. This workflow does
+# not gate pull requests; it is the weekly baseline that makes missing coverage
+# visible and gives the architect/repair stations a concrete finding list.
+#
+# The PR-time controls stay where they are (native CI, CodeQL in Searchclaft,
+# gitleaks in osint, Bandit/pip-audit in investigation, Safety/Trivy in
+# la-fabrique, OWASP Dependency Check in Monitor). Findings from this baseline
+# are tracked by the factory instead of being silently ignored.
+
+on:
+  schedule:
+    - cron: "17 3 * * 1" # Mondays, 03:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-baseline-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secrets:
+    name: Secrets (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Install gitleaks (pinned + checksum)
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -sSfL -o gitleaks.tgz \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz
+          echo "5bc41815076e6ed6ef8fbecc9d9b75bcae31f39029ceb55da08086315316e3ba  gitleaks.tgz" | sha256sum -c -
+          tar -xzf gitleaks.tgz gitleaks
+          mkdir -p "$RUNNER_TEMP/bin"
+          install -m 0755 gitleaks "$RUNNER_TEMP/bin/gitleaks"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/bin/gitleaks" version
+
+      - name: Scan history for secrets
+        run: |
+          gitleaks detect \
+            --source . \
+            --config .gitleaks.toml \
+            --redact \
+            --verbose \
+            --exit-code 1 \
+            --no-banner
+
+  sast:
+    name: SAST (Semgrep)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Semgrep (pinned)
+        run: python -m pip install "semgrep==1.182.1"
+
+      - name: Scan for security issues
+        run: |
+          semgrep scan \
+            --config p/security-audit \
+            --severity ERROR \
+            --error \
+            --sarif \
+            --output semgrep.sarif \
+            --metrics=off \
+            .
+
+      - name: Upload Semgrep SARIF
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: security-baseline-semgrep
+          path: semgrep.sarif
+          if-no-files-found: warn
+          retention-days: 30
+
+  dependencies:
+    name: Dependencies (Trivy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Scan filesystem for known vulnerabilities
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+          hide-progress: true
+          timeout: 10m0s
+
+      - name: Upload Trivy SARIF
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: security-baseline-trivy
+          path: trivy.sarif
+          if-no-files-found: warn
+          retention-days: 30
