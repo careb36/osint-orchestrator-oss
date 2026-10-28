@@ -191,15 +191,6 @@ entidad ficticia, dos corridas, ninguna clave de API.
 
 ![Espacio de la corrida: cada evidencia con su categoría, relevancia, confianza y justificación, calificada por la muestra grabada](docs/img/dashboard-run-evidence-es.png)
 
-## Construido durante el hackathon
-
-Este proyecto se construyó durante una hackathon. El commit `Baseline:
-pre-hackathon snapshot` marca lo que existía antes del evento: el pipeline de
-recolección, la normalización a STIX, la ingesta en OpenCTI, los reportes, las
-alertas y la API. El historial completo de funcionalidades agregadas desde
-entonces, con sus pull requests, está en
-[docs/HACKATHON.md](docs/HACKATHON.md).
-
 ## Uso responsable
 
 El orquestador ejecuta reconocimiento contra lo que figure en `targets.yaml`, y
