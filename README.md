@@ -183,14 +183,6 @@ fictitious sample, two runs, no API key.
 
 ![Run workspace: each piece of evidence with its category, relevance, confidence and rationale, qualified by the recorded sample](docs/img/dashboard-run-evidence-en.png)
 
-## Built during the hackathon
-
-This project was built during a hackathon. The commit `Baseline: pre-hackathon
-snapshot` marks what existed before the event: the collection pipeline, STIX
-normalisation, OpenCTI ingest, reports, alerts and the API. The full history of
-features added since then, with their pull requests, is kept in
-[docs/HACKATHON.md](docs/HACKATHON.md).
-
 ## Responsible use
 
 The orchestrator runs reconnaissance against whatever is listed in
