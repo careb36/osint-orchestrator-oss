@@ -19,6 +19,7 @@ import yaml
 
 REPO_ROOT = pathlib.Path(__file__).parents[2]
 DOCKERFILE = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+DOCKERFILE_MISP = (REPO_ROOT / "Dockerfile.misp").read_text(encoding="utf-8")
 PYPROJECT = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
 
@@ -70,3 +71,249 @@ def test_provider_sdk_importable_when_installed(module: str) -> None:
     if importlib.util.find_spec(module) is None:
         pytest.skip(f"{module} not installed (llm extra absent in this environment)")
     __import__(module)
+
+
+# ── Optional images ──────────────────────────────────────────────────────────
+#
+# Dockerfile.misp and Dockerfile.socialosint belong to the opt-in compose
+# profiles, so nothing built them and nothing scanned them: a broken one (or a
+# .dockerignore that drops what it copies) stayed invisible until an operator
+# tried the profile. The workflow that covers them and the ignore file that
+# feeds them are both easy to break silently, hence these guards.
+
+DOCKER_PUBLISH = (REPO_ROOT / ".github" / "workflows" / "docker-publish.yml").read_text(
+    encoding="utf-8"
+)
+DOCKERIGNORE = (REPO_ROOT / ".dockerignore").read_text(encoding="utf-8")
+
+
+def _dockerignore_rules() -> list[str]:
+    return [
+        line.strip()
+        for line in DOCKERIGNORE.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+
+
+@pytest.mark.parametrize("dockerfile", ["Dockerfile.misp", "Dockerfile.socialosint"])
+def test_optional_image_is_built_and_scanned_in_ci(dockerfile: str) -> None:
+    assert (REPO_ROOT / dockerfile).is_file()
+    workflow = yaml.safe_load(DOCKER_PUBLISH)
+    job = workflow["jobs"]["optional-images"]
+    matrix = job["strategy"]["matrix"]["include"]
+    entry = next((e for e in matrix if e["dockerfile"] == dockerfile), None)
+    assert entry, (
+        f"{dockerfile} is not in the scan matrix; it would be built by nobody, "
+        "which is the gap this job closes"
+    )
+    # Every image states whether a new finding fails the PR. A missing flag
+    # silently makes the scan advisory, which is the state this job replaced.
+    assert isinstance(entry["blocking"], bool), f"{dockerfile} has no blocking flag"
+    scanned = [step for step in job["steps"] if "trivy-action" in (step.get("uses") or "")]
+    assert scanned, "optional images are built but never scanned"
+    # The exit code must follow the flag, or the flag is decorative.
+    assert any("matrix.blocking" in str(step.get("with", {}).get("exit-code")) for step in scanned)
+
+
+@pytest.mark.parametrize("dockerfile", ["Dockerfile.misp", "Dockerfile.socialosint"])
+def test_pr_pipeline_reruns_when_an_optional_dockerfile_changes(dockerfile: str) -> None:
+    workflow = yaml.safe_load(DOCKER_PUBLISH)
+    paths = workflow[True]["pull_request"]["paths"]  # `on:` parses as the boolean True
+    assert dockerfile in paths, (
+        f"editing {dockerfile} would not trigger the workflow that builds it"
+    )
+
+
+def test_dockerignore_keeps_what_dockerfile_misp_copies() -> None:
+    """The build broke on `entrypoint_fpm.sh: not found` while `deploy` was ignored."""
+    copied = re.findall(r"^COPY\s+(\S+)", DOCKERFILE_MISP, re.MULTILINE)
+    assert copied, "Dockerfile.misp stopped copying anything; revisit this guard"
+    rules = _dockerignore_rules()
+    for source in copied:
+        parts = source.strip("/").split("/")
+        needed = {"/".join(parts[: index + 1]) for index in range(len(parts))}
+        assert not needed & set(rules), (
+            f"Dockerfile.misp copies {source}, but .dockerignore excludes "
+            f"{sorted(needed & set(rules))}; the build fails with 'not found'"
+        )
+
+
+def test_socialosint_pins_the_security_upgrades_it_needs() -> None:
+    """The upstream tree resolves to versions with published CVEs.
+
+    Dockerfile.socialosint is the only place they can be moved without forking
+    that repository, so the pin must stay in the same RUN as the install (a
+    later layer would leave the vulnerable files shipped) and it must carry an
+    argument override so a rebuild can move past it without an edit.
+    """
+    dockerfile = (REPO_ROOT / "Dockerfile.socialosint").read_text(encoding="utf-8")
+    assert "ARG PIP_SECURITY_UPGRADES=" in dockerfile
+    assert "--upgrade ${PIP_SECURITY_UPGRADES}" in dockerfile
+    # setuptools carries the vendored wheel/jaraco.context Trivy reports;
+    # installing those two on their own does not remove the vendored copies.
+    assert "setuptools==" in dockerfile
+    # Never let a dependency check failure ship a broken tree.
+    assert "pip check" in dockerfile
+
+
+def test_every_trivy_acceptance_expires() -> None:
+    """An accepted finding must carry a date, or it is permanent by inertia.
+
+    Trivy's ignorefile syntax supports `exp:YYYY-MM-DD`; without it an entry
+    silently outlives the reason it was added, which is how a security
+    acceptance turns into a blind spot.
+    """
+    ignorefile = REPO_ROOT / ".trivyignore"
+    assert ignorefile.is_file(), "the blocking scan needs an ignorefile to accept known findings"
+    entries = [
+        line.strip()
+        for line in ignorefile.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    assert entries, "an empty .trivyignore should be deleted, not kept"
+    for entry in entries:
+        assert " exp:" in entry, (
+            f"{entry!r} has no expiry date; add `exp:YYYY-MM-DD` so the "
+            "acceptance is re-examined instead of inherited"
+        )
+    assert any(
+        ".trivyignore" in str(step.get("with", {}).get("trivyignores", ""))
+        for step in yaml.safe_load(DOCKER_PUBLISH)["jobs"]["optional-images"]["steps"]
+    ), ".trivyignore exists but the scan never reads it"
+
+
+def test_suppressed_findings_stay_visible_in_the_scan_log() -> None:
+    """An accepted finding must be printed, not silently dropped.
+
+    `hide-progress: true` makes the action set TRIVY_QUIET, which also silences
+    the "Some vulnerabilities have been ignored/suppressed" notice. A reviewer
+    then sees a green scan with no trace of what was accepted, which is worse
+    than a red one: the exception is invisible. TRIVY_SHOW_SUPPRESSED restores
+    the "Suppressed Vulnerabilities" table without changing the exit code.
+    """
+    steps = yaml.safe_load(DOCKER_PUBLISH)["jobs"]["optional-images"]["steps"]
+    scans = [s for s in steps if "trivy-action" in str(s.get("uses", ""))]
+    assert scans, "no Trivy step in the optional-images job"
+    for step in scans:
+        env = step.get("env") or {}
+        assert str(env.get("TRIVY_SHOW_SUPPRESSED")).lower() == "true", (
+            f"{step.get('name')} hides progress, which suppresses the notice "
+            "that findings were accepted; set TRIVY_SHOW_SUPPRESSED: 'true'"
+        )
+
+
+DOCKER_PUBLISH_YAML = yaml.safe_load(DOCKER_PUBLISH)
+
+
+def test_scan_runs_monthly_so_an_expiry_becomes_a_deadline() -> None:
+    """An `exp:` date only means something if something re-runs the scan.
+
+    Without a schedule the optional images are scanned when a pull request
+    happens to touch them, so an expiry that passed could go unnoticed for
+    months - the entry would still be honoured on every run in between, which
+    is the permanence the `exp:` field was added to prevent.
+    """
+    triggers = DOCKER_PUBLISH_YAML[True]  # YAML 1.1 parses the `on:` key as True
+    assert "schedule" in triggers, "no schedule: image scans only run on pull_request"
+    crons = [entry["cron"] for entry in triggers["schedule"]]
+    assert len(crons) == 1, f"expected one cron, found {crons}"
+    minute, hour, dom, month, dow = crons[0].split()
+    assert dom.isdigit() and month == "*" and dow == "*", (
+        f"{crons[0]!r} is not a monthly run on a fixed day, so the expiry "
+        "check would fire on an unpredictable calendar"
+    )
+
+
+def _job_condition(job: str) -> str:
+    condition = DOCKER_PUBLISH_YAML["jobs"][job].get("if", "")
+    return " ".join(str(condition).split())
+
+
+def test_the_scheduled_run_scans_but_never_publishes() -> None:
+    """A scheduled run must not push an image.
+
+    A schedule runs from the default branch, so without this guard every
+    monthly run would publish a new :main image with no commit behind it.
+    """
+    assert "github.event_name != 'schedule'" in _job_condition("image"), (
+        "the image job would publish a :main image on every scheduled run"
+    )
+
+
+def test_only_green_ci_on_main_and_version_tags_publish() -> None:
+    """Publishing is gated by the event, not just by the ref.
+
+    `event_name != 'pull_request'` pushed for every other event, so a
+    workflow_dispatch from a feature branch published `:<branch>` and
+    `:sha-<short>` to GHCR - tags no commit vouches for. Allowing any
+    `refs/heads/main` was still wrong: a dispatch from main would have
+    published :main without passing the CI gate that workflow_run enforces.
+    """
+    push_step = next(
+        step
+        for step in DOCKER_PUBLISH_YAML["jobs"]["image"]["steps"]
+        if "push" in (step.get("with") or {})
+    )
+    push = " ".join(str(push_step["with"]["push"]).split())
+    assert "github.event_name == 'workflow_run'" in push, (
+        f"the publish condition {push!r} no longer accepts the gated main path"
+    )
+    assert "github.event_name == 'push'" in push, (
+        f"the publish condition {push!r} does not require a tag push; another "
+        "event on main would publish without the CI gate"
+    )
+    assert "refs/tags/v" in push, f"the publish condition {push!r} drops version tags"
+    assert "refs/heads/main" not in push, (
+        f"the publish condition {push!r} keys off the main ref, which a manual "
+        "dispatch also satisfies"
+    )
+
+
+def test_the_scheduled_run_includes_the_optional_image_scan() -> None:
+    condition = _job_condition("optional-images")
+    assert "github.event_name == 'schedule'" in condition, (
+        "the scan is gated to pull_request, so the monthly run would skip the "
+        "job that exists to catch an expired acceptance"
+    )
+
+
+def test_a_monthly_run_cannot_pile_up_or_cancel_commit_work() -> None:
+    """Scheduled runs need their own concurrency group.
+
+    Falling back to `run_id` gives each monthly run a fresh group, so a queue
+    that is stuck accumulates one copy per month; sharing a group with commits
+    would let the scan cancel, or be cancelled by, work tied to a revision.
+    """
+    concurrency = DOCKER_PUBLISH_YAML["concurrency"]
+    group = " ".join(str(concurrency["group"]).split())
+    assert "scheduled-optional-image-scan" in group, (
+        "scheduled runs share the run_id group and can accumulate"
+    )
+
+
+def test_a_failed_scheduled_scan_reports_somewhere() -> None:
+    """A red monthly run on the Actions tab is not a notification.
+
+    The schedule exists so an expired acceptance is noticed on a calendar. If
+    the only signal is a red run in a tab nobody watches, the deadline fires
+    and nothing happens. The reporter must therefore be able to write an issue
+    and must only fire for the unattended events.
+    """
+    job = DOCKER_PUBLISH_YAML["jobs"].get("notify-scan-failure")
+    assert job is not None, "a scheduled scan failure must open an issue"
+    assert job["permissions"].get("issues") == "write"
+    condition = " ".join(str(job["if"]).split())
+    assert "failure()" in condition, "it would run even when the scan passes"
+    assert "github.event_name == 'schedule'" in condition
+    # A pull request already shows the failure on the PR; an issue would be noise.
+    assert "pull_request" not in condition
+    assert job["needs"] == "optional-images"
+
+
+def test_the_reporter_does_not_open_a_new_issue_every_month() -> None:
+    """A recurring failure must keep one issue, not one per run."""
+    run = DOCKER_PUBLISH_YAML["jobs"]["notify-scan-failure"]["steps"][0]["run"]
+    assert "issue list" in run and "issue comment" in run, (
+        "the reporter must look for an existing issue before creating one"
+    )
+    assert "issue create" in run

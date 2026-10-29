@@ -1,0 +1,27 @@
+# Findings reviewed and deliberately not fixed yet. Every entry carries an
+# expiry date: on that date Trivy stops honouring it and the scan fails again,
+# which forces a fresh decision instead of letting an acceptance rot in place.
+#
+# CVE-2026-49272  oauthlib, SocialOSINT image. Not reachable here.
+#
+#   The vulnerable code is DeviceCodeGrant.validate_token_request, in the
+#   authorization-SERVER half of oauthlib: it is reached when oauthlib is used
+#   to run a token endpoint (oauthlib/oauth2/rfc6749/endpoints/ and
+#   rfc8628/grant_types/). This image only ever acts as an OAuth client.
+#   Nothing in it instantiates oauthlib's Endpoints or Server classes, and
+#   requests_oauthlib 2.0.0 imports only client-side symbols
+#   (WebApplicationClient, LegacyApplicationClient, oauthlib.oauth1 constants);
+#   tweepy touches oauthlib.oauth1.Client only in its asynchronous client,
+#   which SocialOSINT does not use.
+#
+#   Verify with:
+#     docker run --rm --entrypoint sh <image> -c \
+#       'grep -rn "DeviceCodeGrant\|oauthlib.oauth2.Server" \
+#          /usr/local/lib/python3.11/site-packages/'
+#
+#   Upgrading is separate and blocked: the fix is 4.0.0 and tweepy 4.17
+#   declares oauthlib<4. That is a metadata conflict, not the reason for this
+#   entry: forcing past it would add risk to clear a finding that cannot fire.
+#   Re-examine if the app ever validates OAuth2 grants itself, or when tweepy
+#   relaxes the pin (`pip install --dry-run "tweepy" oauthlib==4.0.0`).
+CVE-2026-49272 exp:2027-04-30

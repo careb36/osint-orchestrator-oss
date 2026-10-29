@@ -2,10 +2,11 @@ name: Publish image
 
 # Builds the orchestrator image and pushes it to GHCR so the Helm chart's
 # default `image.repository` (ghcr.io/careb36/osint-orchestrator-oss) resolves.
+# Exactly two paths publish, and both are gated:
 #   - CI passes on main  → :main and :sha-<short>
 #   - tag v*             → :<version>, :latest
-#   - manual dispatch    → :sha-<short> only
-# Pull requests only build (no push) to catch a broken Dockerfile early.
+# Nothing else publishes. A pull request, a scheduled run and a manual
+# dispatch all build without pushing; the scan is what those runs are for.
 #
 # Push to main is gated: the image is only built after the CI workflow
 # (lint-and-test + helm-chart) succeeds on that commit.
@@ -21,10 +22,21 @@ on:
   pull_request:
     paths:
       - Dockerfile
+      - Dockerfile.misp
+      - Dockerfile.socialosint
+      - docker-compose.misp.yml
+      - .dockerignore
       - pyproject.toml
       - orchestrator/**
       - ui/**
       - .github/workflows/docker-publish.yml
+  # Monthly, so an accepted finding in .trivyignore is re-examined by the
+  # calendar rather than by luck. A `pull_request`-only scan only revisits the
+  # optional images when someone happens to change them; an `exp:` date that
+  # passes unnoticed would then sit there until the next such PR. Only the
+  # scanning job runs: see the `image` job's guard below.
+  schedule:
+    - cron: "23 4 1 * *" # 1st of the month, 04:23 UTC
   workflow_dispatch:
 
 concurrency:
@@ -32,16 +44,31 @@ concurrency:
   # replaces, so the single self-hosted runner does not build stale images.
   # Every other event (main, tags, dispatch) gets its own group and is never
   # cancelled, so each commit on main keeps its required checks.
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  #
+  # The schedule is pinned to a name of its own on purpose. With the usual
+  # `run_id` fallback every monthly run would land in a new group, so a stuck
+  # scheduled run would accumulate one queued copy per month; and grouping it
+  # with anything else would let a monthly scan queue behind, or cancel, work
+  # that belongs to a commit.
+  group: >-
+    ${{ github.event_name == 'schedule'
+        && 'scheduled-optional-image-scan'
+        || format('{0}-{1}', github.workflow, github.event.pull_request.number || github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'schedule' }}
 
 jobs:
   image:
     name: Build & push
     # For workflow_run events only proceed if CI succeeded.
+    #
+    # A scheduled run exists to re-scan the optional images, never to publish:
+    # scheduled workflows run from the default branch (always main), so pushing
+    # there would mint a fresh :main image every month without a commit, against
+    # a repository whose images are tagged by commit and release.
     if: >-
-      github.event_name != 'workflow_run' ||
-      github.event.workflow_run.conclusion == 'success'
+      github.event_name != 'schedule' &&
+      (github.event_name != 'workflow_run' ||
+       github.event.workflow_run.conclusion == 'success')
     runs-on: ${{ fromJSON(vars.CI_RUNS_ON || (github.event.repository.private && '["self-hosted","linux","x64","osint"]' || '"ubuntu-latest"')) }}
     permissions:
       contents: read
@@ -78,7 +105,16 @@ jobs:
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6
         with:
           context: .
-          push: ${{ github.event_name != 'pull_request' }}
+          # Publishing is a property of the ref, and only two paths qualify:
+          # a `workflow_run` (main, which the job condition already gated on
+          # CI success) and a `v*` tag push. Keying off "not a pull request"
+          # also pushed on any other event - a workflow_dispatch on a feature
+          # branch published `:<branch>` and `:sha-<short>`, and a dispatch on
+          # main would publish :main without passing the CI gate.
+          push: >-
+            ${{ github.event_name == 'workflow_run' ||
+                (github.event_name == 'push' &&
+                 startsWith(github.ref, 'refs/tags/v')) }}
           load: ${{ github.event_name == 'pull_request' }}
           tags: ${{ github.event_name == 'pull_request' && 'osint-orchestrator:smoke' || steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -194,4 +230,147 @@ jobs:
             echo "Timed out waiting for /health to report status=ok"
             docker logs "${cid}" || true
             exit 1
+          fi
+
+  optional-images:
+    name: Scan ${{ matrix.label }}
+    # Dockerfile.misp and Dockerfile.socialosint are opt-in compose profiles and
+    # no workflow built them, so Trivy never saw either one: the only scanned
+    # image was the orchestrator's. Both are covered here. Building them is
+    # what catches a broken optional Dockerfile (a .dockerignore that drops the
+    # entrypoints, an upstream ref that moved).
+    #
+    # `blocking` is per image because the two are in different states:
+    #   - socialosint resolves clean once Dockerfile.socialosint pins its
+    #     transitive CVEs, so a new fixable finding is a regression here and
+    #     fails the PR. The one finding no change here can clear (oauthlib) is
+    #     accepted in .trivyignore, where the reason is recorded: the
+    #     vulnerable code is oauthlib's authorization-server half and this
+    #     image is only ever an OAuth client. The entry expires, so the
+    #     acceptance is re-examined rather than inherited.
+    #   - MISP cannot be clean: its base is the newest v2.4 tag and still
+    #     ships jmespath 2.8.0 (CVE-2026-54133, fixed in 2.9.1, no tag carries
+    #     it). Blocking would leave the job red permanently, which reads as
+    #     "ignore this job" rather than "bump the pin".
+    # `ignore-unfixed: true` keeps both honest: only a finding with a published
+    # fix can fail, and a published fix is exactly the action to take.
+    #
+    # Runs on pull_request and monthly on a schedule. The scheduled run is what
+    # makes an `.trivyignore` expiry date act as a deadline: on the first of the
+    # month, an `exp:` that has passed reinstates its finding and this job goes
+    # red without anyone having to touch the files. `workflow_dispatch` is
+    # included so the check can be run on demand.
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ${{ fromJSON(vars.CI_RUNS_ON || (github.event.repository.private && '["self-hosted","linux","x64","osint"]' || '"ubuntu-latest"')) }}
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    strategy:
+      # One broken optional image must not hide the report for the other.
+      fail-fast: false
+      matrix:
+        include:
+          - dockerfile: Dockerfile.misp
+            image: osint-orchestrator-misp:scan
+            label: MISP image
+            blocking: false
+          - dockerfile: Dockerfile.socialosint
+            image: osint-orchestrator-socialosint:scan
+            label: SocialOSINT image
+            blocking: true
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
+
+      - name: Build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          load: true
+          push: false
+          tags: ${{ matrix.image }}
+          cache-from: type=gha,scope=${{ matrix.dockerfile }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.dockerfile }}
+
+      - name: Scan for fixable CRITICAL and HIGH vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        # TRIVY_SHOW_SUPPRESSED is not an input of this action version, but
+        # Trivy reads it from the environment. Without it `hide-progress` sets
+        # TRIVY_QUIET, which silences the notice that anything was ignored, and
+        # a reviewer sees a green scan with no sign of an accepted finding. With
+        # it the log lists them in a "Suppressed Vulnerabilities" table (status
+        # `ignored`) while the exit code still counts only unsuppressed
+        # findings, so a valid acceptance stays green and a new finding fails.
+        env:
+          TRIVY_SHOW_SUPPRESSED: "true"
+        with:
+          image-ref: ${{ matrix.image }}
+          format: table
+          exit-code: ${{ matrix.blocking && '1' || '0' }}
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          version: v0.76.1
+          hide-progress: true
+          timeout: 15m0s
+
+  # The monthly run above only turns an expired acceptance into a red run. A
+  # red scheduled run is easy to miss on the Actions tab, so this opens an
+  # issue with the run link when the scan fails. It reports, it does not gate:
+  # no ruleset lists it as a required check, so it cannot block a merge.
+  notify-scan-failure:
+    name: Open an issue when the scan fails
+    needs: optional-images
+    if: >-
+      failure() &&
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    runs-on: ${{ fromJSON(vars.CI_RUNS_ON || (github.event.repository.private && '["self-hosted","linux","x64","osint"]' || '"ubuntu-latest"')) }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      # Pinned like every other action here. `gh api` is used instead of
+      # actions/github-script because gh is already on the runner and one fewer
+      # third-party action is one fewer supply-chain surface.
+      - name: Report the failure
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Optional image scan failed: expired acceptance or new finding"
+          # One issue at a time: a recurring monthly failure must not open a new
+          # issue every month.
+          # Search a short marker, not the whole title: the title contains a
+          # colon, and GitHub search treats those as qualifiers.
+          existing=$(gh issue list --state open --search 'in:title "Optional image scan failed"' \
+            --json number --jq '.[0].number // empty')
+          body=$(printf '%s\n' \
+            "The optional-image scan failed on a scheduled run." \
+            "" \
+            "Most likely causes: an \`exp:\` date in \`.trivyignore\` has passed, so the" \
+            "finding it accepted is live again, or a new fixable CRITICAL/HIGH finding" \
+            "appeared in \`Dockerfile.misp\` or \`Dockerfile.socialosint\`." \
+            "" \
+            "Run: $RUN_URL" \
+            "" \
+            "The scan prints the accepted findings in a \"Suppressed Vulnerabilities\"" \
+            "table, so check whether the failure is a new one before touching" \
+            "\`.trivyignore\`." \
+            "" \
+            "_Opened by a workflow on behalf of the maintainer. Close it once the" \
+            "acceptance is renewed or the finding is fixed; the next failure reopens" \
+            "the conversation rather than the issue._")
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body" --label security
           fi

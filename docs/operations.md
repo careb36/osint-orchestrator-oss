@@ -52,7 +52,7 @@ Each one is off by default and enabled per target in `targets.yaml`.
 | --- | --- | --- |
 | Tavily web research | `TAVILY_API_KEY` in `.env` | No extra container. Searches the quoted `search_terms` (default: the domain) across third-party sources |
 | OWASP Amass | `cp amass/datasources.example.yaml amass/datasources.yaml && docker compose --profile amass up -d amass` | Subdomain enumeration. Data-source keys stay in the engine container. `active` and `brute` touch the target: enable them only when the authorisation covers active probing |
-| OWASP SocialOSINT | `docker compose --profile socialosint up -d socialosint` | Needs its own OpenAI-compatible model with vision (`SOCIALOSINT_LLM_*`) and platform credentials; a platform without credentials is skipped. Its analysis is stored as an unverified Note. Platform developer terms apply to what you store |
+| OWASP SocialOSINT | `docker compose --profile socialosint up -d socialosint` | Needs its own OpenAI-compatible model with vision (`SOCIALOSINT_LLM_*`) and platform credentials; a platform without credentials is skipped. Its analysis is stored as an unverified Note. Platform developer terms apply to what you store. The image re-pins the transitive packages with published CVEs (`PIP_SECURITY_UPGRADES` in `Dockerfile.socialosint`); override that build argument to move past a pin without editing the file |
 | MISP | `docker compose -f docker-compose.yml -f docker-compose.misp.yml --profile misp --profile opencti up -d` | Requires both profiles and `OPENCTI_ENABLED=true`. Synchronised through the official OpenCTI connector. First start takes 5–10 minutes; create the API key in MISP (*Administration → List Auth Keys*), set `MISP_KEY` and restart `connector-misp` |
 | OIDC login | `docker compose -f docker-compose.yml -f docker-compose.auth.yml --profile auth up -d` | Keycloak (`:8085`) and oauth2-proxy (`:8002`) in front of the console. No account is shipped: create one in the `orchestrator` realm. API keys keep working ([ADR-006](adr/ADR-006-oidc-proxy.md)) |
 | investigation-assistant worker | `docker compose -f docker-compose.yml -f docker-compose.engine.yml --profile opencti --profile engine up -d --build` | One-shot container that exports one case of the investigation-assistant engine and posts its STIX bundle to `POST /bundles` ([ADR-011](adr/ADR-011-external-stix-producers.md)). Needs `OPENCTI_ENABLED=true`, a clone of the producer and its own API key; see below |
@@ -556,6 +556,30 @@ loopback-only unauthenticated sidecars, the unsigned webhook by default, and
 the residual risk that a schema-valid model reply skews a risk level — each
 with the hardening step a shared-infrastructure deployment must add.
 
+## Accepted container findings
+
+`.trivyignore` holds the findings that were reviewed and deliberately not fixed.
+Every entry carries an `exp:` date, so the acceptance expires instead of being
+inherited by every later run: on that date Trivy stops honouring the line, the
+finding is reported again and the scan fails.
+
+The scan runs on every pull request that touches a Dockerfile and monthly on a
+schedule, which is what turns the expiry into a deadline. When it fails outside
+a pull request, the `notify-scan-failure` job opens an issue with the link to
+the run and comments on that issue on every later failure, so a standing
+problem keeps one thread instead of a new issue per month.
+
+The accepted set is currently one entry:
+
+| Finding | Image | Why it is accepted | Expires |
+| --- | --- | --- | --- |
+| `CVE-2026-49272` (oauthlib) | SocialOSINT | The vulnerable code is `DeviceCodeGrant.validate_token_request`, in the authorization-server half of oauthlib. The image is only ever an OAuth client: nothing instantiates `Endpoints` or `Server`, `requests_oauthlib` imports client-side symbols only, and tweepy reaches `oauthlib.oauth1.Client` only in its asynchronous client, which is unused. The fix is 4.0.0 and tweepy 4.17 requires `oauthlib<4`, so it is not installable yet | 2027-04-30 |
+
+Renew or remove an entry only with a new reason. The scan prints every accepted
+finding in a `Suppressed Vulnerabilities` table on each run, so the decision is
+visible in the log of the pull request that touched the image, not only in this
+file.
+
 ## Release checklist and support SOP
 
 A release is a `vX.Y.Z` tag on `main`: the image workflow publishes
@@ -566,7 +590,8 @@ the release candidate (`docker compose --profile opencti up -d --build` from
 the commit, with `OPENCTI_ENABLED=true`):
 
 - [ ] CI is green on the commit (lint, unit tests, dashboard, Helm chart,
-      public-release guard, image build with the vulnerability scan)
+      public-release guard, image build with the vulnerability scan, and the
+      MISP/SocialOSINT optional images built and scanned)
 - [ ] `GET /ready` answers 200 and `docker compose ps` shows no `unhealthy`
       service
 - [ ] `ORCHESTRATOR_API_KEY=… pytest tests/integration -m integration` passes
