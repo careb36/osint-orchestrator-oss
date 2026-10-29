@@ -2,7 +2,7 @@
 # built with CGO_ENABLED=0, so they run unchanged on the Debian base below.
 # The Amass *engine* itself runs as a separate compose service (profile
 # "amass"); the orchestrator only needs the two clients that talk to it.
-FROM owaspamass/amass:v5.1.1 AS amass
+FROM owaspamass/amass:v5.1.3 AS amass
 
 # React operator dashboard (ui/). Built here so the runtime image needs no
 # Node: the output is static files the orchestrator serves under /console.
