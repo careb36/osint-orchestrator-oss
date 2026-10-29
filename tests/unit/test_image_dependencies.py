@@ -154,3 +154,29 @@ def test_socialosint_pins_the_security_upgrades_it_needs() -> None:
     assert "setuptools==" in dockerfile
     # Never let a dependency check failure ship a broken tree.
     assert "pip check" in dockerfile
+
+
+def test_every_trivy_acceptance_expires() -> None:
+    """An accepted finding must carry a date, or it is permanent by inertia.
+
+    Trivy's ignorefile syntax supports `exp:YYYY-MM-DD`; without it an entry
+    silently outlives the reason it was added, which is how a security
+    acceptance turns into a blind spot.
+    """
+    ignorefile = REPO_ROOT / ".trivyignore"
+    assert ignorefile.is_file(), "the blocking scan needs an ignorefile to accept known findings"
+    entries = [
+        line.strip()
+        for line in ignorefile.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    assert entries, "an empty .trivyignore should be deleted, not kept"
+    for entry in entries:
+        assert " exp:" in entry, (
+            f"{entry!r} has no expiry date; add `exp:YYYY-MM-DD` so the "
+            "acceptance is re-examined instead of inherited"
+        )
+    assert any(
+        ".trivyignore" in str(step.get("with", {}).get("trivyignores", ""))
+        for step in yaml.safe_load(DOCKER_PUBLISH)["jobs"]["optional-images"]["steps"]
+    ), ".trivyignore exists but the scan never reads it"

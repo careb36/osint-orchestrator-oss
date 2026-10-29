@@ -1,0 +1,10 @@
+# Findings reviewed and deliberately not fixed yet. Every entry carries an
+# expiry date: on that date Trivy stops honouring it and the scan fails again,
+# which forces a fresh decision instead of letting an acceptance rot in place.
+#
+# CVE-2026-49272  oauthlib 3.3.1 -> 4.0.0, in the SocialOSINT image only.
+#   The fix is not installable: tweepy 4.17 declares `oauthlib<4`, so upgrading
+#   oauthlib breaks the Twitter collector. Review when tweepy relaxes it —
+#   `pip install --dry-run "tweepy" oauthlib==4.0.0` shows whether it still
+#   conflicts.
+CVE-2026-49272 exp:2027-04-30
