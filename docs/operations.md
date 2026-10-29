@@ -602,6 +602,7 @@ the files above — never from a list of its own, so it cannot disagree with
 them — and compares each one against the default branch of its repository with
 `git ls-remote`. No token, no clone. When something moved it opens one issue
 labelled `security` (or comments on the one already open) and fails the run.
+The policy and the fork decision are ADR-013.
 
 Read the table by the *Status* column:
 
