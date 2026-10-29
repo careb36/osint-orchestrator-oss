@@ -74,6 +74,15 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 5
     labels: ["security"]
+    ignore:
+      # Dockerfile.misp's `FROM` tag and the two MISP compose pins are one
+      # release: misp-core, misp-modules and the passwordless backport all
+      # track `v2.4.198`, and the same pattern is ignored in the
+      # docker-compose entry below. Bumping either half alone is the skew
+      # tests/unit/test_misp_compose.py::
+      # test_misp_uses_the_passwordless_backport_image exists to catch, so
+      # both halves move in one commit or not at all.
+      - dependency-name: "misp/misp-docker/*"
 
   # Compose `image:` pins in docker-compose.yml and its .misp, .auth and
   # .engine overlays: the docker-compose ecosystem matches every
@@ -90,12 +99,13 @@ updates:
       # test_pycti_pin_matches_the_opencti_platform_tag ties that tag to the
       # pycti pin (see the pip entry). None of them may move here alone.
       - dependency-name: "opencti/*"
+      # The MISP pins, held in lockstep with Dockerfile.misp; see the comment
+      # on the same pattern in the docker entry above.
+      # test_misp_uses_the_passwordless_backport_image asserts
+      # `misp-modules:v2.4.198`, so a lone bump of it turns CI red.
+      - dependency-name: "misp/misp-docker/*"
       # Built from this repository or from a local Dockerfile, so there is no
-      # upstream release to propose. Dockerfile.misp's base tag mirrors the
-      # misp image, and
-      # tests/unit/test_misp_compose.py::
-      # test_misp_uses_the_passwordless_backport_image asserts the
-      # `v2.4.198-passwordless` tag.
+      # upstream release to propose.
       - dependency-name: "osint-orchestrator-misp"
       - dependency-name: "investigation-assistant"
       - dependency-name: "spiderfoot"
