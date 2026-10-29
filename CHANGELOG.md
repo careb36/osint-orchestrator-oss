@@ -9,6 +9,29 @@ from [SECURITY.md](SECURITY.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- The MISP image could not be built: `.dockerignore` excluded `deploy/` while
+  `Dockerfile.misp` copies its two entrypoints from `deploy/misp`, so the build
+  stopped at `entrypoint_fpm.sh: not found`. Nothing built that Dockerfile, so
+  the breakage was invisible until now.
+
+- `Dockerfile.socialosint` ships the transitive packages with published CVEs
+  pinned instead of whatever the upstream requirements resolve to: 43 fixable
+  CRITICAL/HIGH findings became 1. Most of them were the `wheel` and
+  `jaraco.context` copies vendored inside `setuptools/_vendor`, so bumping
+  setuptools is what removed them; upgrading those two on their own left the
+  vulnerable files in the image. The remaining HIGH is `oauthlib`, which
+  cannot move until upstream relaxes `tweepy`'s `oauthlib<4` requirement.
+
+### Added
+
+- CI builds and scans `Dockerfile.misp` and `Dockerfile.socialosint`. Both are
+  opt-in compose profiles that no workflow touched, so Trivy only ever saw the
+  orchestrator image. The SocialOSINT scan is blocking now that the image is
+  clean; the MISP one is advisory because its newest base tag still ships
+  `jmespath` 2.8.0 (CVE-2026-54133, fixed in 2.9.1) and no tag carries the fix.
+
 ### Changed
 
 - CI runs on the self-hosted runner while GitHub-hosted minutes are exhausted.
