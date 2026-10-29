@@ -30,6 +30,7 @@ import re
 import uuid
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlsplit
 
 import stix2
 
@@ -95,47 +96,59 @@ def _canonical_phone(value: str) -> str:
 # ── Per-tool Identity objects (module-level singletons) ───────────────────────
 
 _COLLECTOR_CREATED = datetime(2026, 9, 4, tzinfo=UTC)
+# STIX BP 3.1: a consumer only takes a new version of an object when `modified`
+# moves forward, so this must be bumped whenever the Identity content below
+# changes — otherwise an existing OpenCTI keeps the old copy.
+_COLLECTOR_MODIFIED = datetime(2026, 10, 29, tzinfo=UTC)
+# STIX BP 3.4: a non-anonymised Identity should say how to reach its producer,
+# so a consumer holding a dangling reference has somewhere to ask.
+_CONTACT_INFORMATION = "https://github.com/careb36/osint-orchestrator-oss"
 
 _IDENTITIES: dict[CollectorName, stix2.Identity] = {
     CollectorName.OPENOSINT: stix2.Identity(
         id=f"identity--{_det_uuid('openosint')}",
         name="OpenOSINT",
         identity_class="system",
+        contact_information=_CONTACT_INFORMATION,
         description="OSINT Orchestrator — OpenOSINT collector",
         created=_COLLECTOR_CREATED,
-        modified=_COLLECTOR_CREATED,
+        modified=_COLLECTOR_MODIFIED,
     ),
     CollectorName.SPIDERFOOT: stix2.Identity(
         id=f"identity--{_det_uuid('spiderfoot')}",
         name="SpiderFoot",
         identity_class="system",
+        contact_information=_CONTACT_INFORMATION,
         description="OSINT Orchestrator — SpiderFoot collector",
         created=_COLLECTOR_CREATED,
-        modified=_COLLECTOR_CREATED,
+        modified=_COLLECTOR_MODIFIED,
     ),
     CollectorName.SOCIALOSINT: stix2.Identity(
         id=f"identity--{_det_uuid('socialosint')}",
         name="OWASP SocialOSINT",
         identity_class="system",
+        contact_information=_CONTACT_INFORMATION,
         description="OSINT Orchestrator — SocialOSINT collector",
         created=_COLLECTOR_CREATED,
-        modified=_COLLECTOR_CREATED,
+        modified=_COLLECTOR_MODIFIED,
     ),
     CollectorName.AMASS: stix2.Identity(
         id=f"identity--{_det_uuid('amass')}",
         name="OWASP Amass",
         identity_class="system",
+        contact_information=_CONTACT_INFORMATION,
         description="OSINT Orchestrator — Amass collector",
         created=_COLLECTOR_CREATED,
-        modified=_COLLECTOR_CREATED,
+        modified=_COLLECTOR_MODIFIED,
     ),
     CollectorName.TAVILY: stix2.Identity(
         id=f"identity--{_det_uuid('tavily')}",
         name="Tavily",
         identity_class="system",
+        contact_information=_CONTACT_INFORMATION,
         description="OSINT Orchestrator — Tavily collector",
         created=_COLLECTOR_CREATED,
-        modified=_COLLECTOR_CREATED,
+        modified=_COLLECTOR_MODIFIED,
     ),
 }
 
@@ -319,6 +332,20 @@ def _phone_number_sco(value: str, custom: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _stix_timestamp(collected_at: datetime) -> datetime:
+    """Observation time, truncated to milliseconds.
+
+    STIX BP 4.5 asks for exactly three sub-second digits on `created` and
+    `modified`, and stix2 would otherwise serialise the microseconds of a
+    `now()` default. Pinning both to the collection time also makes
+    re-normalising the same CollectorResult byte-identical: a re-run of an
+    unchanged finding updates nothing in OpenCTI instead of minting a new
+    version of every Note on each run.
+    """
+    stamp = collected_at.replace(tzinfo=UTC) if collected_at.tzinfo is None else collected_at
+    return stamp.replace(microsecond=stamp.microsecond // 1000 * 1000)
+
+
 def _fallback_indicator(
     obs_type: str,
     value: str,
@@ -339,13 +366,15 @@ def _fallback_indicator(
     # get re-escaped and the pattern no longer parses — and an unparseable
     # pattern makes stix2 reject the Indicator, silently dropping the finding.
     safe_val = value.replace("\\", "\\\\").replace("'", "\\'")
-    valid_from = collected_at.replace(tzinfo=UTC) if collected_at.tzinfo is None else collected_at
+    stamp = _stix_timestamp(collected_at)
     return stix2.Indicator(
         id=f"indicator--{_det_uuid(f'{obs_type}|{value}')}",
         name=value,
         pattern=f"[{obs_type}:value = '{safe_val}']",
         pattern_type="stix",
-        valid_from=valid_from,
+        valid_from=stamp,
+        created=stamp,
+        modified=stamp,
         created_by_ref=identity_id,
         labels=labels or ["unknown"],
         confidence=score,
@@ -360,21 +389,28 @@ def _qualified_note_extras(
     result: CollectorResult,
     note_text: str,
     qualification_by_url: dict[str, EvidenceQualification],
-) -> tuple[list[str], dict[str, Any]]:
+) -> tuple[list[str], dict[str, Any], list[dict[str, str]]]:
     labels = [result.target_fqdn, result.collector.value]
     custom: dict[str, Any] = {}
+    external: list[dict[str, str]] = []
     if result.collector != CollectorName.TAVILY:
-        return labels, custom
+        return labels, custom, external
     match = _TAVILY_URL_IN_NOTE.search(note_text)
     if not match:
-        return labels, custom
+        return labels, custom, external
     url = match.group(1).strip()
+    # STIX BP 4.1/Table 1: a source worth citing belongs in external_references,
+    # where a consumer renders it as a link, not only in the note text. The host
+    # is the source name so the same outlet always reports the same one.
+    host = urlsplit(url).netloc
+    if host:
+        external.append({"source_name": host, "url": url})
     row = qualification_by_url.get(url)
     if row is None:
-        return labels, custom
+        return labels, custom, external
     labels.extend([f"category:{row.category}", f"relevance:{row.relevance}"])
     custom["x_orchestrator_confidence"] = row.confidence
-    return labels, custom
+    return labels, custom, external
 
 
 def normalize(
@@ -396,6 +432,7 @@ def normalize(
     confidence = _TOOL_CONFIDENCE.get(result.collector, 60)
     labels = [result.target_fqdn, result.collector.value]
     qualification_by_url = qualification_by_url or {}
+    stamp = _stix_timestamp(result.collected_at)
 
     objects: list[Any] = [identity]
     # Keyed by (type, canonical value): two observables of different types may
@@ -430,6 +467,8 @@ def normalize(
                 source_ref=src_id,
                 target_ref=tgt_id,
                 relationship_type=rel.relationship_type,
+                created=stamp,
+                modified=stamp,
                 created_by_ref=identity_id,
                 confidence=confidence,
                 labels=labels,
@@ -444,7 +483,7 @@ def normalize(
         if not note_text or not note_text.strip():
             continue
         try:
-            note_labels, note_custom = _qualified_note_extras(
+            note_labels, note_custom, note_external = _qualified_note_extras(
                 result, note_text, qualification_by_url
             )
             # The identity is one per collector, so the target goes into the
@@ -454,8 +493,14 @@ def normalize(
                 id=f"note--{_det_uuid(f'{identity_id}|{result.target_fqdn}|{note_text}')}",
                 abstract=note_text[:128],
                 content=note_text,
+                # STIX BP 5.8: created_by_ref is the organisation, so the tool
+                # that actually wrote the note goes in authors.
+                authors=[identity.name],
+                created=stamp,
+                modified=stamp,
                 created_by_ref=identity_id,
                 object_refs=[identity_id],
+                external_references=note_external or None,
                 labels=note_labels,
                 custom_properties={"x_opencti_score": confidence, **note_custom},
             )
