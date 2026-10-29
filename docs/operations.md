@@ -566,7 +566,8 @@ the release candidate (`docker compose --profile opencti up -d --build` from
 the commit, with `OPENCTI_ENABLED=true`):
 
 - [ ] CI is green on the commit (lint, unit tests, dashboard, Helm chart,
-      public-release guard, image build with the vulnerability scan)
+      public-release guard, image build with the vulnerability scan, and the
+      MISP/SocialOSINT optional images built and scanned)
 - [ ] `GET /ready` answers 200 and `docker compose ps` shows no `unhealthy`
       service
 - [ ] `ORCHESTRATOR_API_KEY=… pytest tests/integration -m integration` passes

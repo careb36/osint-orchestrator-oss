@@ -19,6 +19,7 @@ import yaml
 
 REPO_ROOT = pathlib.Path(__file__).parents[2]
 DOCKERFILE = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+DOCKERFILE_MISP = (REPO_ROOT / "Dockerfile.misp").read_text(encoding="utf-8")
 PYPROJECT = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
 
@@ -70,3 +71,62 @@ def test_provider_sdk_importable_when_installed(module: str) -> None:
     if importlib.util.find_spec(module) is None:
         pytest.skip(f"{module} not installed (llm extra absent in this environment)")
     __import__(module)
+
+
+# ── Optional images ──────────────────────────────────────────────────────────
+#
+# Dockerfile.misp and Dockerfile.socialosint belong to the opt-in compose
+# profiles, so nothing built them and nothing scanned them: a broken one (or a
+# .dockerignore that drops what it copies) stayed invisible until an operator
+# tried the profile. The workflow that covers them and the ignore file that
+# feeds them are both easy to break silently, hence these guards.
+
+DOCKER_PUBLISH = (REPO_ROOT / ".github" / "workflows" / "docker-publish.yml").read_text(
+    encoding="utf-8"
+)
+DOCKERIGNORE = (REPO_ROOT / ".dockerignore").read_text(encoding="utf-8")
+
+
+def _dockerignore_rules() -> list[str]:
+    return [
+        line.strip()
+        for line in DOCKERIGNORE.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+
+
+@pytest.mark.parametrize("dockerfile", ["Dockerfile.misp", "Dockerfile.socialosint"])
+def test_optional_image_is_built_and_scanned_in_ci(dockerfile: str) -> None:
+    assert (REPO_ROOT / dockerfile).is_file()
+    workflow = yaml.safe_load(DOCKER_PUBLISH)
+    job = workflow["jobs"]["optional-images"]
+    matrix = job["strategy"]["matrix"]["include"]
+    assert dockerfile in {entry["dockerfile"] for entry in matrix}, (
+        f"{dockerfile} is not in the scan matrix; it would be built by nobody, "
+        "which is the gap this job closes"
+    )
+    scanned = [step for step in job["steps"] if "trivy-action" in (step.get("uses") or "")]
+    assert scanned, "optional images are built but never scanned"
+
+
+@pytest.mark.parametrize("dockerfile", ["Dockerfile.misp", "Dockerfile.socialosint"])
+def test_pr_pipeline_reruns_when_an_optional_dockerfile_changes(dockerfile: str) -> None:
+    workflow = yaml.safe_load(DOCKER_PUBLISH)
+    paths = workflow[True]["pull_request"]["paths"]  # `on:` parses as the boolean True
+    assert dockerfile in paths, (
+        f"editing {dockerfile} would not trigger the workflow that builds it"
+    )
+
+
+def test_dockerignore_keeps_what_dockerfile_misp_copies() -> None:
+    """The build broke on `entrypoint_fpm.sh: not found` while `deploy` was ignored."""
+    copied = re.findall(r"^COPY\s+(\S+)", DOCKERFILE_MISP, re.MULTILINE)
+    assert copied, "Dockerfile.misp stopped copying anything; revisit this guard"
+    rules = _dockerignore_rules()
+    for source in copied:
+        parts = source.strip("/").split("/")
+        needed = {"/".join(parts[: index + 1]) for index in range(len(parts))}
+        assert not needed & set(rules), (
+            f"Dockerfile.misp copies {source}, but .dockerignore excludes "
+            f"{sorted(needed & set(rules))}; the build fails with 'not found'"
+        )

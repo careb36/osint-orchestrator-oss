@@ -21,6 +21,10 @@ on:
   pull_request:
     paths:
       - Dockerfile
+      - Dockerfile.misp
+      - Dockerfile.socialosint
+      - docker-compose.misp.yml
+      - .dockerignore
       - pyproject.toml
       - orchestrator/**
       - ui/**
@@ -195,3 +199,58 @@ jobs:
             docker logs "${cid}" || true
             exit 1
           fi
+
+  optional-images:
+    name: Scan ${{ matrix.label }}
+    # Dockerfile.misp and Dockerfile.socialosint are opt-in compose profiles and
+    # no workflow built them, so Trivy never saw either one: the only scanned
+    # image was the orchestrator's. Both are covered here. Building them is
+    # what catches a broken optional Dockerfile (a .dockerignore that drops the
+    # entrypoints, an upstream ref that moved); the scan is advisory because
+    # the findings sit in the upstream bases, not in this repository, and can
+    # only be fixed by bumping those pins in their own commits.
+    if: github.event_name == 'pull_request'
+    runs-on: ${{ fromJSON(vars.CI_RUNS_ON || (github.event.repository.private && '["self-hosted","linux","x64","osint"]' || '"ubuntu-latest"')) }}
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    strategy:
+      # One broken optional image must not hide the report for the other.
+      fail-fast: false
+      matrix:
+        include:
+          - dockerfile: Dockerfile.misp
+            image: osint-orchestrator-misp:scan
+            label: MISP image
+          - dockerfile: Dockerfile.socialosint
+            image: osint-orchestrator-socialosint:scan
+            label: SocialOSINT image
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
+
+      - name: Build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          load: true
+          push: false
+          tags: ${{ matrix.image }}
+          cache-from: type=gha,scope=${{ matrix.dockerfile }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.dockerfile }}
+
+      - name: Report CRITICAL and HIGH vulnerabilities (advisory)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        with:
+          image-ref: ${{ matrix.image }}
+          format: table
+          exit-code: "0"
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          version: v0.76.1
+          hide-progress: true
+          timeout: 15m0s

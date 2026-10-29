@@ -21,5 +21,12 @@ targets.yaml
 amass/datasources.yaml
 docs
 tests
-deploy
+# Dockerfile.misp copies its entrypoints from deploy/misp, so excluding the
+# whole tree broke that build ("entrypoint_fpm.sh: not found"). Exclude the
+# rest of deploy/ but keep those two files in the context.
+deploy/*
+!deploy/misp
+deploy/misp/*
+!deploy/misp/entrypoint.sh
+!deploy/misp/entrypoint_fpm.sh
 scratchpad
