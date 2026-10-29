@@ -207,6 +207,15 @@ inicio rápido): la entidad ficticia, dos corridas, sin clave de API.
 
 ![Espacio de la corrida: cada evidencia con su categoría, relevancia, confianza y justificación, calificada por la muestra grabada](docs/img/dashboard-run-evidence-es.png)
 
+Los dos clips siguientes son capturas sin montaje de esa misma repetición:
+entrar, leer qué requiere atención, abrir una corrida y seguir un expediente de
+debida diligencia desde la evidencia grabada hasta el informe firmado. Nada está
+preparado para la cámara; la consola es la que se obtiene con el inicio rápido.
+
+![Acceso, resumen y apertura de la segunda corrida del objetivo de muestra](docs/img/demo-run.gif)
+
+![Apertura de un expediente de cumplimiento, sus decisiones fundamentadas y las versiones del informe](docs/img/demo-dossier.gif)
+
 ## Uso responsable
 
 El orquestador ejecuta reconocimiento contra lo que figure en `targets.yaml`, y
@@ -222,6 +231,7 @@ salida de los modelos es una ayuda para el analista, no una determinación. Ver
 | --- | --- |
 | Calificación de evidencia y cadena de evidencia | Hecho |
 | Panel del operador (resumen, triaje, investigación) | Hecho |
+| Expedientes de cumplimiento: roles, decisiones fundamentadas, informes firmados versionados | Hecho |
 | Calificación de relaciones entre entidades | Planificado |
 | Indicadores de calidad de datos por fuente | Planificado |
 | NLP de documentos (balances, expedientes) | Planificado |
@@ -231,12 +241,28 @@ salida de los modelos es una ayuda para el analista, no una determinación. Ver
 
 El acceso personal distingue contadores y administración. Los expedientes conservan decisiones fundamentadas por evidencia e informes finales versionados. Consulte el [flujo profesional](docs/compliance-workflow.md) (en inglés); las claves de automatización conservan sus permisos y deben rotarse si antes se compartieron con operadores.
 
+Un expediente conserva las corridas en que se basa, el motivo de cada ítem
+confirmado o descartado y cada versión del informe, de modo que el archivo se
+pueda defender después. Las decisiones y la conclusión las registra una cuenta
+de contador, nunca la administración que creó el expediente.
+
+![Expedientes: el listado con la entidad, el estado y el propietario de cada caso](docs/img/dashboard-dossiers-es.png)
+
+![Evidencias y decisiones profesionales: cada ítem con su evaluación automática, la decisión registrada y su motivo](docs/img/dashboard-dossier-review-es.png)
+
+![Versiones emitidas del informe, cada una descargable como PDF firmado, sobre el historial de acciones](docs/img/dashboard-dossier-report-es.png)
+
+![Administración de cuentas: crear cuentas de contador, desactivar el acceso y revocar sesiones](docs/img/dashboard-accounts-es.png)
+
 ## Documentación
 
 La documentación de referencia está disponible en inglés y español:
 [Arquitectura](docs/architecture.md) · [Configuración](docs/configuration.md) ·
-[Operación](docs/operations.md) · [Despliegue](docs/deploy.md) · [Decisiones](docs/adr/) ·
+[Operación](docs/operations.md) · [Despliegue](docs/deploy.md) ·
+[Flujo de cumplimiento](docs/compliance-workflow.md) · [Decisiones](docs/adr/) ·
+[Modelo de amenazas](docs/threat-model.md) · [Buenas prácticas STIX](docs/stix-best-practices.md) ·
 [Contribuir](CONTRIBUTING.md) · [Seguridad](SECURITY.md) ·
-[Changelog](CHANGELOG.md) · [Historial de la hackathon](docs/HACKATHON.md)
+[Changelog](CHANGELOG.md) · [Historial de la hackathon](docs/HACKATHON.md) ·
+[Toda la documentación](docs/README.md)
 
 Licencia MIT — ver [LICENSE](LICENSE).

@@ -95,10 +95,28 @@ Every data call goes to the same REST API through one typed client
 (`ui/src/lib/api.ts`), so the dashboard has no state of its own: the backend
 stays the source of truth for runs, findings and evidence (ADR-003).
 
-Access follows ADR-005: the shell is public, every data route needs the static
-API key, which the browser keeps in `sessionStorage` (or `localStorage` when
-the operator asks to be remembered) and sends as `X-API-Key`. There are no
-users or roles. The shell is served with a `Content-Security-Policy` that
+Access is layered. The shell is public; browser operators sign in with a
+personal account ([ADR-012](adr/ADR-012-personal-compliance-workflow.md)) and
+the server keeps an `HttpOnly`, `SameSite=Strict` session cookie whose token is
+stored only as a SHA-256 digest. Roles are `admin` (accounts and the
+operational routes) and `accountant` (evidence decisions, dossier conclusion,
+report issuance). The boundary the code enforces is narrower than
+"four eyes": only an accountant may decide, and an administrator may not, but
+nothing stops the accountant who triggered a run from signing that same run off
+later, so keeping collection and approval apart is a procedure, not a control.
+Automation keeps the static API key
+([ADR-005](adr/ADR-005-api-auth-and-single-instance.md)), which the scheduler
+and scripts send as `X-API-Key` or a bearer token, and which opens the
+operational routes but not `/accounts` or `/cases`; `/auth/status` tells the
+console whether personal accounts exist yet, and until an
+administrator is provisioned the console asks for that static key instead,
+keeping it in `sessionStorage` (or `localStorage` when the operator asks to be
+remembered). An install with neither a key nor an account lets legacy routes
+through anonymously. Mutating browser requests must carry
+`X-Requested-With: XMLHttpRequest` and, when `Origin` is present, match the
+request's own origin (`orchestrator/accounts.py::check_browser_request`), which
+is what replaces a CSRF token now that a cookie carries the session. The shell
+is served with a `Content-Security-Policy` that
 allows nothing by default and only same-origin scripts, styles, connections,
 images and fonts (`default-src 'none'; script-src 'self'; style-src 'self';
 connect-src 'self'; img-src 'self' data:; font-src 'self'; base-uri 'none';
