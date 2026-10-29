@@ -1,0 +1,122 @@
+# Dependabot version updates.
+#
+# Weekly pull requests that move a pin, so a dependency fix reaches the queue
+# as a reviewable diff with its changelog. The only signal today is Trivy, and
+# it runs only when the image is rebuilt (docker-publish.yml): an advisory
+# published against a pin already in pyproject.toml or ui/package-lock.json
+# stays invisible until someone changes the build.
+#
+# Every entry carries the repository's existing `security` label, so the
+# supply-chain PRs are one filter away, and stops at 5 open pull requests so
+# one noisy upstream release cannot bury the rest of the queue.
+#
+# This file is the whole channel. The dependency graph, Dependabot alerts,
+# Dependabot security updates and auto-merge are owner switches in the
+# repository settings, not configuration. Deleting this file stops every
+# update; there is no state to revert.
+
+version: 2
+
+updates:
+  # pyproject.toml: the orchestrator and its dev/llm extras.
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels: ["security"]
+    groups:
+      # Patch and minor together: one PR per week to read. A major stays out of
+      # the group and arrives alone, because it is the one that needs its own
+      # commit and its own reason (AGENTS.md, "Dependencies are pinned on
+      # purpose").
+      patch-and-minor:
+        patterns: ["*"]
+        update-types: ["patch", "minor"]
+    ignore:
+      # Coupled to the opencti/platform tag in docker-compose.yml.
+      # tests/unit/test_image_dependencies.py::
+      # test_pycti_pin_matches_the_opencti_platform_tag requires pycti to be
+      # that tag's release (an LTS tag `X-lts.N` is pycti `X.N` on PyPI), and an
+      # unpinned pycti sends GraphQL inputs an older platform rejects. The two
+      # pins move in one commit or not at all, so neither may arrive here alone.
+      - dependency-name: "pycti"
+
+  # ui/package.json and ui/package-lock.json: the React dashboard.
+  - package-ecosystem: "npm"
+    directory: "/ui"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels: ["security"]
+    groups:
+      # react, react-dom and react-router-dom together; vite and vitest
+      # together; the Testing Library packages together. A major of one of them
+      # is usually what breaks a peer in the same group, so the decision stays
+      # in one PR.
+      react:
+        patterns: ["react*"]
+      vite:
+        patterns: ["vite*"]
+      testing-library:
+        patterns: ["@testing-library/*"]
+
+  # Base images of the Dockerfiles. The docker ecosystem reads every file in
+  # the directory whose name contains "dockerfile" -- Dockerfile,
+  # Dockerfile.misp and Dockerfile.socialosint -- and only their `FROM` lines.
+  # It also fetches companion YAML, but keeps only Helm charts or Kubernetes
+  # manifests (a file with both `apiVersion` and `kind`), so the compose
+  # `image:` pins are not covered here; the docker-compose entry below reads
+  # them. deploy/helm/ sits in a subdirectory and is not covered.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels: ["security"]
+    ignore:
+      # Dockerfile.misp's `FROM` tag and the two MISP compose pins are one
+      # release: misp-core, misp-modules and the passwordless backport all
+      # track `v2.4.198`, and the same pattern is ignored in the
+      # docker-compose entry below. Bumping either half alone is the skew
+      # tests/unit/test_misp_compose.py::
+      # test_misp_uses_the_passwordless_backport_image exists to catch, so
+      # both halves move in one commit or not at all.
+      - dependency-name: "misp/misp-docker/*"
+
+  # Compose `image:` pins in docker-compose.yml and its .misp, .auth and
+  # .engine overlays: the docker-compose ecosystem matches every
+  # `(docker-)?compose(-<word>)?.yaml` file in the directory.
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels: ["security"]
+    ignore:
+      # platform, worker and the connectors share one release tag, and
+      # tests/unit/test_image_dependencies.py::
+      # test_pycti_pin_matches_the_opencti_platform_tag ties that tag to the
+      # pycti pin (see the pip entry). None of them may move here alone.
+      - dependency-name: "opencti/*"
+      # The MISP pins, held in lockstep with Dockerfile.misp; see the comment
+      # on the same pattern in the docker entry above.
+      # test_misp_uses_the_passwordless_backport_image asserts
+      # `misp-modules:v2.4.198`, so a lone bump of it turns CI red.
+      - dependency-name: "misp/misp-docker/*"
+      # Built from this repository or from a local Dockerfile, so there is no
+      # upstream release to propose.
+      - dependency-name: "osint-orchestrator-misp"
+      - dependency-name: "investigation-assistant"
+      - dependency-name: "spiderfoot"
+
+  # actions/checkout, actions/setup-node, docker/* and azure/setup-helm in
+  # .github/workflows/, which track moving major tags today: each major arrives
+  # as its own reviewable PR instead of moving under the workflow silently.
+  # Pinning those actions by commit SHA stays a separate change.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels: ["security"]

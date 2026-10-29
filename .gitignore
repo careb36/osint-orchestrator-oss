@@ -92,5 +92,8 @@ amass/datasources.yaml
 # Local compose overrides
 docker-compose.local.yml
 docker-compose.*.local.yml
+# Compose auto-loads this file without a -f flag, so a committed copy would
+# change the stack for everyone instead of just for the developer who wrote it.
+docker-compose.override.yml
 
 !daily_reports/.gitkeep
