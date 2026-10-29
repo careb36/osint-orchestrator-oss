@@ -248,8 +248,11 @@ by the administrator who created the dossier.
 ## Documentation
 
 [Architecture](docs/architecture.md) · [Configuration](docs/configuration.md) ·
-[Operations](docs/operations.md) · [Deploy](docs/deploy.md) · [Decisions](docs/adr/) ·
+[Operations](docs/operations.md) · [Deploy](docs/deploy.md) ·
+[Compliance workflow](docs/compliance-workflow.md) · [Decisions](docs/adr/) ·
+[Threat model](docs/threat-model.md) · [STIX best practices](docs/stix-best-practices.md) ·
 [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) ·
-[Changelog](CHANGELOG.md) · [Hackathon history](docs/HACKATHON.md)
+[Changelog](CHANGELOG.md) · [Hackathon history](docs/HACKATHON.md) ·
+[All docs](docs/README.md)
 
 MIT licence — see [LICENSE](LICENSE).

@@ -258,8 +258,11 @@ de contador, nunca la administración que creó el expediente.
 
 La documentación de referencia está disponible en inglés y español:
 [Arquitectura](docs/architecture.md) · [Configuración](docs/configuration.md) ·
-[Operación](docs/operations.md) · [Despliegue](docs/deploy.md) · [Decisiones](docs/adr/) ·
+[Operación](docs/operations.md) · [Despliegue](docs/deploy.md) ·
+[Flujo de cumplimiento](docs/compliance-workflow.md) · [Decisiones](docs/adr/) ·
+[Modelo de amenazas](docs/threat-model.md) · [Buenas prácticas STIX](docs/stix-best-practices.md) ·
 [Contribuir](CONTRIBUTING.md) · [Seguridad](SECURITY.md) ·
-[Changelog](CHANGELOG.md) · [Historial de la hackathon](docs/HACKATHON.md)
+[Changelog](CHANGELOG.md) · [Historial de la hackathon](docs/HACKATHON.md) ·
+[Toda la documentación](docs/README.md)
 
 Licencia MIT — ver [LICENSE](LICENSE).

@@ -24,34 +24,6 @@ from [SECURITY.md](SECURITY.md).
   points at a fork whose own head looks current while `OpenOSINT/OpenOSINT`
   runs 161 commits ahead of it.
 
-### Fixed
-
-- STIX objects no longer get a fresh `modified` on every run. `stix2` defaults
-  `created` and `modified` to `now()`, which the normaliser never overrode for
-  Notes, Relationships and the Indicator fallback, so re-ingesting an unchanged
-  finding handed OpenCTI a new version of every Note each time and the
-  millisecond rule of the OASIS best practices (exactly three sub-second
-  digits) was broken. Both are pinned to the collection time now, truncated to
-  milliseconds, so the same `CollectorResult` normalises to identical objects.
-
-- The MISP image could not be built: `.dockerignore` excluded `deploy/` while
-  `Dockerfile.misp` copies its two entrypoints from `deploy/misp`, so the build
-  stopped at `entrypoint_fpm.sh: not found`. Nothing built that Dockerfile, so
-  the breakage was invisible until now.
-
-- `Dockerfile.socialosint` ships the transitive packages with published CVEs
-  pinned instead of whatever the upstream requirements resolve to: 43 fixable
-  CRITICAL/HIGH findings became 1. Most of them were the `wheel` and
-  `jaraco.context` copies vendored inside `setuptools/_vendor`, so bumping
-  setuptools is what removed them; upgrading those two on their own left the
-  vulnerable files in the image. The remaining HIGH (`oauthlib`) is accepted
-  in `.trivyignore` with an expiry date and a recorded reason: the vulnerable
-  code is oauthlib's authorization-server half and this image only ever acts
-  as an OAuth client, so it cannot fire. Upgrading it is separately blocked by
-  `tweepy`'s `oauthlib<4` requirement.
-
-### Added
-
 - [docs/stix-best-practices.md](docs/stix-best-practices.md) maps the
   [OASIS STIX 2.1 Best Practice Guide v1.0.0](https://www.cisa.gov/resources-tools/resources/oasis-stix-21-best-practice-guide)
   to this normaliser, practice by practice, with the file or test that holds
@@ -69,117 +41,6 @@ from [SECURITY.md](SECURITY.md).
   orchestrator image. The SocialOSINT scan is blocking now that the image is
   clean; the MISP one is advisory because its newest base tag still ships
   `jmespath` 2.8.0 (CVE-2026-54133, fixed in 2.9.1) and no tag carries the fix.
-
-### Changed
-
-- The Spanish writing skill said it was "the portable version for projects in
-  `/home/caro/Dev`" and defaulted to Uruguayan Spanish, while the product
-  strings in `orchestrator/i18n.py` are neutral and formal («Revise los
-  campos»). It also framed itself as a Codex skill and never mentioned the
-  language policy, so an agent could have applied it to `docs/` and produced
-  Spanish where ADR-004 requires English. It now opens with a scope table
-  (which files are Spanish, which are not, `AGENTS.md` wins), states the
-  `es`/`en` pairing on every `i18n.py` key, the identifiers that stay English
-  (`risk_level`, `RunStatus`, STIX types) and the formatting placeholders that
-  must survive a rewrite, and gains the genre this repository actually uses:
-  executive reports, where evidence precedes the traffic light.
-
-- Publishing an image is now gated by the event, not only by the ref. Any event
-  that was not a pull request used to push, so a `workflow_dispatch` from a
-  feature branch published `:<branch>` and `:sha-<short>` to GHCR. Only a
-  `workflow_run` (main, already gated on CI success) and a `v*` tag push
-  publish; a pull request, a scheduled run and a manual dispatch build without
-  pushing. The header comment claimed "manual dispatch -> :sha only", which was
-  not what the file did.
-- The optional-image scan now also runs monthly, so an expired `.trivyignore`
-  acceptance turns into a red scheduled run on the first of the month instead
-  of waiting for a pull request that happens to touch those images. The
-  scheduled run scans only and never publishes an image. When it fails it
-  opens an issue (reusing the existing one) so the failure is not left on the
-  Actions tab.
-- CI runs on the self-hosted runner while GitHub-hosted minutes are exhausted.
-  Every workflow takes its runner from the repository variable `CI_RUNS_ON`;
-  unset, a private repository uses the runner labelled `osint` and a public
-  one `ubuntu-latest`. A new push to a pull request cancels the run it
-  replaces. Python 3.11 comes from a pinned uv release instead of
-  setup-python, and nothing is written outside `RUNNER_TEMP`: gitleaks, the
-  venv, the migration check database and the Helm renders. See *CI runner* in
-  CONTRIBUTING.md.
-
-- The daily report reads in the order a reviewer needs it: synthesis (risk
-  label with its code, what changed since the previous run, suggested pivots)
-  first, then the qualified evidence, then the new observables, then errors,
-  and only after that a technical annex with the collector status, the full
-  inventory with STIX identifiers and the relationships rendered as values
-  (`example.com -> 1.2.3.4`) with the identifiers beside them. A closing
-  "document data" block names the software version, the provider and model
-  that wrote the assessment, and states that the generated text is not an
-  opinion and must be validated by the compliance officer.
-- Stable identifiers are shown as labels wherever an operator reads them:
-  `orchestrator/i18n.py` gains `tv()` and a value catalogue (run status,
-  risk level, evidence category and relevance, collector outcome, STIX
-  types and relationship types, both languages), used by the report, the
-  daily index and the alert e-mail (`riesgo alto` instead of `riesgo high`,
-  `Estado: exitosa (success)`; the code stays next to the label, so mail
-  rules matching `high` keep working). Relevance uses its own feminine
-  labels in Spanish (alta, media, baja). The daily index writes
-  `label (\`code\`)` and re-renders earlier rows from their codes, so targets
-  reporting in different languages no longer mix languages in one file.
-  Evidence confidence is printed as a percentage with a note on what it is.
-  The persisted identifiers do not change (ADR-004).
-- Report and alert e-mail dates are printed in the operator's time zone with
-  the UTC instant beside them (`25/10/2026 00:20 -03 (2026-10-25T03:20:06Z)`,
-  `orchestrator/timefmt.py`); report directories stay named by the UTC day;
-  new setting
-  `ORCHESTRATOR_TIMEZONE` (IANA name, default `UTC`, unknown names fall back
-  to UTC with a warning). `Finding` carries `provider` and `model` so the
-  report can name them; `orchestrator.__version__` is the single source of
-  the version string (`api.VERSION` reads it).
-
-- Tavily collector: two more query templates per language look for the
-  record itself rather than the news cycle: a criminal conviction or
-  prosecution (money laundering, fraud) and administrative sanctions (fines,
-  disqualification, proceedings). The default call budget
-  (`max_calls_per_run`, `TAVILY_MAX_CALLS_PER_RUN` and the Helm chart's
-  `config.tavily.maxCallsPerRun`) rises from 3 to 5 so a single-term target
-  still covers every template; a single-term run now spends five Tavily
-  searches instead of three. Upgrade note: an `.env` copied from an earlier
-  `.env.example` still sets `TAVILY_MAX_CALLS_PER_RUN=3` and keeps capping
-  runs at three queries; raise it to 5. A unit test pins that no request
-  carries a recency filter (`topic`, `days`, `time_range`): a due-diligence
-  search looks back as far as the sources go.
-
-- Retention is off by default: `ORCHESTRATOR_RETENTION_DAYS` is now `0` in
-  `config.py`, `.env.example` and the Helm values (it was `90`). Runs, reports,
-  findings, qualified evidence and alert cases are the evidence a compliance
-  file is built on, and record-keeping rules count their retention in years,
-  so a fresh deployment no longer deletes anything on its own. When an
-  operator does set a period, each target keeps its first run that met an
-  alert rule (the alert case is where the review is recorded) and every run
-  after it, so the purged runs are always a contiguous prefix of the
-  target's evidence chain and `chain/verify` keeps reporting it intact;
-  a purged run's own `run-<id>` directory is removed even when its day
-  directory stays. The purge summary reports `runs_retained_protected`
-  instead of `alert_cases_deleted`, which is now always zero.
-
-### Fixed
-
-- `report.pdf` is legible again. The previous renderer cut every line into
-  40-character chunks and drew every second chunk past the right edge of the
-  page, so the download the console offers as "report in PDF" came out as
-  near-blank pages with truncated text. `orchestrator/reports/pdf.py` now
-  renders the report's Markdown subset (headings, bullets, pipe tables,
-  links, paragraphs) as a paged A4 document: text flows between the margins,
-  overlong URLs and STIX ids wrap character-wise, tables keep their header,
-  links keep their URL on paper, and every page carries a footer with the
-  page number in the report language. Core Helvetica covers Latin-1; a few
-  common characters outside it (dashes, ellipsis, arrows, curly quotes) are
-  transliterated and anything else degrades to `?` instead of aborting.
-  A table cell is capped at 900 characters so one row always fits on a
-  page (fpdf2 refuses taller rows; a 3,000-character URL or collector error
-  used to cost the whole PDF); the footer text comes from `orchestrator/i18n.py`.
-
-### Added
 
 - Personal accounts with revocable HttpOnly sessions, accountant/administrator
   permissions, local administrator provisioning and password/session controls.
@@ -386,6 +247,96 @@ from [SECURITY.md](SECURITY.md).
 
 ### Changed
 
+- The Spanish writing skill said it was "the portable version for projects in
+  `/home/caro/Dev`" and defaulted to Uruguayan Spanish, while the product
+  strings in `orchestrator/i18n.py` are neutral and formal («Revise los
+  campos»). It also framed itself as a Codex skill and never mentioned the
+  language policy, so an agent could have applied it to `docs/` and produced
+  Spanish where ADR-004 requires English. It now opens with a scope table
+  (which files are Spanish, which are not, `AGENTS.md` wins), states the
+  `es`/`en` pairing on every `i18n.py` key, the identifiers that stay English
+  (`risk_level`, `RunStatus`, STIX types) and the formatting placeholders that
+  must survive a rewrite, and gains the genre this repository actually uses:
+  executive reports, where evidence precedes the traffic light.
+
+- Publishing an image is now gated by the event, not only by the ref. Any event
+  that was not a pull request used to push, so a `workflow_dispatch` from a
+  feature branch published `:<branch>` and `:sha-<short>` to GHCR. Only a
+  `workflow_run` (main, already gated on CI success) and a `v*` tag push
+  publish; a pull request, a scheduled run and a manual dispatch build without
+  pushing. The header comment claimed "manual dispatch -> :sha only", which was
+  not what the file did.
+- The optional-image scan now also runs monthly, so an expired `.trivyignore`
+  acceptance turns into a red scheduled run on the first of the month instead
+  of waiting for a pull request that happens to touch those images. The
+  scheduled run scans only and never publishes an image. When it fails it
+  opens an issue (reusing the existing one) so the failure is not left on the
+  Actions tab.
+- CI runs on the self-hosted runner while GitHub-hosted minutes are exhausted.
+  Every workflow takes its runner from the repository variable `CI_RUNS_ON`;
+  unset, a private repository uses the runner labelled `osint` and a public
+  one `ubuntu-latest`. A new push to a pull request cancels the run it
+  replaces. Python 3.11 comes from a pinned uv release instead of
+  setup-python, and nothing is written outside `RUNNER_TEMP`: gitleaks, the
+  venv, the migration check database and the Helm renders. See *CI runner* in
+  CONTRIBUTING.md.
+
+- The daily report reads in the order a reviewer needs it: synthesis (risk
+  label with its code, what changed since the previous run, suggested pivots)
+  first, then the qualified evidence, then the new observables, then errors,
+  and only after that a technical annex with the collector status, the full
+  inventory with STIX identifiers and the relationships rendered as values
+  (`example.com -> 1.2.3.4`) with the identifiers beside them. A closing
+  "document data" block names the software version, the provider and model
+  that wrote the assessment, and states that the generated text is not an
+  opinion and must be validated by the compliance officer.
+- Stable identifiers are shown as labels wherever an operator reads them:
+  `orchestrator/i18n.py` gains `tv()` and a value catalogue (run status,
+  risk level, evidence category and relevance, collector outcome, STIX
+  types and relationship types, both languages), used by the report, the
+  daily index and the alert e-mail (`riesgo alto` instead of `riesgo high`,
+  `Estado: exitosa (success)`; the code stays next to the label, so mail
+  rules matching `high` keep working). Relevance uses its own feminine
+  labels in Spanish (alta, media, baja). The daily index writes
+  `label (\`code\`)` and re-renders earlier rows from their codes, so targets
+  reporting in different languages no longer mix languages in one file.
+  Evidence confidence is printed as a percentage with a note on what it is.
+  The persisted identifiers do not change (ADR-004).
+- Report and alert e-mail dates are printed in the operator's time zone with
+  the UTC instant beside them (`25/10/2026 00:20 -03 (2026-10-25T03:20:06Z)`,
+  `orchestrator/timefmt.py`); report directories stay named by the UTC day;
+  new setting
+  `ORCHESTRATOR_TIMEZONE` (IANA name, default `UTC`, unknown names fall back
+  to UTC with a warning). `Finding` carries `provider` and `model` so the
+  report can name them; `orchestrator.__version__` is the single source of
+  the version string (`api.VERSION` reads it).
+
+- Tavily collector: two more query templates per language look for the
+  record itself rather than the news cycle: a criminal conviction or
+  prosecution (money laundering, fraud) and administrative sanctions (fines,
+  disqualification, proceedings). The default call budget
+  (`max_calls_per_run`, `TAVILY_MAX_CALLS_PER_RUN` and the Helm chart's
+  `config.tavily.maxCallsPerRun`) rises from 3 to 5 so a single-term target
+  still covers every template; a single-term run now spends five Tavily
+  searches instead of three. Upgrade note: an `.env` copied from an earlier
+  `.env.example` still sets `TAVILY_MAX_CALLS_PER_RUN=3` and keeps capping
+  runs at three queries; raise it to 5. A unit test pins that no request
+  carries a recency filter (`topic`, `days`, `time_range`): a due-diligence
+  search looks back as far as the sources go.
+
+- Retention is off by default: `ORCHESTRATOR_RETENTION_DAYS` is now `0` in
+  `config.py`, `.env.example` and the Helm values (it was `90`). Runs, reports,
+  findings, qualified evidence and alert cases are the evidence a compliance
+  file is built on, and record-keeping rules count their retention in years,
+  so a fresh deployment no longer deletes anything on its own. When an
+  operator does set a period, each target keeps its first run that met an
+  alert rule (the alert case is where the review is recorded) and every run
+  after it, so the purged runs are always a contiguous prefix of the
+  target's evidence chain and `chain/verify` keeps reporting it intact;
+  a purged run's own `run-<id>` directory is removed even when its day
+  directory stays. The purge summary reports `runs_retained_protected`
+  instead of `alert_cases_deleted`, which is now always zero.
+
 - README (both languages) shows the operator dashboard: the overview and the
   run workspace with qualified evidence, re-rendered from the showcase replay
   at 1366 px in each language (`docs/img/`), after the dossiers and accounts
@@ -530,6 +481,45 @@ from [SECURITY.md](SECURITY.md).
 - Dead `SPIDERFOOT_CORRELATION` key from `.env.example` (read by nothing).
 
 ### Fixed
+
+- STIX objects no longer get a fresh `modified` on every run. `stix2` defaults
+  `created` and `modified` to `now()`, which the normaliser never overrode for
+  Notes, Relationships and the Indicator fallback, so re-ingesting an unchanged
+  finding handed OpenCTI a new version of every Note each time and the
+  millisecond rule of the OASIS best practices (exactly three sub-second
+  digits) was broken. Both are pinned to the collection time now, truncated to
+  milliseconds, so the same `CollectorResult` normalises to identical objects.
+
+- The MISP image could not be built: `.dockerignore` excluded `deploy/` while
+  `Dockerfile.misp` copies its two entrypoints from `deploy/misp`, so the build
+  stopped at `entrypoint_fpm.sh: not found`. Nothing built that Dockerfile, so
+  the breakage was invisible until now.
+
+- `Dockerfile.socialosint` ships the transitive packages with published CVEs
+  pinned instead of whatever the upstream requirements resolve to: 43 fixable
+  CRITICAL/HIGH findings became 1. Most of them were the `wheel` and
+  `jaraco.context` copies vendored inside `setuptools/_vendor`, so bumping
+  setuptools is what removed them; upgrading those two on their own left the
+  vulnerable files in the image. The remaining HIGH (`oauthlib`) is accepted
+  in `.trivyignore` with an expiry date and a recorded reason: the vulnerable
+  code is oauthlib's authorization-server half and this image only ever acts
+  as an OAuth client, so it cannot fire. Upgrading it is separately blocked by
+  `tweepy`'s `oauthlib<4` requirement.
+
+- `report.pdf` is legible again. The previous renderer cut every line into
+  40-character chunks and drew every second chunk past the right edge of the
+  page, so the download the console offers as "report in PDF" came out as
+  near-blank pages with truncated text. `orchestrator/reports/pdf.py` now
+  renders the report's Markdown subset (headings, bullets, pipe tables,
+  links, paragraphs) as a paged A4 document: text flows between the margins,
+  overlong URLs and STIX ids wrap character-wise, tables keep their header,
+  links keep their URL on paper, and every page carries a footer with the
+  page number in the report language. Core Helvetica covers Latin-1; a few
+  common characters outside it (dashes, ellipsis, arrows, curly quotes) are
+  transliterated and anything else degrades to `?` instead of aborting.
+  A table cell is capped at 900 characters so one row always fits on a
+  page (fpdf2 refuses taller rows; a 3,000-character URL or collector error
+  used to cost the whole PDF); the footer text comes from `orchestrator/i18n.py`.
 
 - Documentation of LLM provider selection: the per-target `llm` field (default
   `local`, Ollama) chooses the provider, and `LLM_PROVIDER` is a global switch
