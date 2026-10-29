@@ -1,5 +1,8 @@
 # OSINT Orchestrator
 
+[![CI](https://github.com/careb36/osint-orchestrator-oss/actions/workflows/ci.yml/badge.svg)](https://github.com/careb36/osint-orchestrator-oss/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 > [English](README.md)
 
 Debida diligencia en fuentes abiertas para equipos de cumplimiento PLA/FT y

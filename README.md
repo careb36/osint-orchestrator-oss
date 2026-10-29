@@ -1,5 +1,8 @@
 # OSINT Orchestrator
 
+[![CI](https://github.com/careb36/osint-orchestrator-oss/actions/workflows/ci.yml/badge.svg)](https://github.com/careb36/osint-orchestrator-oss/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 > [Español](README.es.md)
 
 Open-source due diligence for AML/CFT compliance teams and non-financial
