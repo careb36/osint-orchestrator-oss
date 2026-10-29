@@ -38,8 +38,22 @@ RUN git clone https://github.com/bm-github/owasp-social-osint-agent /app \
 
 WORKDIR /app
 
-# Install core + web-server dependencies
-RUN pip install --no-cache-dir -r requirements.txt -r requirements-web.txt
+# Install core + web-server dependencies, then re-pin the transitive packages
+# that carry a published fix. Upstream pins them loosely (or not at all), so the
+# tree resolves to versions with known CVEs; this is the one place they can be
+# moved without forking that repository.
+#
+# setuptools is the entry that matters most: its vendored wheel and
+# jaraco.context are what Trivy reports, so installing those two as top-level
+# packages leaves the vulnerable copies shipped inside setuptools/_vendor
+# untouched. Bumping setuptools is what actually replaces them.
+#
+# oauthlib is deliberately absent: tweepy 4.17 requires oauthlib<4, so the
+# oauthlib 4.0.0 fix is not installable until upstream moves tweepy.
+ARG PIP_SECURITY_UPGRADES="setuptools==84.2.1 pillow==13.0.0"
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-web.txt \
+    && pip install --no-cache-dir --upgrade ${PIP_SECURITY_UPGRADES} \
+    && pip check
 
 EXPOSE 8000
 

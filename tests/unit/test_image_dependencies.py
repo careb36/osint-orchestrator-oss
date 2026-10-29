@@ -101,12 +101,18 @@ def test_optional_image_is_built_and_scanned_in_ci(dockerfile: str) -> None:
     workflow = yaml.safe_load(DOCKER_PUBLISH)
     job = workflow["jobs"]["optional-images"]
     matrix = job["strategy"]["matrix"]["include"]
-    assert dockerfile in {entry["dockerfile"] for entry in matrix}, (
+    entry = next((e for e in matrix if e["dockerfile"] == dockerfile), None)
+    assert entry, (
         f"{dockerfile} is not in the scan matrix; it would be built by nobody, "
         "which is the gap this job closes"
     )
+    # Every image states whether a new finding fails the PR. A missing flag
+    # silently makes the scan advisory, which is the state this job replaced.
+    assert isinstance(entry["blocking"], bool), f"{dockerfile} has no blocking flag"
     scanned = [step for step in job["steps"] if "trivy-action" in (step.get("uses") or "")]
     assert scanned, "optional images are built but never scanned"
+    # The exit code must follow the flag, or the flag is decorative.
+    assert any("matrix.blocking" in str(step.get("with", {}).get("exit-code")) for step in scanned)
 
 
 @pytest.mark.parametrize("dockerfile", ["Dockerfile.misp", "Dockerfile.socialosint"])
@@ -130,3 +136,21 @@ def test_dockerignore_keeps_what_dockerfile_misp_copies() -> None:
             f"Dockerfile.misp copies {source}, but .dockerignore excludes "
             f"{sorted(needed & set(rules))}; the build fails with 'not found'"
         )
+
+
+def test_socialosint_pins_the_security_upgrades_it_needs() -> None:
+    """The upstream tree resolves to versions with published CVEs.
+
+    Dockerfile.socialosint is the only place they can be moved without forking
+    that repository, so the pin must stay in the same RUN as the install (a
+    later layer would leave the vulnerable files shipped) and it must carry an
+    argument override so a rebuild can move past it without an edit.
+    """
+    dockerfile = (REPO_ROOT / "Dockerfile.socialosint").read_text(encoding="utf-8")
+    assert "ARG PIP_SECURITY_UPGRADES=" in dockerfile
+    assert "--upgrade ${PIP_SECURITY_UPGRADES}" in dockerfile
+    # setuptools carries the vendored wheel/jaraco.context Trivy reports;
+    # installing those two on their own does not remove the vendored copies.
+    assert "setuptools==" in dockerfile
+    # Never let a dependency check failure ship a broken tree.
+    assert "pip check" in dockerfile
