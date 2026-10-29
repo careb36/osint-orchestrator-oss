@@ -180,3 +180,23 @@ def test_every_trivy_acceptance_expires() -> None:
         ".trivyignore" in str(step.get("with", {}).get("trivyignores", ""))
         for step in yaml.safe_load(DOCKER_PUBLISH)["jobs"]["optional-images"]["steps"]
     ), ".trivyignore exists but the scan never reads it"
+
+
+def test_suppressed_findings_stay_visible_in_the_scan_log() -> None:
+    """An accepted finding must be printed, not silently dropped.
+
+    `hide-progress: true` makes the action set TRIVY_QUIET, which also silences
+    the "Some vulnerabilities have been ignored/suppressed" notice. A reviewer
+    then sees a green scan with no trace of what was accepted, which is worse
+    than a red one: the exception is invisible. TRIVY_SHOW_SUPPRESSED restores
+    the "Suppressed Vulnerabilities" table without changing the exit code.
+    """
+    steps = yaml.safe_load(DOCKER_PUBLISH)["jobs"]["optional-images"]["steps"]
+    scans = [s for s in steps if "trivy-action" in str(s.get("uses", ""))]
+    assert scans, "no Trivy step in the optional-images job"
+    for step in scans:
+        env = step.get("env") or {}
+        assert str(env.get("TRIVY_SHOW_SUPPRESSED")).lower() == "true", (
+            f"{step.get('name')} hides progress, which suppresses the notice "
+            "that findings were accepted; set TRIVY_SHOW_SUPPRESSED: 'true'"
+        )

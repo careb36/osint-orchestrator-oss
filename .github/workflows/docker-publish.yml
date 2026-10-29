@@ -259,6 +259,15 @@ jobs:
 
       - name: Scan for fixable CRITICAL and HIGH vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        # TRIVY_SHOW_SUPPRESSED is not an input of this action version, but
+        # Trivy reads it from the environment. Without it `hide-progress` sets
+        # TRIVY_QUIET, which silences the notice that anything was ignored, and
+        # a reviewer sees a green scan with no sign of an accepted finding. With
+        # it the log lists them in a "Suppressed Vulnerabilities" table (status
+        # `ignored`) while the exit code still counts only unsuppressed
+        # findings, so a valid acceptance stays green and a new finding fails.
+        env:
+          TRIVY_SHOW_SUPPRESSED: "true"
         with:
           image-ref: ${{ matrix.image }}
           format: table
