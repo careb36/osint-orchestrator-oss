@@ -556,6 +556,30 @@ loopback-only unauthenticated sidecars, the unsigned webhook by default, and
 the residual risk that a schema-valid model reply skews a risk level — each
 with the hardening step a shared-infrastructure deployment must add.
 
+## Accepted container findings
+
+`.trivyignore` holds the findings that were reviewed and deliberately not fixed.
+Every entry carries an `exp:` date, so the acceptance expires instead of being
+inherited by every later run: on that date Trivy stops honouring the line, the
+finding is reported again and the scan fails.
+
+The scan runs on every pull request that touches a Dockerfile and monthly on a
+schedule, which is what turns the expiry into a deadline. When it fails outside
+a pull request, the `notify-scan-failure` job opens an issue with the link to
+the run and comments on that issue on every later failure, so a standing
+problem keeps one thread instead of a new issue per month.
+
+The accepted set is currently one entry:
+
+| Finding | Image | Why it is accepted | Expires |
+| --- | --- | --- | --- |
+| `CVE-2026-49272` (oauthlib) | SocialOSINT | The vulnerable code is `DeviceCodeGrant.validate_token_request`, in the authorization-server half of oauthlib. The image is only ever an OAuth client: nothing instantiates `Endpoints` or `Server`, `requests_oauthlib` imports client-side symbols only, and tweepy reaches `oauthlib.oauth1.Client` only in its asynchronous client, which is unused. The fix is 4.0.0 and tweepy 4.17 requires `oauthlib<4`, so it is not installable yet | 2027-04-30 |
+
+Renew or remove an entry only with a new reason. The scan prints every accepted
+finding in a `Suppressed Vulnerabilities` table on each run, so the decision is
+visible in the log of the pull request that touched the image, not only in this
+file.
+
 ## Release checklist and support SOP
 
 A release is a `vX.Y.Z` tag on `main`: the image workflow publishes

@@ -104,7 +104,14 @@ jobs:
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6
         with:
           context: .
-          push: ${{ github.event_name != 'pull_request' }}
+          # Only main and version tags publish. `event_name != 'pull_request'`
+          # also pushed on any other event: a workflow_dispatch from a feature
+          # branch published `:<branch>` and `:sha-<short>` to GHCR, tags no
+          # commit on main vouches for. main reaches this job as a workflow_run.
+          push: >-
+            ${{ github.event_name == 'workflow_run' ||
+                github.ref == 'refs/heads/main' ||
+                startsWith(github.ref, 'refs/tags/v') }}
           load: ${{ github.event_name == 'pull_request' }}
           tags: ${{ github.event_name == 'pull_request' && 'osint-orchestrator:smoke' || steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

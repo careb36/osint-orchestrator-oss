@@ -232,17 +232,32 @@ def _job_condition(job: str) -> str:
 def test_the_scheduled_run_scans_but_never_publishes() -> None:
     """A scheduled run must not push an image.
 
-    The image job publishes whenever the event is not a pull request. A
-    schedule runs from the default branch, so without this guard every monthly
-    run would publish a new :main image with no commit behind it.
+    A schedule runs from the default branch, so without this guard every
+    monthly run would publish a new :main image with no commit behind it.
     """
     assert "github.event_name != 'schedule'" in _job_condition("image"), (
         "the image job would publish a :main image on every scheduled run"
     )
-    push_step_condition = "github.event_name != 'pull_request'"
-    assert push_step_condition in DOCKER_PUBLISH, (
-        "the publish step no longer keys off the event; recheck that a scheduled run cannot push"
+
+
+def test_only_main_and_version_tags_publish() -> None:
+    """Publishing is a property of the ref, not of the event.
+
+    `event_name != 'pull_request'` pushed for every other event, so a
+    workflow_dispatch from a feature branch published `:<branch>` and
+    `:sha-<short>` to GHCR - tags no commit on main vouches for. The condition
+    has to name the refs allowed to publish.
+    """
+    push_step = next(
+        step
+        for step in DOCKER_PUBLISH_YAML["jobs"]["image"]["steps"]
+        if "push" in (step.get("with") or {})
     )
+    push = " ".join(str(push_step["with"]["push"]).split())
+    assert "refs/heads/main" in push, (
+        f"the publish condition {push!r} does not restrict publishing to main"
+    )
+    assert "refs/tags/v" in push, f"the publish condition {push!r} drops version tags"
 
 
 def test_the_scheduled_run_includes_the_optional_image_scan() -> None:
