@@ -21,8 +21,11 @@ from [SECURITY.md](SECURITY.md).
   CRITICAL/HIGH findings became 1. Most of them were the `wheel` and
   `jaraco.context` copies vendored inside `setuptools/_vendor`, so bumping
   setuptools is what removed them; upgrading those two on their own left the
-  vulnerable files in the image. The remaining HIGH is `oauthlib`, which
-  cannot move until upstream relaxes `tweepy`'s `oauthlib<4` requirement.
+  vulnerable files in the image. The remaining HIGH (`oauthlib`) is accepted
+  in `.trivyignore` with an expiry date and a recorded reason: the vulnerable
+  code is oauthlib's authorization-server half and this image only ever acts
+  as an OAuth client, so it cannot fire. Upgrading it is separately blocked by
+  `tweepy`'s `oauthlib<4` requirement.
 
 ### Added
 

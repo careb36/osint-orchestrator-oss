@@ -211,9 +211,11 @@ jobs:
     # `blocking` is per image because the two are in different states:
     #   - socialosint resolves clean once Dockerfile.socialosint pins its
     #     transitive CVEs, so a new fixable finding is a regression here and
-    #     fails the PR. The one finding no change here can clear (oauthlib, held
-    #     back by tweepy's `oauthlib<4`) is accepted in .trivyignore with an
-    #     expiry date, so it cannot be forgotten.
+    #     fails the PR. The one finding no change here can clear (oauthlib) is
+    #     accepted in .trivyignore, where the reason is recorded: the
+    #     vulnerable code is oauthlib's authorization-server half and this
+    #     image is only ever an OAuth client. The entry expires, so the
+    #     acceptance is re-examined rather than inherited.
     #   - MISP cannot be clean: its base is the newest v2.4 tag and still
     #     ships jmespath 2.8.0 (CVE-2026-54133, fixed in 2.9.1, no tag carries
     #     it). Blocking would leave the job red permanently, which reads as
