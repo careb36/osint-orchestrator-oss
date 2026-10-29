@@ -122,6 +122,8 @@ and phased definition of done are in `ui/docs/`; the decision is ADR-010.
 | [009](adr/ADR-009-documentation-language.md) | Documentation in English, README in English and Spanish |
 | [010](adr/ADR-010-operator-dashboard.md) | Operator dashboard as a React SPA served by the API, API-key access |
 | [011](adr/ADR-011-external-stix-producers.md) | External STIX 2.1 producers as an intake path (`ingest_bundle`, `POST /bundles`) |
+| [012](adr/ADR-012-personal-compliance-workflow.md) | Personal compliance workflow: identities, accounts, dossiers, immutable report versions |
+| [013](adr/ADR-013-openosint-fork-and-upstream-drift.md) | OpenOSINT fork pin, and explicit monitoring of the three pins Dependabot cannot see |
 
 ## Third-party tools
 
