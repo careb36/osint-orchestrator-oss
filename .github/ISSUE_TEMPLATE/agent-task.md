@@ -1,9 +1,7 @@
 ---
 name: Agent task
 about: A self-contained task to delegate to the coding agent (assign it to Copilot to start it)
-title: ""
 labels: agent-task
-assignees: ""
 ---
 
 <!--
