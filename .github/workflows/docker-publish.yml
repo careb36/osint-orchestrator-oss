@@ -310,3 +310,57 @@ jobs:
           version: v0.76.1
           hide-progress: true
           timeout: 15m0s
+
+  # The monthly run above only turns an expired acceptance into a red run. A
+  # red scheduled run is easy to miss on the Actions tab, so this opens an
+  # issue with the run link when the scan fails. It reports, it does not gate:
+  # no ruleset lists it as a required check, so it cannot block a merge.
+  notify-scan-failure:
+    name: Open an issue when the scan fails
+    needs: optional-images
+    if: >-
+      failure() &&
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    runs-on: ${{ fromJSON(vars.CI_RUNS_ON || (github.event.repository.private && '["self-hosted","linux","x64","osint"]' || '"ubuntu-latest"')) }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      # Pinned like every other action here. `gh api` is used instead of
+      # actions/github-script because gh is already on the runner and one fewer
+      # third-party action is one fewer supply-chain surface.
+      - name: Report the failure
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Optional image scan failed: expired acceptance or new finding"
+          # One issue at a time: a recurring monthly failure must not open a new
+          # issue every month.
+          # Search a short marker, not the whole title: the title contains a
+          # colon, and GitHub search treats those as qualifiers.
+          existing=$(gh issue list --state open --search 'in:title "Optional image scan failed"' \
+            --json number --jq '.[0].number // empty')
+          body=$(printf '%s\n' \
+            "The optional-image scan failed on a scheduled run." \
+            "" \
+            "Most likely causes: an \`exp:\` date in \`.trivyignore\` has passed, so the" \
+            "finding it accepted is live again, or a new fixable CRITICAL/HIGH finding" \
+            "appeared in \`Dockerfile.misp\` or \`Dockerfile.socialosint\`." \
+            "" \
+            "Run: $RUN_URL" \
+            "" \
+            "The scan prints the accepted findings in a \"Suppressed Vulnerabilities\"" \
+            "table, so check whether the failure is a new one before touching" \
+            "\`.trivyignore\`." \
+            "" \
+            "_Opened by a workflow on behalf of the maintainer. Close it once the" \
+            "acceptance is renewed or the finding is fixed; the next failure reopens" \
+            "the conversation rather than the issue._")
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body" --label security
+          fi

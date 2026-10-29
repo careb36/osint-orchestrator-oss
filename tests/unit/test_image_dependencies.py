@@ -265,3 +265,31 @@ def test_a_monthly_run_cannot_pile_up_or_cancel_commit_work() -> None:
     assert "scheduled-optional-image-scan" in group, (
         "scheduled runs share the run_id group and can accumulate"
     )
+
+
+def test_a_failed_scheduled_scan_reports_somewhere() -> None:
+    """A red monthly run on the Actions tab is not a notification.
+
+    The schedule exists so an expired acceptance is noticed on a calendar. If
+    the only signal is a red run in a tab nobody watches, the deadline fires
+    and nothing happens. The reporter must therefore be able to write an issue
+    and must only fire for the unattended events.
+    """
+    job = DOCKER_PUBLISH_YAML["jobs"].get("notify-scan-failure")
+    assert job is not None, "a scheduled scan failure must open an issue"
+    assert job["permissions"].get("issues") == "write"
+    condition = " ".join(str(job["if"]).split())
+    assert "failure()" in condition, "it would run even when the scan passes"
+    assert "github.event_name == 'schedule'" in condition
+    # A pull request already shows the failure on the PR; an issue would be noise.
+    assert "pull_request" not in condition
+    assert job["needs"] == "optional-images"
+
+
+def test_the_reporter_does_not_open_a_new_issue_every_month() -> None:
+    """A recurring failure must keep one issue, not one per run."""
+    run = DOCKER_PUBLISH_YAML["jobs"]["notify-scan-failure"]["steps"][0]["run"]
+    assert "issue list" in run and "issue comment" in run, (
+        "the reporter must look for an existing issue before creating one"
+    )
+    assert "issue create" in run
