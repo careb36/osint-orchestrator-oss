@@ -1,10 +1,8 @@
 name: tmp GHCR cleanup
 on:
-  workflow_dispatch:
-    inputs:
-      digest_or_tag:
-        description: Tag to delete (exact match)
-        required: true
+  pull_request:
+    paths:
+      - .github/workflows/tmp-ghcr-cleanup.yml
 permissions:
   contents: read
   packages: write
@@ -13,20 +11,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: List then delete the matching version
+      - name: List versions, then delete the stray branch tags
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TARGET: ${{ inputs.digest_or_tag }}
         run: |
           set -u
           pkg=osint-orchestrator-oss
-          echo "== versions visible to GITHUB_TOKEN:"
+          echo "== all versions:"
           gh api "/user/packages/container/$pkg/versions?per_page=100" \
-            --jq '.[]|"\(.id)\t\(.metadata.container.tags|join(","))\t\(.updated_at)"' || true
-          ids=$(gh api "/user/packages/container/$pkg/versions?per_page=100" \
-            --jq ".[] | select(.metadata.container.tags | index(\"$TARGET\")) | .id")
-          echo "== matching version ids for tag $TARGET: ${ids:-none}"
-          for id in $ids; do
-            echo "deleting version $id"
-            gh api -X DELETE "/user/packages/container/$pkg/versions/$id" && echo "deleted $id"
+            --jq '.[]|"\(.id)\t\(.metadata.container.tags|join(","))\t\(.updated_at)"' || echo "LIST FAILED"
+          for t in scan-optional-images sha-b1d2fc6; do
+            ids=$(gh api "/user/packages/container/$pkg/versions?per_page=100" \
+              --jq ".[] | select(.metadata.container.tags | index(\"$t\")) | .id")
+            echo "== tag $t -> ids: ${ids:-none}"
+            for id in $ids; do
+              gh api -X DELETE "/user/packages/container/$pkg/versions/$id" && echo "deleted version $id ($t)"
+            done
           done
+          echo "== remaining:"
+          gh api "/user/packages/container/$pkg/versions?per_page=100" \
+            --jq '.[]|"\(.id)\t\(.metadata.container.tags|join(","))"\t\(.updated_at)' | grep -E "b1d2fc6|scan-optional" || echo "none of the stray tags remain"
