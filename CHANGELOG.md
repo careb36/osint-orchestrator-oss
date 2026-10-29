@@ -95,6 +95,16 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- Weekly security baseline (`security-baseline.yml`): gitleaks over the full
+  history, Semgrep at ERROR severity and a Trivy dependency scan, each pinned
+  or checksum-verified and each uploading SARIF as an artifact. It does not
+  gate pull requests. The dependency scan resolves the Python tree into a
+  `requirements.txt` before scanning, because Trivy reads lockfiles and not
+  `pyproject.toml`: without that step it audited only the dashboard's
+  `package-lock.json` and reported a clean green over an unaudited Python
+  dependency set. The step fails if fewer than 50 packages resolve, so the
+  zero-coverage case cannot pass silently again.
+
 - `classification` per target in `targets.yaml`: `osint` (the default; open
   sources only, may go to the cloud provider `llm` names) or `restricted` (an
   investigation that mixes in material that must stay on premises). A
