@@ -11,6 +11,14 @@ from [SECURITY.md](SECURITY.md).
 
 ### Fixed
 
+- STIX objects no longer get a fresh `modified` on every run. `stix2` defaults
+  `created` and `modified` to `now()`, which the normaliser never overrode for
+  Notes, Relationships and the Indicator fallback, so re-ingesting an unchanged
+  finding handed OpenCTI a new version of every Note each time and the
+  millisecond rule of the OASIS best practices (exactly three sub-second
+  digits) was broken. Both are pinned to the collection time now, truncated to
+  milliseconds, so the same `CollectorResult` normalises to identical objects.
+
 - The MISP image could not be built: `.dockerignore` excluded `deploy/` while
   `Dockerfile.misp` copies its two entrypoints from `deploy/misp`, so the build
   stopped at `entrypoint_fpm.sh: not found`. Nothing built that Dockerfile, so
@@ -29,6 +37,18 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- [docs/stix-best-practices.md](docs/stix-best-practices.md) maps the
+  [OASIS STIX 2.1 Best Practice Guide v1.0.0](https://www.cisa.gov/resources-tools/resources/oasis-stix-21-best-practice-guide)
+  to this normaliser, practice by practice, with the file or test that holds
+  each one, and records the four it does differently on purpose (labels over
+  custom properties, Notes emitted by the creator, no common-object repository
+  ids, no ATT&CK attribution).
+- Collector Identity objects carry `contact_information` (best practice §3.4),
+  so a consumer holding a dangling reference knows where to ask, and Notes
+  carry `authors` (§5.8) because `created_by_ref` names the organisation rather
+  than the tool. A Tavily Note that cites a page now publishes it in
+  `external_references` with the host as `source_name` (§4.1), where OpenCTI
+  renders it as a link, instead of leaving the URL buried in the note text.
 - CI builds and scans `Dockerfile.misp` and `Dockerfile.socialosint`. Both are
   opt-in compose profiles that no workflow touched, so Trivy only ever saw the
   orchestrator image. The SocialOSINT scan is blocking now that the image is

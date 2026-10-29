@@ -16,6 +16,7 @@ New to the project? Start with the [README](../README.md), then read
 | [Operations](operations.md) | You run it: metrics, logs, alerts, retention, backups, troubleshooting |
 | [Deploy](deploy.md) | You are taking it to production, with Compose or the Helm chart |
 | [Compliance review workflow](compliance-workflow.md) | You use the professional identity, dossier and review features, or you are upgrading an automation-only install |
+| [STIX best practices](stix-best-practices.md) | You are changing the normaliser, or a consumer reads your bundles and you want to know how they interpret them |
 | [Threat model](threat-model.md) | You are reviewing the security posture or assessing a change against it |
 
 ## Decisions

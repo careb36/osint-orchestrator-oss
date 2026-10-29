@@ -33,6 +33,9 @@ One run, in order (`orchestrator/pipeline.py`):
    (category, relevance, confidence, rationale) on the fast model route.
 3. **Normalise and ingest.** Results become STIX 2.1 objects with deterministic
    ids and are pushed to OpenCTI. Failed bundles go to an outbox and are retried.
+   Which OASIS best practices shape those objects, and the few this project
+   deliberately does differently, are recorded in
+   [STIX best practices](stix-best-practices.md).
 4. **Delta.** Observables not seen before for the target are marked new.
 5. **Synthesise.** The reasoning model writes a summary, a risk level with its
    justification, and suggested pivots, citing the qualified evidence it uses.
