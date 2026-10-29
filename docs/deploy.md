@@ -47,6 +47,19 @@ passwords, even for a sink-off install.
 per target and are written into every report. List only entities you are
 authorised in writing to assess.
 
+### Local changes to the stack
+
+Compose auto-loads `docker-compose.override.yml` with no `-f` flag, so anything
+you put there applies without you asking. That is convenient for a deviating
+pin or a port on your machine, and wrong to commit: it would change the stack
+for everyone. It is git-ignored for that reason. Keep local-only changes there
+and the tracked `docker-compose.yml` untouched.
+
+To change the stack deliberately for everyone, edit `docker-compose.yml` and say
+why in the pull request. The tracked files must keep passing
+`tests/unit/test_compose_hardening.py`: loopback-only ports, and every image
+pinned to a patch release or a digest.
+
 ## Start and verify
 
 ```bash
