@@ -29,8 +29,8 @@ pip install -e ".[dev]"
 pip install -e ".[dev,llm]"
 
 # Quality gates — the same commands CI runs
-ruff check orchestrator/ tests/unit/
-ruff format --check orchestrator/ tests/unit/
+ruff check orchestrator/ tests/
+ruff format --check orchestrator/ tests/
 mypy orchestrator/ --ignore-missing-imports
 pytest tests/unit/ -v -m "not integration"
 
