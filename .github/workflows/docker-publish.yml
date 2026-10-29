@@ -2,10 +2,11 @@ name: Publish image
 
 # Builds the orchestrator image and pushes it to GHCR so the Helm chart's
 # default `image.repository` (ghcr.io/careb36/osint-orchestrator-oss) resolves.
+# Exactly two paths publish, and both are gated:
 #   - CI passes on main  → :main and :sha-<short>
 #   - tag v*             → :<version>, :latest
-#   - manual dispatch    → :sha-<short> only
-# Pull requests only build (no push) to catch a broken Dockerfile early.
+# Nothing else publishes. A pull request, a scheduled run and a manual
+# dispatch all build without pushing; the scan is what those runs are for.
 #
 # Push to main is gated: the image is only built after the CI workflow
 # (lint-and-test + helm-chart) succeeds on that commit.
@@ -104,14 +105,16 @@ jobs:
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6
         with:
           context: .
-          # Only main and version tags publish. `event_name != 'pull_request'`
-          # also pushed on any other event: a workflow_dispatch from a feature
-          # branch published `:<branch>` and `:sha-<short>` to GHCR, tags no
-          # commit on main vouches for. main reaches this job as a workflow_run.
+          # Publishing is a property of the ref, and only two paths qualify:
+          # a `workflow_run` (main, which the job condition already gated on
+          # CI success) and a `v*` tag push. Keying off "not a pull request"
+          # also pushed on any other event - a workflow_dispatch on a feature
+          # branch published `:<branch>` and `:sha-<short>`, and a dispatch on
+          # main would publish :main without passing the CI gate.
           push: >-
             ${{ github.event_name == 'workflow_run' ||
-                github.ref == 'refs/heads/main' ||
-                startsWith(github.ref, 'refs/tags/v') }}
+                (github.event_name == 'push' &&
+                 startsWith(github.ref, 'refs/tags/v')) }}
           load: ${{ github.event_name == 'pull_request' }}
           tags: ${{ github.event_name == 'pull_request' && 'osint-orchestrator:smoke' || steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

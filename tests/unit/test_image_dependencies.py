@@ -240,13 +240,14 @@ def test_the_scheduled_run_scans_but_never_publishes() -> None:
     )
 
 
-def test_only_main_and_version_tags_publish() -> None:
-    """Publishing is a property of the ref, not of the event.
+def test_only_green_ci_on_main_and_version_tags_publish() -> None:
+    """Publishing is gated by the event, not just by the ref.
 
     `event_name != 'pull_request'` pushed for every other event, so a
     workflow_dispatch from a feature branch published `:<branch>` and
-    `:sha-<short>` to GHCR - tags no commit on main vouches for. The condition
-    has to name the refs allowed to publish.
+    `:sha-<short>` to GHCR - tags no commit vouches for. Allowing any
+    `refs/heads/main` was still wrong: a dispatch from main would have
+    published :main without passing the CI gate that workflow_run enforces.
     """
     push_step = next(
         step
@@ -254,10 +255,18 @@ def test_only_main_and_version_tags_publish() -> None:
         if "push" in (step.get("with") or {})
     )
     push = " ".join(str(push_step["with"]["push"]).split())
-    assert "refs/heads/main" in push, (
-        f"the publish condition {push!r} does not restrict publishing to main"
+    assert "github.event_name == 'workflow_run'" in push, (
+        f"the publish condition {push!r} no longer accepts the gated main path"
+    )
+    assert "github.event_name == 'push'" in push, (
+        f"the publish condition {push!r} does not require a tag push; another "
+        "event on main would publish without the CI gate"
     )
     assert "refs/tags/v" in push, f"the publish condition {push!r} drops version tags"
+    assert "refs/heads/main" not in push, (
+        f"the publish condition {push!r} keys off the main ref, which a manual "
+        "dispatch also satisfies"
+    )
 
 
 def test_the_scheduled_run_includes_the_optional_image_scan() -> None:

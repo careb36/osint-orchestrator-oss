@@ -37,11 +37,13 @@ from [SECURITY.md](SECURITY.md).
 
 ### Changed
 
-- Publishing an image is now tied to the ref, not to the event. Any event that
-  was not a pull request used to push, so a `workflow_dispatch` from a feature
-  branch published `:<branch>` and `:sha-<short>` to GHCR. Only `main` (which
-  arrives as a `workflow_run`) and `v*` tags publish; every other run builds
-  without pushing.
+- Publishing an image is now gated by the event, not only by the ref. Any event
+  that was not a pull request used to push, so a `workflow_dispatch` from a
+  feature branch published `:<branch>` and `:sha-<short>` to GHCR. Only a
+  `workflow_run` (main, already gated on CI success) and a `v*` tag push
+  publish; a pull request, a scheduled run and a manual dispatch build without
+  pushing. The header comment claimed "manual dispatch -> :sha only", which was
+  not what the file did.
 - The optional-image scan now also runs monthly, so an expired `.trivyignore`
   acceptance turns into a red scheduled run on the first of the month instead
   of waiting for a pull request that happens to touch those images. The
