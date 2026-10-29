@@ -1,0 +1,32 @@
+name: tmp GHCR cleanup
+on:
+  workflow_dispatch:
+    inputs:
+      digest_or_tag:
+        description: Tag to delete (exact match)
+        required: true
+permissions:
+  contents: read
+  packages: write
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: List then delete the matching version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET: ${{ inputs.digest_or_tag }}
+        run: |
+          set -u
+          pkg=osint-orchestrator-oss
+          echo "== versions visible to GITHUB_TOKEN:"
+          gh api "/user/packages/container/$pkg/versions?per_page=100" \
+            --jq '.[]|"\(.id)\t\(.metadata.container.tags|join(","))\t\(.updated_at)"' || true
+          ids=$(gh api "/user/packages/container/$pkg/versions?per_page=100" \
+            --jq ".[] | select(.metadata.container.tags | index(\"$TARGET\")) | .id")
+          echo "== matching version ids for tag $TARGET: ${ids:-none}"
+          for id in $ids; do
+            echo "deleting version $id"
+            gh api -X DELETE "/user/packages/container/$pkg/versions/$id" && echo "deleted $id"
+          done
