@@ -73,7 +73,7 @@ from [SECURITY.md](SECURITY.md).
   after it, so the purged runs are always a contiguous prefix of the
   target's evidence chain and `chain/verify` keeps reporting it intact;
   a purged run's own `run-<id>` directory is removed even when its day
-  directory stays. The purge summary reports `runs_retained_with_case`
+  directory stays. The purge summary reports `runs_retained_protected`
   instead of `alert_cases_deleted`, which is now always zero.
 
 ### Fixed
@@ -95,6 +95,20 @@ from [SECURITY.md](SECURITY.md).
 
 ### Added
 
+- Personal accounts with revocable HttpOnly sessions, accountant/administrator
+  permissions, local administrator provisioning and password/session controls.
+- Professional dossiers with entity identity, reasoned evidence decisions,
+  authenticated event history, optimistic revisions and immutable final PDF
+  versions with verified source chains and signed snapshots (ADR-012).
+- Persisted per-stage outcomes and evidence coverage; runs linked to an alert
+  case or cited by a dossier are retained from the oldest of them onward, so
+  the purged runs stay a contiguous prefix of the target's evidence chain.
+  Historical stages remain explicitly unrecorded.
+- A report whose text cannot be drawn losslessly now produces no PDF instead
+  of a silently altered one, so the run is recorded as an incomplete report
+  rather than sealed with a document that no longer says what the evidence
+  says. Qualification errors and missing reports/PDFs/seals remain visible and
+  degrade the terminal run outcome.
 - Weekly security baseline (`security-baseline.yml`): gitleaks over the full
   history, Semgrep at ERROR severity and a Trivy dependency scan, each pinned
   or checksum-verified and each uploading SARIF as an artifact. It does not
@@ -117,7 +131,6 @@ from [SECURITY.md](SECURITY.md).
   target card shows the classification (translated) and that processing
   location instead of the bare `llm` value, and the report header carries
   both lines.
-
 
 - README screenshots (both languages) now show the console after the showcase
   run, served by the real API over a database seeded with the two recordings,

@@ -23,7 +23,15 @@ This is a product-scoped UI effort: the UI is a front door to existing orchestra
 - The experience should assume the backend remains the source of truth for run state and evidence.
 - The design must support the same product workflows across desktop and narrow-browser widths without adding custom one-off screens.
 
-## Out of scope
+## Scope extension: professional Compliance workflow
+
+ADR-012 explicitly extends the original UI2 baseline with personal access,
+account administration, dossiers, professional evidence decisions and immutable
+report versions. The exclusions below describe the original UI2 milestone;
+these named capabilities are now implemented under that backend decision.
+See [the operator guide](../../docs/compliance-workflow.md).
+
+## Original UI2 exclusions
 
 The following are explicitly not part of the UI2 super-app scope unless a separate milestone or product review approves them:
 

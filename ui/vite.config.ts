@@ -20,7 +20,7 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     server: {
       proxy: Object.fromEntries(
-        API_PATH_PREFIXES.map((prefix) => [prefix, { target: devApiTarget, changeOrigin: true }]),
+        API_PATH_PREFIXES.map((prefix) => [prefix, { target: devApiTarget, changeOrigin: true, configure: (proxy) => { proxy.on('proxyReq', (outgoing, incoming) => { if (incoming.headers.origin) outgoing.setHeader('Origin', new URL(devApiTarget).origin); }); } }]),
       ),
     },
     build: {

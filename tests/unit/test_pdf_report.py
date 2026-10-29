@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from orchestrator.reports import generate_report
+from orchestrator.reports import _write_optional_pdf, generate_report
 from orchestrator.reports.pdf import Block, inline_text, parse_blocks, render_pdf
 from tests.unit.test_reports import _sample_report_data
 
@@ -195,6 +195,24 @@ def test_page_count_alias_does_not_rewrite_body_text(tmp_path: Path) -> None:
     out = tmp_path / "report.pdf"
     render_pdf(out, "# T\n\nPlantilla {nb} literal", "es")
     assert "Plantilla {nb} literal" in _drawn_strings(out.read_bytes())
+
+
+def test_a_report_the_font_cannot_draw_produces_no_pdf(tmp_path: Path) -> None:
+    """A sealed PDF must still say what the evidence says.
+
+    Characters outside Latin-1 and the transliteration table would degrade to
+    ``?``, silently rewriting an entity name or an authorization in the one
+    artefact a third party reads. Refusing is the honest outcome: the caller
+    records the report as incomplete.
+    """
+    out = tmp_path / "report.pdf"
+    with pytest.raises(ValueError, match="U\\+4E2D"):
+        render_pdf(out, "# T\n\nEntidad: 中国石化", "es")
+    assert not out.exists()
+
+    (tmp_path / "no-render").mkdir()
+    _write_optional_pdf(tmp_path / "no-render" / "report.pdf", "# T\n\nEntidad: 中国石化")
+    assert not (tmp_path / "no-render" / "report.pdf").exists()
 
 
 def test_snake_case_identifiers_keep_their_underscores() -> None:

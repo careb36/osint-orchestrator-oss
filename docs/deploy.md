@@ -163,3 +163,12 @@ service can work; what the compose healthcheck polls) and `GET /metrics`
 (Prometheus) need no API key. With `ORCHESTRATOR_LOG_FORMAT=json` every log line is one
 object with `request_id`, `target_id`, `run_id` and `collector` fields for a
 log shipper. Details and the alert runbook: [operations.md](operations.md#observability).
+
+## Personal-access upgrade
+
+Back up SQLite and the report/signing-key archive before startup applies
+migrations 0011/0012. Follow [personal access](compliance-workflow.md) to provision
+the first administrator, rotate previously shared machine keys, configure HTTPS
+and trusted proxy headers, and grant accountant accounts. No default account
+is created. Migrations do not rewrite existing signed artifacts. Include the
+new identity/dossier tables and final PDFs in recovery drills.

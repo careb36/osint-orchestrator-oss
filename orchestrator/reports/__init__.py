@@ -579,12 +579,22 @@ def _json_default(value: Any) -> Any:
     return str(value)
 
 
-def _write_optional_pdf(path: Path, markdown: str, lang: str = "es") -> None:
+def _write_optional_pdf(
+    path: Path,
+    markdown: str,
+    lang: str = "es",
+    *,
+    created_at: datetime | None = None,
+) -> None:
     """Best-effort PDF rendering of the Markdown report via fpdf2.
 
     Never raises: a missing library or a rendering failure is logged as a
     warning and the run proceeds — report.md/bundle/delta are the artifacts
     that matter. The layout itself lives in :mod:`orchestrator.reports.pdf`.
+
+    A report the renderer cannot represent losslessly produces no PDF instead
+    of a mangled one (see ``render_pdf``), so the pipeline records the report
+    as incomplete rather than sealing a truncated document.
     """
     try:
         import fpdf  # noqa: F401  — probe the optional dependency first
@@ -594,7 +604,7 @@ def _write_optional_pdf(path: Path, markdown: str, lang: str = "es") -> None:
     try:
         from orchestrator.reports.pdf import render_pdf
 
-        render_pdf(path, markdown, lang)
+        render_pdf(path, markdown, lang, created_at=created_at)
     except Exception as exc:  # noqa: BLE001
         logger.warning("PDF generation failed: %s", exc)
 
@@ -745,7 +755,12 @@ async def generate_report(
     report_md_path.write_text(report_md, encoding="utf-8")
     _write_json(bundle_path, merged_bundle)
     _write_json(delta_path, delta)
-    _write_optional_pdf(pdf_path, report_md, lang)
+    _write_optional_pdf(
+        pdf_path,
+        report_md,
+        lang,
+        created_at=data.run_finished_at or data.run_started_at,
+    )
     risk_level = finding.risk_level if finding is not None else "—"
     _write_daily_index(
         date_dir, data.target_id, data.run_id, data.run_status, len(delta), risk_level, lang

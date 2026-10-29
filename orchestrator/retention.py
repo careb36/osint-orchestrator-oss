@@ -25,6 +25,7 @@ from orchestrator.models import (
     AlertCase,
     AlertDelivery,
     AlertRecord,
+    DossierRun,
     EvidenceQualification,
     FindingRecord,
     OpenCTIOutbox,
@@ -53,9 +54,10 @@ class RetentionSummary:
     alert_deliveries_deleted: int = 0
     opencti_outbox_deleted: int = 0
     evidence_qualifications_deleted: int = 0
-    # Runs past the cutoff kept because their target has an alert case at or
-    # before them (a snapshot taken at each purge, not a delta).
-    runs_retained_with_case: int = 0
+    # Runs past the cutoff kept because their target has a protected run (an
+    # alert case or a dossier citation) at or before them, in the chain's
+    # order (a snapshot taken at each purge, not a delta).
+    runs_retained_protected: int = 0
     report_dirs_deleted: int = 0
     errors: list[str] = field(default_factory=list)
 
@@ -68,11 +70,13 @@ async def purge_expired(now: datetime | None = None) -> RetentionSummary:
     Two kinds of rows survive every purge on purpose:
 
     - ``seen_observables``, the delta memory between runs;
-    - for every target, the first run that met an alert rule (and so opened
-      an alert case) and every run after it, with all their dependents and
-      report directories. A case is where the operator records who reviewed
-      the run and what they decided, so it belongs to the compliance file;
-      keeping everything after the first case, not just the case runs, keeps
+    - for every target, the oldest run that must be kept for a professional
+      reason -- it opened an alert case, or a finalized dossier cites it --
+      and every run after it, with all their dependents and report
+      directories. A case is where the operator records who reviewed the run
+      and what they decided, and a dossier is the reviewed file a conclusion
+      is signed into; both belong to the compliance record. Keeping
+      everything after the oldest of them, not just the protected runs, keeps
       the purged runs a contiguous prefix of the target's evidence chain,
       which chain verification accepts (a gap in the middle reads as
       tampering).
@@ -105,27 +109,36 @@ async def purge_expired(now: datetime | None = None) -> RetentionSummary:
             )
             candidates = [(row[0], row[1], row[2]) for row in result.all()]
 
-            # The first run of each target that opened an alert case, in the
-            # evidence chain's own order (started_at, id). Everything from it
-            # on is kept: purging only a contiguous prefix of a target's runs
-            # is what verify_target_chain accepts as "retention removed the
-            # oldest runs"; a hole in the middle reads as tampering.
-            case_runs = await session.exec(  # type: ignore[call-overload]  # Same SQLModel stub gap as above.
+            # A run is kept when it must survive for a professional reason:
+            # it opened an alert case, or a dossier cites it. Neither kind may
+            # be purged on its own, and neither may be purged while an older
+            # run of the same target survives either -- so both collapse into
+            # one per-target floor.
+            #
+            # The floor is the oldest run of the target that is protected, in
+            # the evidence chain's own order (started_at, id), and everything
+            # from it on is kept: purging only a contiguous prefix of a
+            # target's runs is what verify_target_chain accepts as "retention
+            # removed the oldest runs". Excluding the protected runs alone
+            # instead would punch a hole in the middle of the chain, which
+            # verification reads as tampering.
+            protected_rows = await session.exec(  # type: ignore[call-overload]  # Same SQLModel stub gap as above.
                 select(col(Run.target_id), col(Run.started_at), col(Run.id)).where(
                     col(Run.id).in_(select(col(AlertCase.run_id)))
+                    | col(Run.id).in_(select(col(DossierRun.run_id)))
                 )
             )
-            first_filed: dict[str, tuple[datetime, int]] = {}
-            for target_id, started_at, run_id in case_runs.all():
+            first_protected: dict[str, tuple[datetime, int]] = {}
+            for target_id, started_at, run_id in protected_rows.all():
                 key = (_ensure_aware(started_at), run_id)
-                if target_id not in first_filed or key < first_filed[target_id]:
-                    first_filed[target_id] = key
+                if target_id not in first_protected or key < first_protected[target_id]:
+                    first_protected[target_id] = key
 
             expired_ids: list[int] = []
             for run_id, target_id, started_at in candidates:
-                floor = first_filed.get(target_id)
+                floor = first_protected.get(target_id)
                 if floor is not None and (_ensure_aware(started_at), run_id) >= floor:
-                    summary.runs_retained_with_case += 1
+                    summary.runs_retained_protected += 1
                     continue
                 expired_ids.append(run_id)
 
@@ -244,7 +257,7 @@ async def purge_expired(now: datetime | None = None) -> RetentionSummary:
             "alert_deliveries_deleted": summary.alert_deliveries_deleted,
             "opencti_outbox_deleted": summary.opencti_outbox_deleted,
             "evidence_qualifications_deleted": summary.evidence_qualifications_deleted,
-            "runs_retained_with_case": summary.runs_retained_with_case,
+            "runs_retained_protected": summary.runs_retained_protected,
             "report_dirs_deleted": summary.report_dirs_deleted,
             "errors": summary.errors,
         },

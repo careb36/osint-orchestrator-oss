@@ -236,6 +236,8 @@ class Settings(BaseSettings):
     # every endpoint is open and a warning is logged once at startup. /health
     # and /metrics never require a key (see orchestrator/auth.py).
     orchestrator_api_key: str = ""
+    # Secure cookies require HTTPS; disable only for local HTTP development.
+    orchestrator_cookie_secure: bool = True
     # Log verbosity and shape. `json` emits one JSON object per line for log
     # shippers (Loki, ELK, CloudWatch); `text` is the human-readable default.
     orchestrator_log_level: str = "INFO"

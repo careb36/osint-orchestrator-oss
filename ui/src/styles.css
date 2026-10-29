@@ -1565,3 +1565,9 @@ code {
     grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   }
 }
+
+.case-form { display: grid; gap: 1rem; margin-bottom: 1.5rem; }
+.case-form label { display: grid; gap: .4rem; }
+.case-form textarea { min-height: 7rem; padding: .75rem; font: inherit; color: inherit; background: var(--bg, #0f172a); border: 1px solid #64748b; border-radius: .4rem; }
+.case-form input[type="checkbox"] { width: auto; justify-self: start; }
+.case-form a { overflow-wrap: anywhere; }

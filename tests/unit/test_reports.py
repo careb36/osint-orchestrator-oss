@@ -108,6 +108,14 @@ async def test_pdf_is_optional_when_fpdf2_missing(
     assert (report_path.parent / "delta.json").exists()
 
 
+async def test_unsupported_glyphs_do_not_produce_a_silently_truncated_pdf(tmp_path):
+    data = _sample_report_data()
+    data.authorization = "Fictitious company: 测试公司"
+    report_path = await generate_report(data, report_dir=str(tmp_path))
+    assert "测试公司" in report_path.read_text(encoding="utf-8")
+    assert not (report_path.parent / "report.pdf").exists()
+
+
 @pytest.mark.asyncio
 async def test_markdown_language_default_es_and_en_override(tmp_path: Path) -> None:
     es_report = await generate_report(_sample_report_data(), report_dir=str(tmp_path))

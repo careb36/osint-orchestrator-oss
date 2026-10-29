@@ -6,7 +6,7 @@ import { describeUnavailable } from '../lib/unavailable';
 
 /** Asks for the operator's API key; shown while the API answers 401. */
 export function ApiKeyGate() {
-  const { submitKey } = useApiKey();
+  const { submitKey, personal } = useApiKey();
   const { t } = useLocale();
   const [key, setKey] = useState('');
   // Pre-tick when the last key was remembered on this browser: clearApiKey()
@@ -29,6 +29,7 @@ export function ApiKeyGate() {
     }
   };
 
+  if (personal) return <PersonalLogin />;
   return (
     <section className="page">
       <div className="hero-card">
@@ -73,4 +74,25 @@ export function ApiKeyGate() {
       </form>
     </section>
   );
+}
+
+function PersonalLogin() {
+  const { t } = useLocale();
+  const { submitCredentials } = useApiKey();
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const submit = async (event: FormEvent) => {
+    event.preventDefault(); setBusy(true); setFailed(false);
+    const ok = await submitCredentials(username, password);
+    setPassword(''); setBusy(false); setFailed(!ok);
+  };
+  return <section className="page"><h1>{t('personal.login')}</h1><form className="state-card key-form" onSubmit={submit}>
+    <label>{t('personal.username')}<input autoComplete="username" required value={username} onChange={(e) => setUsername(e.target.value)} /></label>
+    <label>{t('personal.password')}<input type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} /></label>
+    {failed ? <p role="alert">{t('personal.failed')}</p> : null}
+    <button type="submit" disabled={busy}>{t('personal.login')}</button>
+    <p>{t('personal.recovery')}</p>
+  </form></section>;
 }

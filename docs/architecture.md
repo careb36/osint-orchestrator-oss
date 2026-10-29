@@ -5,6 +5,13 @@ OSINT Orchestrator is one FastAPI process with an in-process scheduler
 collectors, normalises what they find to STIX 2.1, and produces a signed,
 reviewable report per run.
 
+## Professional workflow
+
+[ADR-012](adr/ADR-012-personal-compliance-workflow.md) adds personal identities,
+server-side sessions and shared-practice professional dossiers above source runs.
+SQLite holds identities, review events, immutable snapshots and final PDFs.
+See the [workflow and upgrade guide](compliance-workflow.md).
+
 ## Pipeline
 
 ```mermaid

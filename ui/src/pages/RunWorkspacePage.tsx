@@ -2,6 +2,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { EmptyState, ErrorState, LoadingState, PageLayout } from '../components/PageState';
+import { StageSummary } from '../components/StageSummary';
 import { RunNotice } from '../components/RunNotice';
 import { SearchField } from '../components/SearchField';
 import { SortableHeader } from '../components/SortableHeader';
@@ -184,6 +185,7 @@ export function RunWorkspacePage() {
         </div>
       ) : null}
 
+      {run.data ? <StageSummary run={run.data} /> : null}
       <div className="workspace-shell">
         <div className="artifact-toolbar">
           <div className="artifact-tabs" role="tablist" aria-label={t('runDetail.artefacts')}>

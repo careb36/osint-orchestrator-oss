@@ -399,7 +399,8 @@ async def test_run_failing_before_manifest_is_unsealed_and_next_run_chains_past_
         unsealed = await harness.run(1)
     last = await harness.run(2)
 
-    assert unsealed.status == RunStatus.SUCCESS  # the final status survived
+    assert unsealed.status == RunStatus.PARTIAL  # missing integrity is not success
+    assert unsealed.integrity_status == "failed"
     assert unsealed.manifest_sha256 is None
     assert (Path(unsealed.report_path).parent / "report.md").exists()
     assert _manifest(last)["previous_manifest_sha256"] == first.manifest_sha256
@@ -478,7 +479,7 @@ async def test_retention_keeps_the_chain_verifiable_around_a_filed_run(
     summary = await retention_module.purge_expired(now=datetime.now(UTC) + timedelta(days=30))
 
     assert summary.runs_deleted == 1
-    assert summary.runs_retained_with_case == 2
+    assert summary.runs_retained_protected == 2
     assert not Path(first.report_path).parent.exists(), "the purged run's directory goes"
     assert Path(last.report_path).parent.exists()
     async with harness.session() as session:

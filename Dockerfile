@@ -9,7 +9,9 @@ FROM owaspamass/amass:v5.1.1 AS amass
 FROM node:22.12.0-alpine3.20 AS ui-builder
 WORKDIR /ui
 COPY ui/package.json ui/package-lock.json ./
-RUN npm ci --no-audit --no-fund
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -f /run/secrets/proxy_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/proxy_ca; fi; \
+    npm ci --no-audit --no-fund
 COPY ui/ ./
 RUN npm run build
 
@@ -18,7 +20,10 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Install minimal system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN --mount=type=secret,id=proxy_ca \
+    set --; \
+    if [ -f /run/secrets/proxy_ca ]; then set -- -o Acquire::https::CaInfo=/run/secrets/proxy_ca; fi; \
+    apt-get "$@" update && apt-get "$@" install -y --no-install-recommends \
     # git: the openosint dependency is a pinned git reference, and pip
     # needs a git client to resolve it. python:3.11-slim ships without one.
     git \
@@ -31,7 +36,11 @@ COPY pyproject.toml README.md LICENSE ./
 RUN mkdir -p orchestrator && touch orchestrator/__init__.py
 # The llm extra brings the cloud provider SDKs (openai for openai/nebius,
 # anthropic for anthropic); without it every cloud synthesis fails at runtime.
-RUN pip install --no-cache-dir ".[llm]"
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -f /run/secrets/proxy_ca ]; then \
+      export PIP_CERT=/run/secrets/proxy_ca GIT_SSL_CAINFO=/run/secrets/proxy_ca; \
+    fi; \
+    pip install --no-cache-dir ".[llm]"
 
 COPY orchestrator/ ./orchestrator/
 # Dashboard build: orchestrator/api.py serves it at /console (and answers 503
@@ -41,6 +50,8 @@ COPY --from=ui-builder /ui/dist ./orchestrator/static/ui-dist
 COPY --from=amass /bin/enum /usr/local/bin/oam_enum
 COPY --from=amass /bin/subs /usr/local/bin/oam_subs
 
+# Make copied source/assets readable even when the build context uses a
+# restrictive umask. They remain root-owned and read-only to the runtime uid.
 # Create directories for runtime data. /app/amass/data is the mount point of
 # the volume shared with the Amass engine container, which runs as uid 1000:
 # pre-own it so the engine can write asset.db whichever container initialises
@@ -49,7 +60,8 @@ COPY --from=amass /bin/subs /usr/local/bin/oam_subs
 # engine use), never as root: a bug in a collector or in the PDF renderer
 # must not get root inside the container. Everything the process writes at
 # run time lives under these three directories.
-RUN mkdir -p /app/daily_reports /app/data /app/amass/data \
+RUN chmod -R a+rX /app/orchestrator \
+    && mkdir -p /app/daily_reports /app/data /app/amass/data \
     && groupadd --gid 1000 app \
     && useradd --uid 1000 --gid 1000 --no-create-home --shell /usr/sbin/nologin app \
     && chown -R 1000:1000 /app/daily_reports /app/data /app/amass/data

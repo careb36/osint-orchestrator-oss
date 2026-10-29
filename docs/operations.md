@@ -3,6 +3,18 @@
 Running, securing and observing a deployment. Settings named here are described
 in [configuration.md](configuration.md).
 
+## Professional dossiers and personal access
+
+Use the [Compliance workflow guide](compliance-workflow.md) for personal login,
+account provisioning, permissions, dossier creation, human evidence decisions,
+finalization and versioned PDF exports. Run responses now expose
+`collection_status`, `qualification_status`, `synthesis_status`, `report_status`,
+`integrity_status`, `evidence_collected` and `evidence_qualified`. Old runs say
+`not_recorded`; a successful technical run is not professional approval.
+Incomplete qualification, failed synthesis and missing artifacts can no longer
+silently claim a complete result. Runs linked to dossiers are excluded from
+operational retention; back up the SQLite dossier snapshots and PDFs as well.
+
 ## Full stack
 
 Requirements: Docker Engine 24+ with Compose v2.20+, 16 GB of RAM (OpenCTI and
@@ -352,7 +364,7 @@ target, a contiguous prefix of its chain, which `chain/verify` reports as an
 anchor rather than as tampering. A `daily_reports/<date>` directory is
 deleted once its whole day is older than the cutoff and no remaining run
 started that day, so a kept run never loses its report or manifest. The
-summary's `runs_retained_with_case` counts the expired runs kept this way at
+summary's `runs_retained_protected` counts the expired runs kept this way at
 each purge (a snapshot, not a delta). The delta memory (`seen_observables`) is never purged. Before
 enabling a period, archive the run directories you must keep, or set the
 period your regulation requires rather than an operational one.

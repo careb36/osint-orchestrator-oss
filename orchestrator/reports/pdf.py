@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 
 from orchestrator.i18n import t
@@ -168,13 +169,49 @@ def _column_widths(rows: list[list[str]], total: float) -> list[float]:
     return [total * share / normaliser for share in shares]
 
 
-def render_pdf(path: Path, markdown: str, lang: str = "es") -> None:
+def _ensure_utc(value: datetime) -> datetime:
+    """SQLite returns naive datetimes; compare everything as UTC-aware."""
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+def unrepresentable(text: str) -> list[str]:
+    """Characters the core PDF font cannot draw and the table does not map.
+
+    ``inline_text`` degrades these to ``?``. That is fine for a stray glyph,
+    but a report whose entity name or authorization is entirely outside
+    Latin-1 would be sealed as a document that no longer says what the
+    evidence says, so the caller checks first.
+    """
+    mapped = text.translate(_TRANSLITERATE)
+    return sorted({char for char in mapped if ord(char) > 255})
+
+
+def render_pdf(
+    path: Path,
+    markdown: str,
+    lang: str = "es",
+    *,
+    created_at: datetime | None = None,
+) -> None:
     """Render *markdown* as ``path``; raises on any rendering problem.
 
     The caller decides what a failure means (the Markdown report is the
     artefact of record; the PDF is a convenience), so nothing is swallowed
     here.
+
+    ``created_at`` stamps the document with the run's own time instead of the
+    render time, so re-rendering an archived report does not move its date.
+
+    Raises ``ValueError`` when the report carries characters the core font
+    cannot draw: a document that silently changes the evidence is worse than
+    no document, and the caller records the report as incomplete.
     """
+    lossy = unrepresentable(markdown)
+    if lossy:
+        raise ValueError(
+            "Report contains characters unsupported by the PDF font: "
+            + ", ".join(f"U+{ord(char):04X}" for char in lossy)
+        )
     from fpdf import FPDF
     from fpdf.enums import XPos, YPos
     from fpdf.fonts import FontFace
@@ -198,6 +235,7 @@ def render_pdf(path: Path, markdown: str, lang: str = "es") -> None:
     pdf.alias_nb_pages(_PAGE_COUNT_ALIAS)
     pdf.set_margins(left=15, top=15, right=15)
     pdf.set_auto_page_break(auto=True, margin=18)
+    pdf.set_creation_date(_ensure_utc(created_at) if created_at else datetime.now(UTC))
     pdf.add_page()
     printable = pdf.w - pdf.l_margin - pdf.r_margin
 

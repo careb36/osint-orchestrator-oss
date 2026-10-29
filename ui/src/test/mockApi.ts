@@ -306,6 +306,7 @@ export function installFetchMock(options: MockOptions = {}) {
     const path = url.replace(/^https?:\/\/[^/]+/, '');
     const headers = new Headers(init?.headers);
 
+    if (path === '/auth/status') return jsonResponse(200, { personal_access: false });
     if (options.requireKey !== undefined && headers.get('X-API-Key') !== options.requireKey) {
       return jsonResponse(401, { detail: 'Missing or invalid API key' });
     }

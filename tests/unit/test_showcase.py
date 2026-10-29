@@ -348,7 +348,7 @@ async def test_injected_client_respects_llm_provider_none(
 async def test_replay_all_fails_when_artefacts_are_not_written(
     db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, broken: str, expected: str
 ) -> None:
-    """The pipeline keeps a run SUCCESS without its report or manifest; the showcase does not."""
+    """Missing reports and manifests fail the replay and degrade the persisted run."""
     session_ctx, engine = db
     await _create_all(engine)
 
@@ -374,9 +374,13 @@ async def test_replay_all_fails_when_artefacts_are_not_written(
     assert caplog_messages and expected in caplog_messages[-1]
     async with session_ctx() as session:
         runs = (await session.exec(select(Run))).all()
-        assert len(runs) == 1 and runs[0].status == RunStatus.SUCCESS
+        assert len(runs) == 1
+        assert runs[0].status == (
+            RunStatus.FAILED if broken == "generate_report" else RunStatus.PARTIAL
+        )
         if broken == "generate_report":
             assert "disk full" in (runs[0].error or "")
         else:
-            # A manifest failure leaves the run unsealed and logged, not annotated.
+            # A manifest failure remains visible in both state and diagnostics.
+            assert "integrity:" in (runs[0].error or "")
             assert runs[0].report_path and runs[0].manifest_sha256 is None

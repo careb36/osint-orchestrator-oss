@@ -31,6 +31,7 @@ from orchestrator.collectors.tavily import TavilyCollector
 from orchestrator.config import settings
 from orchestrator.database import get_session
 from orchestrator.evidence import build_manifest, canonical_json, sha256_file, write_manifest_file
+from orchestrator.i18n import t
 from orchestrator.models import (
     AlertDelivery,
     AlertDeliveryStatus,
@@ -701,8 +702,8 @@ async def _run_target_pipeline(
             result = await collector.collect()
             results.append(result)
             collectors_run.append(name)
-            outcome = "success" if result.success else "failure"
-            if not result.success:
+            outcome = "success" if result.success and result.complete else "failure"
+            if not result.success or not result.complete:
                 # The collector contract says "never raise, return success=False".
                 # That path must weigh on the run status exactly like a raise
                 # does, or a target whose only collector is down is recorded
@@ -736,6 +737,8 @@ async def _run_target_pipeline(
         metrics.collector_runs_total.labels(name, target.id, outcome).inc()
         metrics.collector_duration_seconds.labels(name).observe(perf_counter() - collector_started)
 
+    if not results:
+        errors.append("collection: " + t("collection_not_requested", language=target.language))
     evidence_items = [item for result in results for item in result.evidence]
     qualifications: list[EvidenceQualification] = []
     qualification_client = await _qualification_client(target, evidence_items, client=llm_client)
@@ -748,6 +751,31 @@ async def _run_target_pipeline(
         await persist_qualifications(qualifications)
         for row in qualifications:
             metrics.evidence_qualified_total.labels(target.id, row.category).inc()
+
+    qualification_status = "skipped"
+    if qualification_attempted:
+        qualified_urls = {row.url for row in qualifications}
+        qualification_status = (
+            "ok" if {item.url for item in evidence_items} <= qualified_urls else "incomplete"
+        )
+        if qualification_status != "ok":
+            errors.append(
+                "qualification: "
+                + t(
+                    "qualification_incomplete",
+                    language=target.language,
+                    qualified=len(qualified_urls),
+                    collected=len({item.url for item in evidence_items}),
+                )
+            )
+    elif (
+        evidence_items
+        and settings.llm_qualify_enabled
+        and settings.llm_qualify_max_items > 0
+        and settings.llm_provider != "none"
+    ):
+        qualification_status = "unavailable"
+        errors.append("qualification: " + t("qualification_unavailable", language=target.language))
 
     qualification_by_url = _select_best_qualifications(
         qualifications, run_id=run_id, target_id=target.id
@@ -873,7 +901,7 @@ async def _run_target_pipeline(
 
     # Update run record
     final_status = RunStatus.SUCCESS
-    if errors and not any(r.success for r in results):
+    if errors and not any(r.success or r.observables or r.evidence for r in results):
         final_status = RunStatus.FAILED
     elif errors:
         final_status = RunStatus.PARTIAL
@@ -893,13 +921,16 @@ async def _run_target_pipeline(
             # chain to the wrong predecessor (a false "chain_link" break).
             run.collectors_run = ",".join(collectors_run)
             run.new_observables = len(new_stix_ids)
-            run.error = "; ".join(errors) or None
+            existing_errors = [run.error] if run.error else []
+            run.error = "; ".join(dict.fromkeys(existing_errors + errors)) or None
+            run.collection_status = (
+                "ok" if results and all(r.success and r.complete for r in results) else "incomplete"
+            )
+            run.qualification_status = qualification_status
+            run.evidence_collected = len({item.url for item in evidence_items})
+            run.evidence_qualified = len({row.url for row in qualifications})
             session.add(run)
             await session.commit()
-    if final_status == RunStatus.SUCCESS:
-        metrics.target_last_success_timestamp_seconds.labels(target.id).set(
-            run_finished_at.timestamp()
-        )
 
     report_data = RunReportData(
         target_id=target.id,
@@ -931,6 +962,16 @@ async def _run_target_pipeline(
     # Synthesize: collect → normalize → ingest → SYNTHESIZE → report.
     finding, synthesis_status = await synthesize(target, run_id, report_data, client=llm_client)
     metrics.synthesis_total.labels(target.id, synthesis_status or "unknown").inc()
+    if synthesis_status == "failed" and final_status == RunStatus.SUCCESS:
+        final_status = RunStatus.PARTIAL
+    async with get_session() as session:
+        assessment_run = await session.get(Run, run_id)
+        if assessment_run and assessment_run.error and assessment_run.error not in errors:
+            errors.append(assessment_run.error)
+    report_data.run_status = final_status.value
+    report_data.errors = list(dict.fromkeys(errors))
+    run_finished_at = datetime.now(UTC)
+    report_data.run_finished_at = run_finished_at
 
     report_error: str | None = None
     report_path: str | None = None
@@ -948,9 +989,21 @@ async def _run_target_pipeline(
         report_error = f"report-generation: {exc}"
         logger.exception("Report generation failed for run %d", run_id, extra=log_ctx)
 
+    report_status = "failed" if report_path is None else "ok"
+    if report_path is None:
+        final_status = RunStatus.FAILED
+    elif not Path(report_path).with_suffix(".pdf").is_file():
+        report_status = "incomplete"
+        report_error = "report-generation: PDF not produced"
+        if final_status == RunStatus.SUCCESS:
+            final_status = RunStatus.PARTIAL
+
     async with get_session() as session:
         run = await session.get(Run, run_id)
         if run:
+            run.synthesis_status = synthesis_status
+            run.report_status = report_status
+            run.integrity_status = "failed"
             if report_path is not None:
                 run.report_path = report_path
             if report_error:
@@ -987,13 +1040,22 @@ async def _run_target_pipeline(
                     run.manifest_sha256 = write_manifest_file(
                         report_path=report_path, manifest=manifest
                     )
+                    run.integrity_status = "ok"
                 except Exception:  # noqa: BLE001
                     logger.exception(
                         "Evidence manifest not written; run left unsealed run_id=%d",
                         run_id,
                         extra=log_ctx,
                     )
+            if not run.manifest_sha256 and final_status == RunStatus.SUCCESS:
+                final_status = RunStatus.PARTIAL
+                run.error = (
+                    f"{run.error}; integrity: manifest not produced"
+                    if run.error
+                    else "integrity: manifest not produced"
+                )
             run.status = final_status
+            run.finished_at = run_finished_at
             # Read before the commit: a session that expires attributes on
             # commit would otherwise lazy-load here, which is sync IO.
             manifest_sha256 = run.manifest_sha256
@@ -1012,6 +1074,11 @@ async def _run_target_pipeline(
                         "manifest_sha256": manifest_sha256,
                     },
                 )
+
+    if final_status == RunStatus.SUCCESS:
+        metrics.target_last_success_timestamp_seconds.labels(target.id).set(
+            datetime.now(UTC).timestamp()
+        )
 
     # Alert: final pipeline step — never changes run status.
     try:

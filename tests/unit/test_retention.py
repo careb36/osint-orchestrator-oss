@@ -20,6 +20,8 @@ from orchestrator.models import (
     AlertDeliveryStatus,
     AlertRecord,
     AlertStatus,
+    Dossier,
+    DossierRun,
     EvidenceQualification,
     FindingRecord,
     OpenCTIOutbox,
@@ -193,7 +195,7 @@ async def test_purge_deletes_old_run_and_dependents(tmp_path, monkeypatch):
     assert summary.alert_deliveries_deleted == 1
     assert summary.opencti_outbox_deleted == 1
     assert summary.evidence_qualifications_deleted == 1
-    assert summary.runs_retained_with_case == 0
+    assert summary.runs_retained_protected == 0
 
     # Verify DB state
     async with AsyncSession(engine, expire_on_commit=False) as session:
@@ -294,7 +296,7 @@ async def test_purge_keeps_runs_that_opened_an_alert_case(tmp_path, monkeypatch)
     summary = await purge_expired(now=NOW)
 
     assert summary.runs_deleted == 1
-    assert summary.runs_retained_with_case == 1
+    assert summary.runs_retained_protected == 1
     assert summary.findings_deleted == 1
     assert summary.evidence_qualifications_deleted == 1
     assert summary.report_dirs_deleted == 1
@@ -310,6 +312,153 @@ async def test_purge_keeps_runs_that_opened_an_alert_case(tmp_path, monkeypatch)
         assert [row.run_id for row in findings] == [filed_run.id]
         evidence = (await session.exec(select(EvidenceQualification))).all()
         assert [row.run_id for row in evidence] == [filed_run.id]
+
+
+@pytest.mark.asyncio
+async def test_dossier_citation_keeps_a_contiguous_chain_prefix(tmp_path, monkeypatch):
+    """A dossier-cited run must not leave a hole in the evidence chain.
+
+    Excluding the cited runs from the purge one by one deletes the older
+    uncited run and keeps the cited one, so verification reads the surviving
+    chain as tampered (a gap in the middle is indistinguishable from a
+    deleted manifest). Everything from the oldest protected run onward has to
+    survive instead, exactly as the alert-case floor already does.
+    """
+    engine = _make_engine()
+    await _setup_db(engine)
+
+    reports = tmp_path / "daily_reports"
+    days = [reports / f"2026-06-{day:02d}" for day in (1, 2, 3)]
+    for day in days:
+        day.mkdir(parents=True)
+
+    started = [datetime(2026, 6, day, 8, 0, tzinfo=UTC) for day in (1, 2, 3)]
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        runs = [
+            Run(target_id="t1", started_at=moment, finished_at=moment, status=RunStatus.SUCCESS)
+            for moment in started
+        ]
+        for run in runs:
+            session.add(run)
+        await session.commit()
+        for run in runs:
+            await session.refresh(run)
+        session.add(
+            Dossier(id=1, title="d", entity_name="e", entity_type="org", purpose="p", owner_id=1)
+        )
+        # The middle run is cited: the purge may drop the older run, never the
+        # newer one, or the chain loses its tail.
+        session.add(DossierRun(dossier_id=1, run_id=runs[1].id))
+        await session.commit()
+        ids = [run.id for run in runs]
+
+    monkeypatch.setattr("orchestrator.retention.get_session", _session_factory(engine))
+    monkeypatch.setattr("orchestrator.retention.settings.orchestrator_retention_days", 30)
+    monkeypatch.setattr(
+        "orchestrator.retention.settings.targets_file", str(tmp_path / "notfound.yaml")
+    )
+    monkeypatch.setattr("orchestrator.retention._collect_report_dirs", lambda: {str(reports)})
+
+    summary = await purge_expired(now=datetime(2026, 8, 1, tzinfo=UTC))
+
+    assert summary.runs_deleted == 1
+    assert summary.runs_retained_protected == 2
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        survived = sorted(row.id for row in (await session.exec(select(Run))).all())
+    assert survived == ids[1:], "the cited run and everything after it must survive"
+    assert days[2].is_dir(), "the surviving newer run keeps its report directory"
+
+
+@pytest.mark.asyncio
+async def test_alert_case_and_dossier_citation_share_one_contiguous_floor(tmp_path, monkeypatch):
+    """Both protections must collapse into the *earliest* of the two.
+
+    Keeping each clause as its own exclusion is the bug this guards: the
+    dossier clause alone would purge the runs that back an already-opened
+    alert case, and the alert-case clause alone would purge runs a finalized
+    dossier cites.
+
+    Two targets, with the two protections in opposite order, so that dropping
+    either clause changes the surviving set. A single target where one
+    protection always sits first would pass under either mutant.
+    """
+    engine = _make_engine()
+    await _setup_db(engine)
+
+    reports = tmp_path / "daily_reports"
+    days = [
+        reports / f"2026-05-{day:02d}-{target}" for target in ("a", "b") for day in (1, 2, 3, 4)
+    ]
+    for day in days:
+        day.mkdir(parents=True)
+
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        per_target: dict[str, list[Run]] = {}
+        for target in ("a", "b"):
+            runs = []
+            for day in (1, 2, 3, 4):
+                moment = datetime(2026, 5, day, 8, 0, tzinfo=UTC)
+                run = Run(
+                    target_id=target,
+                    started_at=moment,
+                    finished_at=moment,
+                    status=RunStatus.SUCCESS,
+                )
+                session.add(run)
+                runs.append(run)
+            per_target[target] = runs
+        await session.commit()
+        for runs in per_target.values():
+            for run in runs:
+                await session.refresh(run)
+        session.add(
+            Dossier(id=1, title="d", entity_name="e", entity_type="org", purpose="p", owner_id=1)
+        )
+        # target "a": alert case on the oldest run, dossier cites the middle one.
+        session.add(DossierRun(dossier_id=1, run_id=per_target["a"][1].id))
+        session.add(
+            AlertCase(
+                run_id=per_target["a"][0].id,
+                target_id="a",
+                run_status="success",
+                acknowledged_by="Ana",
+                note="caso abierto a",
+            )
+        )
+        # target "b": the mirror image -- dossier on the oldest, alert case on the middle.
+        session.add(DossierRun(dossier_id=1, run_id=per_target["b"][0].id))
+        session.add(
+            AlertCase(
+                run_id=per_target["b"][1].id,
+                target_id="b",
+                run_status="success",
+                acknowledged_by="Ana",
+                note="caso abierto b",
+            )
+        )
+        await session.commit()
+        ids = {target: [run.id for run in runs] for target, runs in per_target.items()}
+
+    monkeypatch.setattr("orchestrator.retention.get_session", _session_factory(engine))
+    monkeypatch.setattr("orchestrator.retention.settings.orchestrator_retention_days", 30)
+    monkeypatch.setattr(
+        "orchestrator.retention.settings.targets_file", str(tmp_path / "notfound.yaml")
+    )
+    monkeypatch.setattr("orchestrator.retention._collect_report_dirs", lambda: {str(reports)})
+
+    summary = await purge_expired(now=datetime(2026, 8, 1, tzinfo=UTC))
+
+    # Both floors are the oldest run of their target, so nothing expires.
+    assert summary.runs_deleted == 0
+    assert summary.runs_retained_protected == 8
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        survived = sorted(row.id for row in (await session.exec(select(Run))).all())
+        cases = {row.target_id: row.run_id for row in (await session.exec(select(AlertCase))).all()}
+        cited = {row.run_id for row in (await session.exec(select(DossierRun))).all()}
+    assert survived == sorted(ids["a"] + ids["b"]), "neither protection may purge the other"
+    assert cases == {"a": ids["a"][0], "b": ids["b"][1]}, "an alert case lost its run"
+    assert cited == {ids["a"][1], ids["b"][0]}, "a dossier lost its cited run"
+    assert all(day.is_dir() for day in days), "every surviving run keeps its report directory"
 
 
 def test_retention_is_disabled_by_default(monkeypatch):
