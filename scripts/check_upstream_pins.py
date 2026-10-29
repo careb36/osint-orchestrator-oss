@@ -11,9 +11,15 @@ The pins are read from the files themselves, not from a list kept here: a list
 would silently disagree with `pyproject.toml` the first time someone bumped it.
 The check is `git ls-remote`, so it needs no token, no clone and no API quota.
 
+A declaration this script finds but cannot read is reported as a problem, not
+ignored: a pin that changes shape (a branch instead of a commit, a quoted SHA,
+a Dockerfile that goes missing) must turn the run red, because a green run over
+fewer pins than it was written to watch is the failure mode that looks like
+success.
+
 Exit codes: 0 every pin is at its upstream head, 1 at least one moved,
-2 the pins could not be read (a pin changed shape, and this script needs fixing
-before it can be trusted).
+2 the check is incomplete (a pin could not be read, or a declaration it was
+meant to parse no longer parses).
 """
 
 from __future__ import annotations
@@ -26,15 +32,27 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+SHA = r"[0-9a-f]{40}"
 # `openosint @ git+https://github.com/careb36/OpenOSINT@<sha>` in pyproject.toml.
-PEP508_GIT = re.compile(r"git\+https://github\.com/([\w.-]+/[\w.-]+)@([0-9a-f]{40})")
+PEP508_GIT = re.compile(rf"git\+https://github\.com/([\w.-]+/[\w.-]+)@({SHA})")
+PEP508_GIT_ANY = re.compile(r"git\+https://github\.com/([\w.-]+/[\w.-]+)@([^\s\"']+)")
 # `context: https://github.com/smicallef/spiderfoot.git#<sha>` in a compose file.
-BUILD_CONTEXT = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+?)(?:\.git)?#([0-9a-f]{40})")
+BUILD_CONTEXT = re.compile(rf"https://github\.com/([\w.-]+/[\w.-]+?)(?:\.git)?#({SHA})")
+BUILD_CONTEXT_ANY = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+?)(?:\.git)?#([^\s#]+)")
 # `ARG SOCIALOSINT_REF=<sha>` in a Dockerfile, attributed to the GitHub URL in
-# the comment above it.
-DOCKERFILE_ARG = re.compile(r"^ARG\s+(\w+)=([0-9a-f]{40})\s*$", re.MULTILINE)
+# the comment above it. The value may be quoted.
+DOCKERFILE_ARG = re.compile(rf"^ARG\s+(\w+)=[\"']?({SHA})[\"']?\s*$", re.MULTILINE)
+DOCKERFILE_ARG_ANY = re.compile(r"^ARG\s+(\w+)=[\"']?([^\"'\s]+)[\"']?\s*$", re.MULTILINE)
+REF_ARG_NAME = re.compile(r"_(?:REF|SHA|COMMIT|PIN)$")
 GITHUB_URL = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+?)(?:\.git)?(?:#|\s|$)")
 COMPOSE_SERVICE = re.compile(r"^  ([\w.-]+):\s*$", re.MULTILINE)
+
+
+# `resolve_upstream` returns this only when the lookup itself failed, so the
+# caller can tell "this repository is not a fork" from "we do not know whether
+# it is a fork". The second case must fail the run, not pass as "no fork".
+class UpstreamLookupError(Exception):
+    pass
 
 
 @dataclass(frozen=True)
@@ -46,9 +64,13 @@ class Pin:
     source: str
     detail: str
 
-    @property
-    def slug(self) -> str:
-        return f"{self.repo}@{self.ref[:7]}"
+
+@dataclass(frozen=True)
+class Problem:
+    """A declaration the script was meant to parse but could not."""
+
+    source: str
+    detail: str
 
 
 @dataclass(frozen=True)
@@ -56,69 +78,100 @@ class Finding:
     pin: Pin
     head: str | None
     upstream_ahead: int | None
+    kind: str  # "direct" | "fork" | "parent"
+    incomplete: bool = False
 
     @property
     def moved(self) -> bool:
+        if self.kind == "fork":
+            # The fork is ours: its own head moving is not upstream drift, and
+            # the pin is a specific commit, not the tip. The parent row is the
+            # verdict.
+            return False
+        if self.kind == "parent":
+            # The pin is a fork commit, so it is never equal to the parent's
+            # head; equality means nothing here. What means "drift" is whether
+            # upstream has commits the pin does not. A synchronized fork reports
+            # 0 and must not be called moved.
+            return self.upstream_ahead is not None and self.upstream_ahead > 0
+        # A direct (non-fork) pin is an upstream commit, so the head matching it
+        # is the only "current" state.
         return self.head is not None and self.head != self.pin.ref
 
 
-def _pins_from_pyproject(root: Path) -> list[Pin]:
+def _pins_from_pyproject(root: Path) -> tuple[list[Pin], list[Problem]]:
     path = root / "pyproject.toml"
     if not path.exists():
-        return []
-    return [
+        return [], []
+    text = path.read_text(encoding="utf-8")
+    pins = [
         Pin(repo=m.group(1), ref=m.group(2), source=path.name, detail="PEP 508 direct reference")
-        for m in PEP508_GIT.finditer(path.read_text(encoding="utf-8"))
+        for m in PEP508_GIT.finditer(text)
     ]
+    problems = [
+        Problem(path.name, f"{m.group(1)}@{m.group(2)} (not a full commit)")
+        for m in PEP508_GIT_ANY.finditer(text)
+        if not re.fullmatch(SHA, m.group(2))
+    ]
+    return pins, problems
 
 
-def _pins_from_compose(root: Path) -> list[Pin]:
-    found: list[Pin] = []
+def _pins_from_compose(root: Path) -> tuple[list[Pin], list[Problem]]:
+    pins: list[Pin] = []
+    problems: list[Problem] = []
     for path in sorted(root.glob("docker-compose*.yml")):
         text = path.read_text(encoding="utf-8")
         for match in BUILD_CONTEXT.finditer(text):
-            # Service keys sit at two-space indentation; `context:` itself sits
-            # deeper, so matching the indentation is what picks `spiderfoot` and
-            # not `context`.
             services = COMPOSE_SERVICE.findall(text[: match.start()])
-            service = services[-1] if services else "?"
-            found.append(
-                Pin(repo=match.group(1), ref=match.group(2), source=path.name, detail=service)
+            pins.append(
+                Pin(
+                    repo=match.group(1),
+                    ref=match.group(2),
+                    source=path.name,
+                    detail=services[-1] if services else "?",
+                )
             )
-    return found
+        for match in BUILD_CONTEXT_ANY.finditer(text):
+            if not re.fullmatch(SHA, match.group(2)):
+                problems.append(Problem(path.name, f"{match.group(1)}#{match.group(2)[:12]}"))
+    return pins, problems
 
 
-def _pins_from_dockerfiles(root: Path) -> list[Pin]:
-    found: list[Pin] = []
+def _pins_from_dockerfiles(root: Path) -> tuple[list[Pin], list[Problem]]:
+    pins: list[Pin] = []
+    problems: list[Problem] = []
     for path in sorted(root.glob("Dockerfile*")):
         text = path.read_text(encoding="utf-8")
         for match in DOCKERFILE_ARG.finditer(text):
-            # The ARG rarely carries the URL, so take the last one above it.
-            above = text[: match.start()]
-            urls = GITHUB_URL.findall(above)
+            urls = GITHUB_URL.findall(text[: match.start()])
             if not urls:
                 continue
-            found.append(
-                Pin(
-                    repo=urls[-1],
-                    ref=match.group(2),
-                    source=path.name,
-                    detail=match.group(1),
-                )
+            pins.append(
+                Pin(repo=urls[-1], ref=match.group(2), source=path.name, detail=match.group(1))
             )
-    return found
+        for match in DOCKERFILE_ARG_ANY.finditer(text):
+            name, value = match.group(1), match.group(2)
+            if not re.fullmatch(SHA, value) and REF_ARG_NAME.search(name):
+                problems.append(Problem(path.name, f"{name}={value} (not a full commit)"))
+    return pins, problems
 
 
-def collect_pins(root: Path) -> list[Pin]:
+def collect_pins(root: Path) -> tuple[list[Pin], list[Problem]]:
     """Every commit this repository pins, read from the files that hold them."""
-    pins = _pins_from_pyproject(root) + _pins_from_compose(root) + _pins_from_dockerfiles(root)
+    pins: list[Pin] = []
+    problems: list[Problem] = []
+    for source in (_pins_from_pyproject, _pins_from_compose, _pins_from_dockerfiles):
+        found_pins, found_problems = source(root)
+        pins.extend(found_pins)
+        problems.extend(found_problems)
+
     seen: set[tuple[str, str]] = set()
     unique: list[Pin] = []
     for pin in pins:
         if (pin.repo, pin.ref) not in seen:
             seen.add((pin.repo, pin.ref))
             unique.append(pin)
-    return unique
+    return unique, problems
 
 
 def _run(command: list[str]) -> str:
@@ -139,7 +192,7 @@ def fetch_head(repo: str, run: Callable[[list[str]], str] = _run) -> str | None:
         return None
     for line in output.splitlines():
         parts = line.split()
-        if len(parts) == 2 and re.fullmatch(r"[0-9a-f]{40}", parts[0]):
+        if len(parts) == 2 and re.fullmatch(SHA, parts[0]):
             return parts[0]
     return None
 
@@ -153,10 +206,6 @@ def count_upstream_ahead(
     count wanted is "commits in head that base lacks". `behind_by` here would
     report how many fork-only commits the pin carries, which reads almost the
     same in a table and answers a different question.
-
-    Best effort: a rate limit, a network failure or a missing `gh` degrades to
-    "unknown" rather than failing the whole run, because the drift itself is the
-    signal and the count is the explanation.
     """
     try:
         output = run(["gh", "api", f"repos/{repo}/compare/{base}...{head}", "--jq", ".ahead_by"])
@@ -169,16 +218,14 @@ def count_upstream_ahead(
 def resolve_upstream(repo: str, run: Callable[[list[str]], str] = _run) -> str | None:
     """Parent repository when *repo* is a fork, else None.
 
-    This is the whole point of the script for `openosint`: the pin points at a
-    fork, so comparing against the fork's own head reports "current" for as long
-    as nobody pushes to the fork, while the code it was forked from moves on.
-    Without the parent, the pin that most needs watching is the one that looks
-    settled.
+    Raises `UpstreamLookupError` when the lookup failed: a missing `gh`, a rate
+    limit or a timeout must not be confused with "this is not a fork", because
+    that would drop the parent row and let a fork drift unreported.
     """
     try:
         output = run(["gh", "api", f"repos/{repo}", "--jq", ".parent.full_name // empty"])
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
-        return None
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+        raise UpstreamLookupError(repo) from exc
     return output.strip() or None
 
 
@@ -188,83 +235,102 @@ def survey(
     ahead: Callable[[str, str, str], int | None] = count_upstream_ahead,
     upstream: Callable[[str], str | None] = resolve_upstream,
 ) -> list[Finding]:
-    findings = []
+    findings: list[Finding] = []
     for pin in pins:
         head = fetch(pin.repo)
-        delta = ahead(pin.repo, pin.ref, head) if head and head != pin.ref else None
-        findings.append(Finding(pin=pin, head=head, upstream_ahead=delta))
-
-        parent = upstream(pin.repo)
-        if not parent:
+        try:
+            parent = upstream(pin.repo)
+        except UpstreamLookupError:
+            findings.append(Finding(pin, head, None, "direct", incomplete=True))
             continue
+
+        if parent is None:
+            # A plain repository: its own head is the whole signal.
+            delta = ahead(pin.repo, pin.ref, head) if head and head != pin.ref else None
+            findings.append(Finding(pin, head, delta, "direct", incomplete=head is None))
+            continue
+
+        # A fork: show the fork's own tip for context, then judge the parent.
+        findings.append(Finding(pin, head, None, "fork", incomplete=head is None))
+
         parent_head = fetch(parent)
-        parent_delta = (
+        parent_ahead = (
             ahead(parent, pin.ref, parent_head) if parent_head and parent_head != pin.ref else None
         )
         findings.append(
             Finding(
-                pin=Pin(
-                    repo=parent,
-                    ref=pin.ref,
-                    source=pin.source,
-                    detail=f"upstream of the {pin.repo} fork",
-                ),
-                head=parent_head,
-                upstream_ahead=parent_delta,
+                Pin(parent, pin.ref, pin.source, f"upstream of the {pin.repo} fork"),
+                parent_head,
+                parent_ahead,
+                "parent",
+                # A parent whose drift cannot be counted is unreadable: for a
+                # fork, sha equality never holds, so the count is the verdict.
+                incomplete=parent_head is None or parent_ahead is None,
             )
         )
     return findings
 
 
-def render(findings: Iterable[Finding]) -> str:
+def render(findings: Iterable[Finding], problems: Iterable[Problem] = ()) -> str:
     findings = list(findings)
-    moved = [f for f in findings if f.moved]
+    problems = list(problems)
     lines = [
         "| Pin | Pinned | Upstream head | Commits upstream since the pin | Status |",
         "| --- | --- | --- | --- | --- |",
     ]
     for finding in findings:
         head = finding.head[:7] if finding.head else "unreadable"
-        if not finding.moved:
+        if finding.incomplete:
+            status = "incomplete"
+        elif finding.kind == "fork":
+            status = "fork tip"
+        elif finding.moved:
+            status = "MOVED"
+        else:
+            status = "current"
+        if finding.incomplete or (finding.moved and finding.upstream_ahead is None):
+            delta = "unknown"
+        elif finding.upstream_ahead is None:
             delta = "—"
         else:
-            delta = "unknown" if finding.upstream_ahead is None else str(finding.upstream_ahead)
-        status = "MOVED" if finding.moved else ("unreadable" if not finding.head else "current")
+            delta = str(finding.upstream_ahead)
         lines.append(
             f"| `{finding.pin.repo}` ({finding.pin.source}, {finding.pin.detail}) "
             f"| `{finding.pin.ref[:7]}` | `{head}` | {delta} | {status} |"
         )
-    unreadable = [f for f in findings if not f.head]
+    for problem in problems:
+        lines.append(f"| `{problem.source}` | — | — | — | unparseable: {problem.detail} |")
+
+    moved = [f for f in findings if f.moved]
+    incomplete = [f for f in findings if f.incomplete]
     lines.append("")
     if moved:
-        lines.append(f"{len(moved)} of {len(findings)} pinned commits moved upstream.")
+        lines.append(f"{len(moved)} of {len(findings)} pins moved upstream.")
+    elif problems or incomplete:
+        lines.append("No drift confirmed, but the check is incomplete.")
     else:
-        lines.append(f"All {len(findings)} pinned commits are at their upstream head.")
-    if unreadable:
-        lines.append(
-            f"{len(unreadable)} repository(ies) could not be read; the check is incomplete."
-        )
+        lines.append(f"All {len(findings)} pins are at their upstream head.")
+    if incomplete:
+        lines.append(f"{len(incomplete)} pin(s) could not be read.")
+    if problems:
+        lines.append(f"{len(problems)} declaration(s) could not be parsed.")
     return "\n".join(lines)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent.parent)
-    parser.add_argument(
-        "--no-behind",
-        action="store_true",
-        help="skip the compare API call (the counts, not the drift)",
-    )
+    parser.add_argument("--no-ahead", action="store_true", help="skip the compare API call")
     args = parser.parse_args(argv)
 
-    pins = collect_pins(args.root)
-    if not pins:
+    pins, problems = collect_pins(args.root)
+    if not pins and not problems:
         print("No pinned commits found: the pin format changed.", file=sys.stderr)
         return 2
-    ahead = (lambda *_: None) if args.no_behind else count_upstream_ahead
+    ahead = (lambda *_: None) if args.no_ahead else count_upstream_ahead
     findings = survey(pins, ahead=ahead)
-    print(render(findings))
-    if any(not f.head for f in findings):
+    print(render(findings, problems))
+    if problems or any(f.incomplete for f in findings):
         return 2
     return 1 if any(f.moved for f in findings) else 0
 

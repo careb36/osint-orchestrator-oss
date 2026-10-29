@@ -609,12 +609,24 @@ Read the table by the *Status* column:
 - **MOVED** — upstream moved. Nothing is broken: a pin is immutable, so an old
   commit builds exactly as before. What changed is the code we parse as
   untrusted input, and nobody has looked at the difference.
-- **unreadable** — the repository could not be read. The report is then
-  incomplete, the job exits 2 and says so. Do not read that run as "no drift".
+- **fork tip** — the pinned repository is a fork and its own head has advanced
+  past the pin. Informational only: a fork's own commits are ours to make, and
+  the pin is a specific commit rather than the tip, so this is not drift. The
+  verdict for a fork is the row below it.
+- **incomplete** — the repository (or the parent lookup) could not be read, so
+  this row proves nothing. The job exits 2.
+- **unparseable** — a declaration the checker was written to read no longer
+  parses (for example a pin relaxed from a commit to a branch). The job exits 2,
+  because a green run over fewer pins than it was written to watch is the
+  failure that looks like success.
 
-The check reports a fork and its parent as two rows. For `openosint` the
-**parent** row is the one that matters: the fork's own head can be current
-while `OpenOSINT/OpenOSINT` runs months ahead of it.
+For a fork the checker prints two rows. The first (`careb36/OpenOSINT`) shows
+the fork's own tip and is always informational; the second
+(`OpenOSINT/OpenOSINT`, *"upstream of the … fork"*) is the verdict. The verdict
+is decided by the *commits upstream since the pin* count, not by comparing the
+pin against the parent head: the pin is a fork commit, so it is never equal to
+the parent head, and a fork that has merged every upstream commit reports 0 and
+must be treated as current.
 
 Raising a pin is its own commit, in the file the table names, with the reason in
 the message. For OpenOSINT, verify first that
