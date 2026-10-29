@@ -13,6 +13,22 @@
 - [ ] ¿La extensión y el formato son adecuados?
 - [ ] ¿Hay afirmaciones nuevas sin respaldo?
 
+## Comprobaciones propias de este repositorio
+
+Añadir estas cinco a la lista cuando el texto viva en este proyecto. Ninguna
+depende del estilo: cada una rompe algo si se salta.
+
+- [ ] ¿El texto que se corrigió era realmente español? Comprobar el idioma
+      resuelto (`resolve_language()`), no el idioma por defecto del proyecto.
+      El código, `docs/`, `README.md` y los ADR van en inglés.
+- [ ] ¿Sobrevivieron los marcadores de formato (`{qualified}`, `{collected}`,
+      `{target}`, `{error}`) sin renombrar ni reordenar?
+- [ ] ¿Siguen en inglés los valores que se persisten o se comparan
+      (`risk_level`, `RunStatus`, tipos STIX)?
+- [ ] ¿Se editó la pareja `es`/`en` de la misma clave y no una sola?
+- [ ] ¿Se respetó el orden de secciones del informe
+      (`_markdown_content`) en lugar de reordenarlo por criterio estilístico?
+
 ## Ejemplos orientativos
 
 **Antes:** «Es importante destacar que se llevó a cabo la realización de un

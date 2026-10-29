@@ -21,16 +21,29 @@ Esta skill **no** cambia qué se escribe en cada idioma; para eso manda
 
 | Dónde está el texto | Idioma | Qué hacer |
 | --- | --- | --- |
-| `orchestrator/**/*.py`, comentarios, logs, mensajes de commit, `README.md`, `docs/**`, ADR | Inglés | No traducir ni «mejorar» el español de un texto inglés. Esta skill no aplica |
-| Claves `es` de `orchestrator/i18n.py`, cuerpos de informe, asuntos y cuerpos de alertas, síntesis del LLM | Español | Aquí sí aplica |
+| Código, comentarios de código, logs, mensajes de commit, `README.md`, `docs/**`, ADR | Inglés | No traducir ni «mejorar» el español de un texto inglés. Esta skill no aplica |
+| `targets.example.yaml`, comentarios incluidos | Español | Es el fichero que edita el operador a mano; ADR-004 lo asigna al español. Excepción explícita a la fila anterior. `.env.example` **no** entra: el ADR lo deja en inglés por ser un fichero de despliegue |
+| `detail` de los errores de la API (`HTTPException`) | `es` y `en` | Prosa que lee el operador; va en el catálogo como una clave más |
+| Claves de `orchestrator/i18n.py` y `ui/src/i18n.tsx` | `es` y `en` | Aplicar **solo a la variante cuyo idioma resuelto sea `es`** |
+| Cuerpos de informe, asuntos y cuerpos de alertas, síntesis del LLM | El que resuelva `resolve_language()` | Aplicar solo si el idioma resuelto es `es`; ver la nota de abajo |
 | `README.es.md` | Español | Aplicar, y mantenerlo con las mismas secciones que `README.md` |
+
+El idioma de salida **no es fijo**. `resolve_language(preferred)` en
+`orchestrator/i18n.py` toma primero el `language` del objetivo, después
+`ORCHESTRATOR_LANGUAGE` y solo al final `es`; un valor desconocido se registra y
+se salta en lugar de abortar la ejecución. Por eso el mismo cuerpo de informe
+puede salir en inglés para un objetivo y en español para otro: antes de corregir
+un texto generado, mirar el idioma resuelto, no el idioma por defecto del
+proyecto. Las claves de `i18n.py` se editan por pareja, nunca una sola.
 
 Reglas que se derivan de eso:
 
 - **Cada clave de `i18n.py` lleva `es` y `en`.** Al retocar una cadena en un
   idioma, revisar la pareja: `test_catalogue_is_complete` y
   `test_every_translation_takes_the_same_placeholders` fallan si falta una
-  traducción o si una cambia los marcadores de formato.
+  traducción o si una cambia los marcadores de formato. El catálogo del panel
+  (`ui/src/i18n.tsx`) tiene su propio control en `ui/src/i18n.test.ts`; editarlo
+  sin pasar ese test deja la interfaz con una clave suelta.
 - **Lo que se persiste o se compara no se traduce**: `risk_level` (`low`,
   `medium`, `high`, `critical`, `unknown`), `RunStatus`, tipos STIX y valores
   de enum siguen en inglés en los dos idiomas. Traducirlos rompe comparaciones y
@@ -182,17 +195,30 @@ respuesta HTTP.
 ### Informes ejecutivos para dirección no técnica
 
 Es el caso de uso más frecuente en este repositorio (el informe periódico del
-estado de los sistemas). Reglas que se derivan de cómo se lee ese documento:
+estado de los sistemas). El orden de las secciones **no es libre**: lo fija
+`orchestrator/reports/__init__.py::_markdown_content` y forma parte del contrato
+con el operador. Es cabecera → síntesis → evidencias cualificadas → novedades
+desde la ejecución anterior → errores → anexo técnico. La razón está en el
+docstring: primero las preguntas del lector (qué pasó, cuánto importa, qué
+cambió) y al final el material de verificación.
 
-- **Evidencia antes que valoración.** Primero qué se observó y con qué fuente;
-  después el semáforo, los riesgos y las decisiones pendientes. Un semáforo sin
-  evidencia debajo no es un informe, es una opinión.
-- **Semáforo explícito y comparable.** Cada sistema lleva su estado en una
-  palabra (verde, amarillo, rojo) y una frase que diga qué lo sostiene. No usar
-  «preocupante» o «mejorable» como sustituto del estado.
+Reglas que se derivan de eso:
+
+- **La valoración va delante, pero nunca suelta.** La síntesis abre el informe
+  y las evidencias que la sostienen vienen después; si una afirmación de la
+  síntesis no tiene debajo una evidencia que la respalde, sobra la afirmación,
+  no el orden.
+- **No inventar un semáforo.** Los informes no tienen verde/amarillo/rojo:
+  exponen `risk_level` con cinco valores (`low`, `medium`, `high`, `critical`,
+  `unknown`) y un `synthesis_status` (`ok`, `skipped`, `failed`). Usar esos
+  valores tal cual, sin traducirlos y sin sustituirlos por adjetivos.
+- **Decir cuándo no hubo valoración.** Si la síntesis no se ejecutó
+  (`skipped`, sin proveedor configurado) o falló (`failed`), el informe lo
+  declara en su sección. Un texto que describa un riesgo cuando no hubo
+  síntesis contradice el documento.
 - **Sin jerga sin traducir.** Si hace falta un término técnico, definirlo la
-  primera vez en la misma frase; no dejarlo como abreviatura suelta (`PR`, `CI`,
-  `ADR`) sin explicación.
+  primera vez en la misma frase; no dejarlo como abreviatura suelta (`PR`,
+  `CI`, `ADR`, `STIX`) sin explicación.
 - **Decisiones pendientes con nombre y consecuencia.** Qué se decide, quién lo
   decide y qué pasa si no se decide. Una lista de temas abiertos sin
   consecuencia no permite decidir.
