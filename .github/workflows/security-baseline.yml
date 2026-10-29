@@ -140,6 +140,9 @@ jobs:
         with:
           scan-type: fs
           scan-ref: .
+          # The action's default `version` floats, so the binary the scan runs
+          # would differ between runs and between the five repositories.
+          version: v0.76.1
           format: sarif
           output: trivy.sarif
           severity: CRITICAL,HIGH
