@@ -441,6 +441,14 @@ from [SECURITY.md](SECURITY.md).
   each PR comment started eight empty check runs. Delegation goes through the
   Copilot coding agent only; `AGENTS.md`, `CONTRIBUTING.md`, the *Agent task*
   issue template and `.claude/rules/workflow.md` describe that one channel.
+- `.opencode/skills/ciberseguridad/SKILL.md`, which that retirement left behind
+  and nothing could then load. It was the portable copy of a personal skill,
+  written for a directory outside this repository, so it named an absolute
+  home path, prescribed gates this project does not run (`bandit`,
+  `pip-audit`, `make check`, a `SECURITY_TRIAGE.md` of its own) and was in
+  Spanish, against [ADR-004](docs/adr/ADR-004-language-policy.md). The project's
+  own gates are in `SECURITY.md`, `docs/threat-model.md` and
+  `scripts/threat_model.py`. The file stays in history at `74a47e6`.
 - Dead settings nothing read: `SPIDERFOOT_TIMEOUT_SECONDS` (the per-target
   `collectors.spiderfoot.timeout_seconds` replaced it), `SYNTHESIS_OPENCTI_CONTEXT`,
   and the `SHODAN_API_KEY`, `VIRUSTOTAL_API_KEY`, `CENSYS_API_ID` and
