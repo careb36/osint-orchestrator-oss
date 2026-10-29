@@ -22,7 +22,7 @@ whether the file was edited afterwards.
 
 ```mermaid
 flowchart LR
-    T[Target<br/>cron or API] --> C[Collectors<br/>Tavily · SpiderFoot · OpenOSINT · Amass]
+    T[Target<br/>cron or API] --> C[Collectors<br/>OpenOSINT · SpiderFoot<br/>Tavily · Amass · SocialOSINT]
     C --> Q[Evidence qualification<br/>Nemotron fast]
     Q --> N[STIX 2.1]
     N --> O[(OpenCTI)]
@@ -31,8 +31,10 @@ flowchart LR
     R --> A[Alerts]
 ```
 
-- **Collect.** Each authorised target is researched on a schedule or on demand
-  by web search (Tavily) and infrastructure collectors.
+- **Collect.** Each authorised target is researched on a schedule or on demand.
+  OpenOSINT and SpiderFoot run for every target; Tavily, Amass and SocialOSINT
+  are switched on per target, so nothing leaves your infrastructure or reaches
+  a third party unless that target's block asks for it.
 - **Qualify.** Every web result is classified against the entity: category
   (sanctions, litigation, adverse media…), relevance, confidence and a one-line
   rationale.
@@ -42,6 +44,17 @@ flowchart LR
   relies on, plus what is new since the previous run.
 - **Seal.** Each run's files are hashed into an HMAC-signed manifest chained to
   the previous run, so any later edit or removal is detectable.
+
+| Collector | Runs as | On by default | What it contributes |
+| --- | --- | --- | --- |
+| OpenOSINT | in-process pivot search with hard budgets | every target | Domains, URLs and entities reached from the seed |
+| SpiderFoot | in the base stack, over HTTP | every target | Hosts, certificates and exposures from its modules |
+| Tavily | hosted search API, needs `TAVILY_API_KEY` | opt-in per target | Third-party pages as `url` observables, each qualified |
+| Amass | sidecar CLI, `--profile amass` | opt-in per target | Subdomains and their DNS records |
+| SocialOSINT | sidecar REST, `--profile socialosint` | opt-in per target | One `user-account` per handle, plus an unverified analysis note |
+
+Per-collector keys (`collectors.<name>.*`) are in
+[configuration](docs/configuration.md).
 
 Details: [architecture](docs/architecture.md).
 
@@ -179,8 +192,8 @@ evidence with search and filters, and a Start-run action; it asks for
 `ORCHESTRATOR_API_KEY` on first load. Source in [`ui/`](ui/README.md); the
 images build it, so nothing else is needed.
 
-Both screenshots are the console after the showcase run of tier 1: the
-fictitious sample, two runs, no API key.
+Both screenshots are the console after the showcase replay (quickstart step 1):
+the fictitious sample, two runs, no API key.
 
 ![Overview: key figures and targets ordered by attention, the showcase target last because it is disabled](docs/img/dashboard-overview-en.png)
 

@@ -22,7 +22,7 @@ archivo se modificó después.
 
 ```mermaid
 flowchart LR
-    T[Objetivo<br/>cron o API] --> C[Recolectores<br/>Tavily · SpiderFoot · OpenOSINT · Amass]
+    T[Objetivo<br/>cron o API] --> C[Recolectores<br/>OpenOSINT · SpiderFoot<br/>Tavily · Amass · SocialOSINT]
     C --> Q[Calificación de evidencia<br/>Nemotron fast]
     Q --> N[STIX 2.1]
     N --> O[(OpenCTI)]
@@ -32,7 +32,9 @@ flowchart LR
 ```
 
 - **Recolectar.** Cada objetivo autorizado se investiga según un cron o a
-  demanda, con búsqueda web (Tavily) y recolectores de infraestructura.
+  demanda. OpenOSINT y SpiderFoot corren para todo objetivo; Tavily, Amass y
+  SocialOSINT se activan por objetivo, así que nada sale de su infraestructura
+  ni llega a un tercero salvo que el bloque de ese objetivo lo pida.
 - **Calificar.** Cada resultado web se clasifica respecto de la entidad:
   categoría (sanciones, litigios, prensa adversa…), relevancia, confianza y una
   justificación de una línea.
@@ -43,6 +45,17 @@ flowchart LR
 - **Sellar.** Los archivos de cada corrida se resumen en un manifiesto firmado
   con HMAC y encadenado a la corrida anterior, de modo que cualquier edición o
   borrado posterior se detecta.
+
+| Colector | Cómo corre | Activo por defecto | Qué aporta |
+| --- | --- | --- | --- |
+| OpenOSINT | búsqueda de pivotes en proceso, con presupuestos duros | todo objetivo | Dominios, URL y entidades alcanzadas desde la semilla |
+| SpiderFoot | en el stack base, por HTTP | todo objetivo | Hosts, certificados y exposiciones de sus módulos |
+| Tavily | API de búsqueda alojada, requiere `TAVILY_API_KEY` | opt-in por objetivo | Páginas de terceros como observables `url`, cada una calificada |
+| Amass | CLI sidecar, `--profile amass` | opt-in por objetivo | Subdominios y sus registros DNS |
+| SocialOSINT | REST sidecar, `--profile socialosint` | opt-in por objetivo | Un `user-account` por handle, más una nota de análisis sin verificar |
+
+Las claves por colector (`collectors.<nombre>.*`) están en
+[configuración](docs/configuration.md) (en inglés).
 
 Detalle: [arquitectura](docs/architecture.md) (en inglés).
 
@@ -187,8 +200,8 @@ activas, hallazgos, evidencia con búsqueda y filtros, y un botón para iniciar
 corridas; pide `ORCHESTRATOR_API_KEY` al abrirlo. Código en
 [`ui/`](ui/README.md) (en inglés); las imágenes lo construyen solas.
 
-Las dos capturas son la consola tras la corrida de muestra del nivel 1: la
-entidad ficticia, dos corridas, ninguna clave de API.
+Las dos capturas son la consola tras la repetición de la muestra (paso 1 del
+inicio rápido): la entidad ficticia, dos corridas, sin clave de API.
 
 ![Resumen: cifras clave y objetivos ordenados por atención; el objetivo de la muestra va último porque está desactivado](docs/img/dashboard-overview-es.png)
 

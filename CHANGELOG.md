@@ -334,15 +334,18 @@ from [SECURITY.md](SECURITY.md).
   bilingual README sections.
 - Optional OIDC front door: Keycloak + oauth2-proxy compose overlay
   (`--profile auth`), ADR-006, health-gated startup order.
-- Bilingual executive project presentation for management/AML audiences
-  (`docs/business/`), `CONTRIBUTING.md`, `SECURITY.md`, this changelog and a
-  documentation index (`docs/README.md`).
+- `CONTRIBUTING.md`, `SECURITY.md`, this changelog and a documentation index
+  (`docs/README.md`) linking every guide and ADR.
 
 ### Changed
 
 - README (both languages) shows the operator dashboard: the overview and the
-  run workspace with qualified evidence, rendered from the test fixtures at
-  1366 px in each language (`docs/img/`).
+  run workspace with qualified evidence, re-rendered from the showcase replay
+  at 1366 px in each language (`docs/img/`), after the dossiers and accounts
+  pages joined the console.
+- README (both languages) lists all five collectors in the pipeline diagram and
+  in a table that says which run by default and which are opt-in per target;
+  SocialOSINT was missing from both.
 - README (both languages) shows the four `.env` lines and the per-target
   `llm: nebius` that run every target on Token Factory with the two Nemotron
   routes; `.env.example` names the Nemotron models next to `LLM_MODEL_FAST`
