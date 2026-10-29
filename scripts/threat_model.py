@@ -1,7 +1,8 @@
 """
 OWASP pytm threat model of the OSINT Orchestrator.
 
-Model source of truth: docs/architecture.md, docs/adr/ (001-011),
+Model source of truth: docs/architecture.md, docs/adr/ (001-011; the
+account, session and dossier elements of 012 are still unmapped),
 docker-compose*.yml, the Dockerfiles, orchestrator/config.py,
 orchestrator/auth.py, orchestrator/alerts/__init__.py and the collectors.
 
@@ -1595,10 +1596,13 @@ TRIAGE: dict[str, dict[str, Response]] = {
     "AC21": {  # Cross Site Request Forgery
         "orchestrator": (
             "mitigated",
-            "Data routes authenticate with the X-API-Key/Bearer header, never cookies, so there "
-            "is no ambient credential to forge cross-site; the console CSP sets form-action "
-            "'none'; the scheduler has no HTTP surface. The OIDC overlay adds oauth2-proxy's "
-            "CSRF token.",
+            "Personal sessions do ride an HttpOnly SameSite=Strict cookie, so a CSRF token is "
+            "replaced by two checks on every mutating browser request: X-Requested-With must be "
+            "XMLHttpRequest, which a cross-site form cannot set, and a present Origin must match "
+            "the request's own origin (accounts.py::check_browser_request). Automation keeps "
+            "header-only X-API-Key/Bearer credentials with no ambient cookie to forge; the console "
+            "CSP sets form-action 'none'; the scheduler has no HTTP surface. The OIDC overlay adds "
+            "oauth2-proxy's CSRF token.",
         ),
         "vendor": (
             "transferred",

@@ -120,8 +120,10 @@ with the right owner and need nothing.
 Never publish port 8000 directly. Two options:
 
 - **Your own reverse proxy** (nginx, Caddy, Traefik) terminating TLS in front
-  of `127.0.0.1:8000`. The dashboard at `/console` asks for the API key in the
-  browser; every data route requires it as `X-API-Key` or a bearer token.
+  of `127.0.0.1:8000`. The dashboard at `/console` asks for a personal sign-in
+  once an administrator exists ([ADR-012](adr/ADR-012-personal-compliance-workflow.md));
+  before that it asks for the API key. Automation reaches every data route with
+  that key as `X-API-Key` or a bearer token.
 - **The OIDC overlay**: `docker compose -f docker-compose.yml -f docker-compose.auth.yml --profile auth up -d`
   starts Keycloak and oauth2-proxy in front of the dashboard
   ([ADR-006](adr/ADR-006-oidc-proxy.md)). Its defaults are for development

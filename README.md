@@ -199,6 +199,15 @@ the fictitious sample, two runs, no API key.
 
 ![Run workspace: each piece of evidence with its category, relevance, confidence and rationale, qualified by the recorded sample](docs/img/dashboard-run-evidence-en.png)
 
+The two clips below are unedited captures of that same replay: sign in, read
+what needs attention, open a run, then follow one due-diligence dossier from
+the recorded evidence to the signed report. Nothing is mocked for the camera;
+the console is the one you get from the quickstart.
+
+![Signing in, reading the overview and opening the second run of the showcase target](docs/img/demo-run.gif)
+
+![Opening a compliance dossier, its reasoned evidence decisions and the issued report versions](docs/img/demo-dossier.gif)
+
 ## Responsible use
 
 The orchestrator runs reconnaissance against whatever is listed in
@@ -213,6 +222,7 @@ is an aid for an analyst, not a determination. See [SECURITY](SECURITY.md).
 | --- | --- |
 | Evidence qualification and evidence chain | Done |
 | Operator dashboard (overview, triage, investigation) | Done |
+| Compliance dossiers: roles, reasoned evidence decisions, versioned signed reports | Done |
 | Qualification of relationships between entities | Planned |
 | Data-quality indicators per source | Planned |
 | Document NLP (filings, court records) | Planned |
@@ -221,6 +231,19 @@ is an aid for an analyst, not a determination. See [SECURITY](SECURITY.md).
 ## Professional Compliance reviews
 
 Personal sign-in, accountant and administrator permissions, dossiers, reasoned evidence decisions and versioned final reports are available. Start with the [professional workflow](docs/compliance-workflow.md); existing automation keys retain their privileges and must be rotated if previously shared with human operators.
+
+A dossier keeps the runs it is based on, the reason for every confirmed or
+dismissed item, and each report version, so the file can be defended later.
+Decisions and the final conclusion are recorded by an accountant account, never
+by the administrator who created the dossier.
+
+![Dossiers: the list with the entity, state and owner of each case](docs/img/dashboard-dossiers-en.png)
+
+![Evidence and professional decisions: each item with its automated assessment, the recorded decision and its reason](docs/img/dashboard-dossier-review-en.png)
+
+![Issued report versions, each downloadable as the signed PDF, above the action history](docs/img/dashboard-dossier-report-en.png)
+
+![Account administration: create accountant accounts, disable access and revoke sessions](docs/img/dashboard-accounts-en.png)
 
 ## Documentation
 

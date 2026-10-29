@@ -39,13 +39,14 @@ that contradicts it.
 | [010](adr/ADR-010-operator-dashboard.md) | Operator dashboard as a React SPA served by the API |
 | [011](adr/ADR-011-external-stix-producers.md) | External STIX 2.1 producers as an intake path |
 | [012](adr/ADR-012-personal-compliance-workflow.md) | Personal identities and professional dossiers |
+| [013](adr/ADR-013-openosint-fork-and-upstream-drift.md) | OpenOSINT fork pin and upstream drift monitoring |
 
 ## Other
 
 | Document | Content |
 | --- | --- |
 | [Hackathon history](HACKATHON.md) | Build log and per-PR record, in English and Spanish |
-| [`img/`](img/) | Dashboard screenshots used by both READMEs |
+| [`img/`](img/) | Dashboard screenshots and the demo recordings used by both READMEs |
 
 Contributing rules, the language policy and the commands CI runs are in
 [CONTRIBUTING](../CONTRIBUTING.md) and [AGENTS](../AGENTS.md).
