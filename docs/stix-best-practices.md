@@ -6,10 +6,21 @@ objects this service emits are read by tools it does not control. What matters
 is therefore not only that a bundle validates against the specification, but
 that other STIX consumers interpret it the same way.
 
-The reference for that second question is the
-[OASIS STIX 2.1 Best Practice Guide v1.0.0](https://www.cisa.gov/resources-tools/resources/oasis-stix-21-best-practice-guide)
-(OASIS CTI Technical Committee, September 2022; CISA hosts the copy linked
-here). It covers the non-`MUST` normative statements and the design choices the
+The reference for that second question is the OASIS STIX Best Practices Guide
+v1.0.0, Committee Note 01 of 15 September 2022, from the OASIS CTI Technical
+Committee. The authoritative copy is
+[`stix-bp-v1.0.0-cn01.html`](https://docs.oasis-open.org/cti/stix-bp/v1.0.0/cn01/stix-bp-v1.0.0-cn01.html)
+on `docs.oasis-open.org` (`.pdf` and `.docx` sit beside it); the
+[CISA page](https://www.cisa.gov/resources-tools/resources/oasis-stix-21-best-practice-guide)
+is only the landing page most readers reach first, and it links that same
+document.
+
+The guide states "Copyright © OASIS Open and US Government 2022. All Rights
+Reserved", so it is cited and linked here rather than committed: do not add the
+PDF to the repository. The section numbers below refer to Committee Note 01, and
+v1.0.0 is still the only published edition.
+
+It covers the non-`MUST` normative statements and the design choices the
 specification deliberately leaves to producers. This page records, practice by
 practice, what the orchestrator does and where to check it.
 
