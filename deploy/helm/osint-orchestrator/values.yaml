@@ -102,6 +102,12 @@ config:
   logFormat: json
   logLevel: INFO
   metricsEnabled: true
+  # ORCHESTRATOR_COOKIE_SECURE: the personal session cookie of ADR-012 carries
+  # Secure, so it is only sent back over HTTPS. Keep true behind a TLS ingress.
+  # Browsers accept a Secure cookie on http://localhost (a trustworthy origin),
+  # but not on any other http:// host, so a chart served over plain HTTP on a
+  # real hostname needs false or sign-in loops back to the form.
+  cookieSecure: true
   llm:
     # LLM_PROVIDER: ollama | anthropic | openai | nebius | none. A target's
     # provider is its `llm` field in targets.yaml (default local, Ollama);
