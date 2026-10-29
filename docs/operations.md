@@ -580,6 +580,49 @@ finding in a `Suppressed Vulnerabilities` table on each run, so the decision is
 visible in the log of the pull request that touched the image, not only in this
 file.
 
+## Dependency pins and upstream drift
+
+Every third-party component is pinned to an exact version or commit. Dependabot
+(`.github/dependabot.yml`) proposes the ones it understands: PyPI packages,
+npm, image tags in `docker-compose*.yml` and the `FROM` lines of the
+Dockerfiles.
+
+Three pins are outside what Dependabot can read, because nothing in them looks
+like a package version:
+
+| Component | Pin | Where |
+| --- | --- | --- |
+| OpenOSINT | commit on the fork `careb36/OpenOSINT` | `pyproject.toml`, PEP 508 direct reference |
+| SpiderFoot | commit in a compose `build.context` | `docker-compose.yml`, service `spiderfoot` |
+| SocialOSINT | `ARG SOCIALOSINT_REF` | `Dockerfile.socialosint` |
+
+`.github/workflows/upstream-drift.yml` runs weekly (Mondays, 04:43 UTC) and on
+demand. It executes `scripts/check_upstream_pins.py`, which reads the pins from
+the files above — never from a list of its own, so it cannot disagree with
+them — and compares each one against the default branch of its repository with
+`git ls-remote`. No token, no clone. When something moved it opens one issue
+labelled `security` (or comments on the one already open) and fails the run.
+
+Read the table by the *Status* column:
+
+- **current** — the pinned commit is the upstream head.
+- **MOVED** — upstream moved. Nothing is broken: a pin is immutable, so an old
+  commit builds exactly as before. What changed is the code we parse as
+  untrusted input, and nobody has looked at the difference.
+- **unreadable** — the repository could not be read. The report is then
+  incomplete, the job exits 2 and says so. Do not read that run as "no drift".
+
+The check reports a fork and its parent as two rows. For `openosint` the
+**parent** row is the one that matters: the fork's own head can be current
+while `OpenOSINT/OpenOSINT` runs months ahead of it.
+
+Raising a pin is its own commit, in the file the table names, with the reason in
+the message. For OpenOSINT, verify first that
+`orchestrator/collectors/openosint.py` still resolves `investigate()` and
+`InvestigationBudget`: upstream does not ship `openosint/investigate.py`, only
+the fork does, so moving the pin to upstream breaks the collector at import
+time rather than at runtime.
+
 ## Release checklist and support SOP
 
 A release is a `vX.Y.Z` tag on `main`: the image workflow publishes
