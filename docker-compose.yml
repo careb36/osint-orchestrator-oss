@@ -41,7 +41,7 @@ services:
   # ── Infrastructure ──────────────────────────────────────────────────────────
 
   redis:
-    image: redis:8.0.6
+    image: redis:8.10.0
     profiles: ["opencti"]
     restart: unless-stopped
     volumes:
