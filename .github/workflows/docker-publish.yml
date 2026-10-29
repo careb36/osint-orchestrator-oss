@@ -29,6 +29,13 @@ on:
       - orchestrator/**
       - ui/**
       - .github/workflows/docker-publish.yml
+  # Monthly, so an accepted finding in .trivyignore is re-examined by the
+  # calendar rather than by luck. A `pull_request`-only scan only revisits the
+  # optional images when someone happens to change them; an `exp:` date that
+  # passes unnoticed would then sit there until the next such PR. Only the
+  # scanning job runs: see the `image` job's guard below.
+  schedule:
+    - cron: "23 4 1 * *" # 1st of the month, 04:23 UTC
   workflow_dispatch:
 
 concurrency:
@@ -36,16 +43,31 @@ concurrency:
   # replaces, so the single self-hosted runner does not build stale images.
   # Every other event (main, tags, dispatch) gets its own group and is never
   # cancelled, so each commit on main keeps its required checks.
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  #
+  # The schedule is pinned to a name of its own on purpose. With the usual
+  # `run_id` fallback every monthly run would land in a new group, so a stuck
+  # scheduled run would accumulate one queued copy per month; and grouping it
+  # with anything else would let a monthly scan queue behind, or cancel, work
+  # that belongs to a commit.
+  group: >-
+    ${{ github.event_name == 'schedule'
+        && 'scheduled-optional-image-scan'
+        || format('{0}-{1}', github.workflow, github.event.pull_request.number || github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'schedule' }}
 
 jobs:
   image:
     name: Build & push
     # For workflow_run events only proceed if CI succeeded.
+    #
+    # A scheduled run exists to re-scan the optional images, never to publish:
+    # scheduled workflows run from the default branch (always main), so pushing
+    # there would mint a fresh :main image every month without a commit, against
+    # a repository whose images are tagged by commit and release.
     if: >-
-      github.event_name != 'workflow_run' ||
-      github.event.workflow_run.conclusion == 'success'
+      github.event_name != 'schedule' &&
+      (github.event_name != 'workflow_run' ||
+       github.event.workflow_run.conclusion == 'success')
     runs-on: ${{ fromJSON(vars.CI_RUNS_ON || (github.event.repository.private && '["self-hosted","linux","x64","osint"]' || '"ubuntu-latest"')) }}
     permissions:
       contents: read
@@ -222,7 +244,16 @@ jobs:
     #     "ignore this job" rather than "bump the pin".
     # `ignore-unfixed: true` keeps both honest: only a finding with a published
     # fix can fail, and a published fix is exactly the action to take.
-    if: github.event_name == 'pull_request'
+    #
+    # Runs on pull_request and monthly on a schedule. The scheduled run is what
+    # makes an `.trivyignore` expiry date act as a deadline: on the first of the
+    # month, an `exp:` that has passed reinstates its finding and this job goes
+    # red without anyone having to touch the files. `workflow_dispatch` is
+    # included so the check can be run on demand.
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch'
     runs-on: ${{ fromJSON(vars.CI_RUNS_ON || (github.event.repository.private && '["self-hosted","linux","x64","osint"]' || '"ubuntu-latest"')) }}
     timeout-minutes: 40
     permissions:

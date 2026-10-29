@@ -200,3 +200,68 @@ def test_suppressed_findings_stay_visible_in_the_scan_log() -> None:
             f"{step.get('name')} hides progress, which suppresses the notice "
             "that findings were accepted; set TRIVY_SHOW_SUPPRESSED: 'true'"
         )
+
+
+DOCKER_PUBLISH_YAML = yaml.safe_load(DOCKER_PUBLISH)
+
+
+def test_scan_runs_monthly_so_an_expiry_becomes_a_deadline() -> None:
+    """An `exp:` date only means something if something re-runs the scan.
+
+    Without a schedule the optional images are scanned when a pull request
+    happens to touch them, so an expiry that passed could go unnoticed for
+    months - the entry would still be honoured on every run in between, which
+    is the permanence the `exp:` field was added to prevent.
+    """
+    triggers = DOCKER_PUBLISH_YAML[True]  # YAML 1.1 parses the `on:` key as True
+    assert "schedule" in triggers, "no schedule: image scans only run on pull_request"
+    crons = [entry["cron"] for entry in triggers["schedule"]]
+    assert len(crons) == 1, f"expected one cron, found {crons}"
+    minute, hour, dom, month, dow = crons[0].split()
+    assert dom.isdigit() and month == "*" and dow == "*", (
+        f"{crons[0]!r} is not a monthly run on a fixed day, so the expiry "
+        "check would fire on an unpredictable calendar"
+    )
+
+
+def _job_condition(job: str) -> str:
+    condition = DOCKER_PUBLISH_YAML["jobs"][job].get("if", "")
+    return " ".join(str(condition).split())
+
+
+def test_the_scheduled_run_scans_but_never_publishes() -> None:
+    """A scheduled run must not push an image.
+
+    The image job publishes whenever the event is not a pull request. A
+    schedule runs from the default branch, so without this guard every monthly
+    run would publish a new :main image with no commit behind it.
+    """
+    assert "github.event_name != 'schedule'" in _job_condition("image"), (
+        "the image job would publish a :main image on every scheduled run"
+    )
+    push_step_condition = "github.event_name != 'pull_request'"
+    assert push_step_condition in DOCKER_PUBLISH, (
+        "the publish step no longer keys off the event; recheck that a scheduled run cannot push"
+    )
+
+
+def test_the_scheduled_run_includes_the_optional_image_scan() -> None:
+    condition = _job_condition("optional-images")
+    assert "github.event_name == 'schedule'" in condition, (
+        "the scan is gated to pull_request, so the monthly run would skip the "
+        "job that exists to catch an expired acceptance"
+    )
+
+
+def test_a_monthly_run_cannot_pile_up_or_cancel_commit_work() -> None:
+    """Scheduled runs need their own concurrency group.
+
+    Falling back to `run_id` gives each monthly run a fresh group, so a queue
+    that is stuck accumulates one copy per month; sharing a group with commits
+    would let the scan cancel, or be cancelled by, work tied to a revision.
+    """
+    concurrency = DOCKER_PUBLISH_YAML["concurrency"]
+    group = " ".join(str(concurrency["group"]).split())
+    assert "scheduled-optional-image-scan" in group, (
+        "scheduled runs share the run_id group and can accumulate"
+    )

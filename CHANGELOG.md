@@ -37,6 +37,10 @@ from [SECURITY.md](SECURITY.md).
 
 ### Changed
 
+- The optional-image scan now also runs monthly, so an expired `.trivyignore`
+  acceptance turns into a red scheduled run on the first of the month instead
+  of waiting for a pull request that happens to touch those images. The
+  scheduled run scans only and never publishes an image.
 - CI runs on the self-hosted runner while GitHub-hosted minutes are exhausted.
   Every workflow takes its runner from the repository variable `CI_RUNS_ON`;
   unset, a private repository uses the runner labelled `osint` and a public
