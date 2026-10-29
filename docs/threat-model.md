@@ -1,19 +1,22 @@
 # Threat model — OSINT Orchestrator (OWASP pytm, threat library 114 threats)
 
-Modular monolith (ADR-001): one FastAPI process with an in-process APScheduler and a SQLite store drives OSINT collectors, qualifies evidence with an LLM, normalises findings to STIX 2.1 (ADR-002), ingests them into OpenCTI (ADR-003/008), seals a signed report chain per run (ADR-007) and dispatches alerts by webhook and e-mail. Access uses static API keys and a single instance (ADR-005), with an optional OIDC proxy perimeter (ADR-006) and an external STIX intake (ADR-011). Operator prose is Spanish, code English (ADR-004).
+Modular monolith (ADR-001): one FastAPI process with an in-process APScheduler and a SQLite store drives OSINT collectors, qualifies evidence with an LLM, normalises findings to STIX 2.1 (ADR-002), ingests them into OpenCTI (ADR-003/008), seals a signed report chain per run (ADR-007) and dispatches alerts by webhook and e-mail. Automation authenticates with static API keys (ADR-005), while staff use personal accounts with two roles and sign the professional dossiers of ADR-012; deployment is a single instance, with an optional OIDC proxy perimeter (ADR-006) and an external STIX intake (ADR-011). Operator prose is Spanish, code English (ADR-004).
 
 ## Assumptions
 
 - Single-instance deployment on a trusted Docker host; loopback-published ports are reachable only from that host.
 - The Docker host and the compose network are operated by the same team as the orchestrator.
 - ORCHESTRATOR_API_KEY is set. require_api_key is a no-op with an empty key (open mode, documented in ADR-005 and ADR-006); that mode is out of this model's scope.
+- Personal accounts (ADR-012): one administrator creates them, passwords are at least 12 characters and chosen by staff, and the machine key cannot act as a person. An install with no accounts yet still answers on the legacy key path, and that pre-upgrade state is the ADR-005 model, not this one.
+- The two roles separate the decision from the collection: an admin, and only a person, manages accounts (require_admin), an accountant decides on evidence and issues reports, and dossiers.py::_reviewer rejects anyone else. The operational admin routes — target reload, alert DLQ replay, OpenCTI outbox replay and POST /bundles — accept a machine key as well, which is the documented automation path of require_admin_or_machine. Least privilege is partial on purpose and the model keeps it as a control that is NOT met: any signed-in person can list and read every dossier (dossiers.py::list_cases filters by nothing but limit and offset), which is the shared-practice model the ADR describes, so a compromised accountant account reads the whole practice. Per-dossier scoping would be the fix, and it is a product decision.
+- Login brute force is bounded by a counter, not by a WAF: every wrong password increments user_accounts.failed_logins and the fifth locks the account for 15 minutes (accounts.py::login). An unknown username is not an oracle — same 401, and a dummy digest is verified so the timing matches — but there is no per-IP limit, no CAPTCHA and no MFA, so a distributed attempt against many usernames is slowed per account only, and whoever knows an accountant's username can lock them out for 15 minutes at will. The pytm library has no brute-force threat to attach this to, so it is recorded here and in the triage notes of the login flow.
 - The shipped docker-compose.auth.yml terminates no TLS: oauth2-proxy listens on plain HTTP on loopback and hardcodes OAUTH2_PROXY_COOKIE_SECURE=false, and the browser logs in at Keycloak's own HTTP endpoint (KC_HOSTNAME http://localhost:8085, OIDC_BROWSER_LOGIN_URL). A TLS terminator in front of both, with KC_HOSTNAME and the login URL on the https:// name, is a production hardening step, modelled as absent.
 - Alert channels are modelled with their defaults: SMTP with STARTTLS (ALERT_SMTP_STARTTLS=true) and the webhook over an https:// URL of the operator's with the optional HMAC signature (ALERT_WEBHOOK_SECRET) unset. ALERT_WEBHOOK_URL accepts any URL (config.py) and the notifier posts to it as given; an http:// webhook would carry the alert payload and the URL's own token in clear and is outside this model's scope.
 - Collectors only query targets authorised in targets.yaml (operator attestation per target).
 - OpenCTI, MISP, Amass, SocialOSINT and the OIDC overlay are optional deployments; the model covers them when enabled.
 - ORCHESTRATOR_SECRET_KEY is a private, randomly generated value. The default insecure-dev-key only earns a startup warning (auth.py); with it, or with an empty key, anyone can forge a manifest, and the integrity claims of this model do not hold.
 - The shipped compose has no Ollama service (docs/operations.md): `llm: local` needs an operator-provisioned Ollama on the same host, attached to the compose network or on loopback, which LLM_BASE_URL points at; that prerequisite is modelled inside the trusted compose boundary. OllamaClient posts to whatever URL is configured (providers/ollama.py), so a remote LLM_BASE_URL turns `llm: local` into the cloud-provider case of this model; a remote Ollama is not modelled separately.
-- The operator's browser is outside the model. The console keeps ORCHESTRATOR_API_KEY in sessionStorage and, with 'Remember me', in localStorage in clear (ui/src/lib/api.ts), so a key retained in a shared or compromised browser is the operator's residual risk. Hardening: no 'Remember me' on shared machines and rotation through the comma-separated key set.
+- The operator's browser is outside the model. Before an administrator exists the console keeps ORCHESTRATOR_API_KEY in sessionStorage and, with 'Remember me', in localStorage in clear (ui/src/lib/api.ts); once personal accounts exist it holds an HttpOnly session cookie it cannot read, and the key is only an automation credential. Either way a credential retained in a shared or compromised browser is the operator's residual risk. Hardening: no 'Remember me' on shared machines, and rotation through the comma-separated key set.
 
 ## Element classes
 
@@ -22,15 +25,15 @@ A response is written per class: the same threat means something different on th
 - **orchestrator**: Orchestrator API (FastAPI + APScheduler), APScheduler cron jobs
 - **sidecar**: SpiderFoot, Amass v5 engine, SocialOSINT sidecar, Ollama (local models), Ollama HTTP API
 - **vendor**: Tavily search API, Cloud LLM provider, SocialOSINT's LLM endpoint, SMTP relay (alert e-mail), Alert webhook receiver, oauth2-proxy, Keycloak, MISP, OpenCTI platform, OpenCTI backing stores, connector-misp, connector-opencti, OpenCTI worker, connector-import-file-stix, Keycloak data volume (keycloak-data), MISP backing stores (MariaDB, Redis), Elasticsearch, Redis (OpenCTI), MinIO, RabbitMQ, MariaDB (MISP), Redis (MISP), misp-modules
-- **store**: SQLite run store, targets.yaml, daily_reports (sealed runs), Amass asset database (shared volume), SocialOSINT cache volume, SpiderFoot scan database (spiderfoot-data volume)
+- **store**: SQLite store (orchestrator.db), targets.yaml, daily_reports (sealed runs), Amass asset database (shared volume), SocialOSINT cache volume, SpiderFoot scan database (spiderfoot-data volume)
 - **flow**: every dataflow, named by what it carries
 
-## Findings: 1363 across 89 distinct threats
+## Findings: 1414 across 89 distinct threats
 
 Every finding carries a triage response:
 
-- **accepted**: 684 finding(s)
-- **mitigated**: 21 finding(s)
+- **accepted**: 733 finding(s)
+- **mitigated**: 23 finding(s)
 - **transferred**: 658 finding(s)
 
 ## Triage summary by threat and element class
@@ -61,6 +64,7 @@ Every finding carries a triage response:
 | AC02 Shared Data Manipulation | Medium | vendor | transferred | OpenCTI's backing stores (Elasticsearch, MinIO, RabbitMQ, Redis) are owned and hardened by the OpenCTI platform deployment. |
 | AC05 Content Spoofing | Medium | flow | accepted | Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input. |
 | AC05 Content Spoofing | Medium | flow | accepted | With ALERT_WEBHOOK_SECRET unset (the modelled default) the receiver gets no orchestrator signature, so a custom endpoint without caller authentication cannot tell a forged alert from a real one; hosted Slack, Teams and Discord URLs authenticate the sender through the URL's own token instead. Hardening: set ALERT_WEBHOOK_SECRET and verify the HMAC-SHA256 signature at the receiver. |
+| AC05 Content Spoofing | Medium | flow | mitigated | The login route is unauthenticated by definition, so spoofing it means guessing a password. Five wrong attempts lock the account for 15 minutes (accounts.py::login), an unknown username gets the same 401 after a dummy digest so the timing does not disclose it, and accounts.py::check_browser_request rejects a cross-site or non-XHR post. What is NOT covered: no per-IP or global rate limit, no CAPTCHA, no MFA, so an attempt spread over many usernames is bounded per account only, and five deliberate failures deny a named accountant their sign-in for 15 minutes. |
 | AC06 Using Malicious Files | Very High | sidecar | accepted | The orchestrator never executes what a sidecar produces: SpiderFoot, Amass and SocialOSINT output is parsed into CollectorResult inside the collector module (docs/architecture.md). The sidecars' own file handling is upstream code running loopback-only from pinned images. Hardening: read-only root filesystems and dropped capabilities for the sidecars. |
 | AC06 Using Malicious Files | Very High | vendor | transferred | Keycloak, MISP, Tavily and the SMTP relay own their file-handling surface; the orchestrator uploads no files to them and renders nothing they serve. |
 | AC07 Exploiting Incorrectly Configured Access Control Security Levels | Medium | sidecar | accepted | There is no access control to misconfigure on the sidecars (AA01). |
@@ -96,8 +100,11 @@ Every finding carries a triage response:
 | AC21 Cross Site Request Forgery | Very High | orchestrator | mitigated | Personal sessions do ride an HttpOnly SameSite=Strict cookie, so a CSRF token is replaced by two checks on every mutating browser request: X-Requested-With must be XMLHttpRequest, which a cross-site form cannot set, and a present Origin must match the request's own origin (accounts.py::check_browser_request). Automation keeps header-only X-API-Key/Bearer credentials with no ambient cookie to forge; the console CSP sets form-action 'none'; the scheduler has no HTTP surface. The OIDC overlay adds oauth2-proxy's CSRF token. |
 | AC21 Cross Site Request Forgery | Very High | vendor | transferred | connector-misp has no browser-facing surface; CSRF on vendor UIs is the vendor's (oauth2-proxy implements its own CSRF token). |
 | AC23 Credentials Disclosure | High | flow | accepted | Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI. |
+| AC23 Credentials Disclosure | High | flow | accepted | Same hop as the read direction: the digests and the dossier rows are written to the same plaintext SQLite file the runs use, and the store is where they live out their lifetime. A copied database yields no usable session (only digests) but does yield the dossiers themselves. Hardening: volume encryption or an encrypted SQLite build. |
+| AC23 Credentials Disclosure | High | flow | accepted | What leaves the store is a password digest (pbkdf2), a session digest (SHA-256, usable only with the pre-image) and the account/dossier rows, over a host-local file hop. The credentials' own lifetime is bounded: a person rotates their password through POST /auth/password, an admin resets one, and a session row expires 8 hours after it was issued (accounts.SESSION_SECONDS). The plaintext file that holds them is the accepted at-rest gap (DR01). |
 | API01 Exploit Test APIs | High | orchestrator | mitigated | No test or debug endpoints ship; /docs is the read-only OpenAPI UI and every data route behind it still requires the API key (tests assert 401 without it). |
 | CR01 Session Sidejacking | High | flow | accepted | The shipped OIDC overlay runs oauth2-proxy on plain HTTP on loopback and hardcodes OAUTH2_PROXY_COOKIE_SECURE=false (no variable reads it): the session cookie is exposed to anything on the host, which ADR-005 trusts. Production: a TLS terminator in front of the proxy and of Keycloak's browser endpoint (KC_HOSTNAME and OIDC_BROWSER_LOGIN_URL on the https:// name) and a Compose override that sets OAUTH2_PROXY_COOKIE_SECURE to true. OpenCTI's own UI session on loopback :8080 (APP__BASE_URL http://localhost:8080) is the same case: plain HTTP on the trusted host, a TLS terminator and an https:// APP__BASE_URL in production. |
+| CR01 Session Sidejacking | High | flow | accepted | The token is minted server-side and handed over with HttpOnly, SameSite=Strict and Secure (ORCHESTRATOR_COOKIE_SECURE defaults to true, and docs/configuration.md tells an operator to keep it so), so no script can read it and no cross-site page can send it. Secure is not the protection here: the API ships on http://localhost:8000, which browsers treat as a trustworthy origin, so the cookie still travels in clear over loopback and anyone who can read that socket on the host — which ADR-005 trusts — can copy a live session for up to the 8-hour lifetime (accounts.SESSION_SECONDS). The store keeps only the digest, so a copied cookie is the sole way to use a session that leaks. Hardening: a TLS terminator in front of :8000 on a real hostname, or a shorter lifetime in accounts.py. |
 | CR01 Session Sidejacking | High | vendor | transferred | Session and credential handling inside Keycloak, OpenCTI, MISP, Tavily and the SMTP relay is the vendor's; the orchestrator presents only API tokens. |
 | CR02 Cross Site Tracing | Very High | flow | accepted | FastAPI answers TRACE with 405 and the console ships no inline script that could read reflected headers; the plaintext proxied hop itself is the DS06 decision (shipped overlay without TLS). Hardening: TLS terminator that drops TRACE. |
 | CR02 Cross Site Tracing | Very High | flow | transferred | TRACE handling on OpenCTI's web UI is the platform's; the UI is published on loopback only and nothing the orchestrator serves issues TRACE. Hardening: a TLS terminator in front of :8080 that drops TRACE. |
@@ -117,7 +124,6 @@ Every finding carries a triage response:
 | DE02 Double Encoding | Medium | vendor | transferred | Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves. |
 | DE03 Sniffing Attacks | Medium | flow | accepted | The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input. |
 | DE04 Audit Log Manipulation | High | store | accepted | Outside the manifest chain: scan rows and logs are plain SQLite the sidecar rewrites. The orchestrator reads a scan's events once, at collection, into evidence it then seals, and verifies nothing against this database afterwards, so a later edit here changes no sealed run but misleads whoever reads SpiderFoot's own UI. Hardening: volume permissions and deleting scans after collection. |
-| DE04 Audit Log Manipulation | High | store | accepted | Run rows are outside the manifest chain: /targets/{id}/chain/verify checks the manifest hash, signature, chain link and artefact files (evidence.py), not a row's status, collectors or timestamps, so an edit to those fields with the manifest intact goes undetected. Hardening: database file permissions, backups and disk encryption. |
 | DE04 Audit Log Manipulation | High | store | accepted | The cache is outside the manifest chain: profiles and posts under /app/data are plain files the sidecar rewrites at will, with no signature or audit log, and the orchestrator only ever reads the sidecar's report, so an edit there is invisible to it. Hardening: an ephemeral or read-only volume and file permissions. |
 | DE04 Audit Log Manipulation | High | store | mitigated | Run artefacts are HMAC-signed and chained per target (ADR-007): tampering with daily_reports is detectable through /targets/{id}/chain/verify. targets.yaml is mounted read-only. The Amass asset database carries collector input, not audit data. Application logs are stdout for the operator's shipper. |
 | DE04 Audit Log Manipulation | High | vendor | transferred | The platform's own audit trail (OpenCTI, Keycloak events, MISP logs) lives in its backing stores and is the platform's. |
@@ -131,6 +137,7 @@ Every finding carries a triage response:
 | DO02 Excessive Allocation | Medium | store | accepted | Stores grow with runs. The scheduler's retention purge bounds run rows and daily_reports but keeps seen_observables on purpose (retention.py: the delta memory between runs), so SQLite still grows with every new observable; asset.db is outside the purge and grows with every Amass run; targets.yaml grows with the inventory only. Hardening: disk quotas and monitoring on the volumes, and a prune of seen_observables for retired targets. |
 | DO02 Excessive Allocation | Medium | vendor | transferred | Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves. |
 | DR01 Unprotected Sensitive Data | High | flow | accepted | Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input. |
+| DR01 Unprotected Sensitive Data | High | flow | accepted | The password crosses loopback in clear, which ADR-005 accepts for the trusted host: it is a pydantic SecretStr, so no log line or traceback can print it, and the response is sent with Cache-Control: no-store. Hardening: a TLS terminator in front of :8000, at which point this pair disappears from the finding set. |
 | DS01 Excavation | Medium | sidecar | accepted | Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current. |
 | DS01 Excavation | Medium | vendor | transferred | Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves. |
 | DS03 Footprinting | Very Low | sidecar | accepted | Footprinting of the loopback-only SpiderFoot service yields no external surface; documented in compose comments. |
@@ -139,6 +146,7 @@ Every finding carries a triage response:
 | DS04 XSS Targeting Error Pages | Medium | vendor | transferred | Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves. |
 | DS06 Data Leak | Very High | flow | accepted | GET /metrics answers without an API key by design (scrapers are not API clients; ORCHESTRATOR_METRICS_ENABLED defaults to true): target ids, run status, durations and observable counts go to whoever reaches :8000, which ADR-005 limits to the trusted host. Hardening: ORCHESTRATOR_METRICS_ENABLED=false, or a scraper-only network policy or an authenticating TLS terminator in front of /metrics. |
 | DS06 Data Leak | Very High | flow | accepted | Handling limits are declared per endpoint (SECRET where a service receives its own credentials, PUBLIC for the open web and anonymous callers) and per flow (SECRET on the trusted host or under TLS, PUBLIC in clear across the internet boundary), so what fires here is deliberate: every lookup tells the public source which name is being researched (search queries and discovery traffic, plaintext DNS/WHOIS included; Amass's provider keys go to the providers that issued them, over TLS), and the operator's API key, OIDC session, Keycloak password and OpenCTI admin password and UI session cross the host boundary in clear on :8000, :8080 and the shipped OIDC overlay, which terminates no TLS (ADR-005), and the reports, findings and evidence come back to the operator the same way. The disclosure to the sources queried is inherent to OSINT and bounded by the per-target authorisation. Hardening: a TLS terminator in front of :8000, :8002, OpenCTI's UI (:8080, APP__BASE_URL on the https:// name) and Keycloak's browser endpoint (:8085), with KC_HOSTNAME and OIDC_BROWSER_LOGIN_URL on the https:// name. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input. |
+| DS06 Data Leak | Very High | flow | accepted | The flow's limit is PUBLIC because the sink is the operator's boundary and the hop is not encrypted, so a SECRET session token on it is reported by construction. It is the same decision as the cookie exposure: the host is trusted, the token is HttpOnly, SameSite=Strict and revoked on logout, and it expires. Hardening: TLS in front of :8000. |
 | HA01 Path Traversal | Very High | sidecar | accepted | Input handling inside the sidecar is upstream code the orchestrator does not change; the sidecar is reachable only on loopback or the compose bridge (ADR-005) and its output is parsed as untrusted text into CollectorResult. Hardening: network policies, read-only root filesystems, keeping the pinned images current. |
 | HA01 Path Traversal | Very High | vendor | transferred | Input handling inside the vendor service is the vendor's; the orchestrator sends it well-formed requests built from validated data and renders nothing it serves. |
 | HA03 Web Application Fingerprinting | Low | sidecar | accepted | SpiderFoot's unauthenticated UI is upstream design; compose publishes it on loopback only, limiting fingerprinting to the host itself. |
@@ -223,7 +231,7 @@ Every finding carries a triage response:
 
 ## Full findings
 
-### Severity: Very High (133)
+### Severity: Very High (143)
 
 #### F-7 — Command Line Execution through SQL Injection  `INP05`
 
@@ -959,71 +967,131 @@ Every finding carries a triage response:
 
 #### F-1015 — Data Leak  `DS06`
 
+- **Element:** POST /auth/login (sign-in) (flow)
+- **Response:** accepted — Handling limits are declared per endpoint (SECRET where a service receives its own credentials, PUBLIC for the open web and anonymous callers) and per flow (SECRET on the trusted host or under TLS, PUBLIC in clear across the internet boundary), so what fires here is deliberate: every lookup tells the public source which name is being researched (search queries and discovery traffic, plaintext DNS/WHOIS included; Amass's provider keys go to the providers that issued them, over TLS), and the operator's API key, OIDC session, Keycloak password and OpenCTI admin password and UI session cross the host boundary in clear on :8000, :8080 and the shipped OIDC overlay, which terminates no TLS (ADR-005), and the reports, findings and evidence come back to the operator the same way. The disclosure to the sources queried is inherent to OSINT and bounded by the per-target authorisation. Hardening: a TLS terminator in front of :8000, :8002, OpenCTI's UI (:8080, APP__BASE_URL on the https:// name) and Keycloak's browser endpoint (:8085), with KC_HOSTNAME and OIDC_BROWSER_LOGIN_URL on the https:// name. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1018 — Cross Site Tracing  `CR02`
+
+- **Element:** Set-Cookie orchestrator_session (login response) (flow)
+- **Response:** accepted — FastAPI answers TRACE with 405 and the console ships no inline script that could read reflected headers; the plaintext proxied hop itself is the DS06 decision (shipped overlay without TLS). Hardening: TLS terminator that drops TRACE.
+- **pytm mitigations:** Administrators should disable support for HTTP TRACE at the destination's web server. Vendors should disable TRACE by default. Patch web browser against known security origin policy bypass exploits.
+
+#### F-1024 — Data Leak  `DS06`
+
+- **Element:** Set-Cookie orchestrator_session (login response) (flow)
+- **Response:** accepted — The flow's limit is PUBLIC because the sink is the operator's boundary and the hop is not encrypted, so a SECRET session token on it is reported by construction. It is the same decision as the cookie exposure: the host is trusted, the token is HttpOnly, SameSite=Strict and revoked on logout, and it expires. Hardening: TLS in front of :8000.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1027 — Cross Site Tracing  `CR02`
+
+- **Element:** Console calls with the personal session (accountant/admin) (flow)
+- **Response:** accepted — FastAPI answers TRACE with 405 and the console ships no inline script that could read reflected headers; the plaintext proxied hop itself is the DS06 decision (shipped overlay without TLS). Hardening: TLS terminator that drops TRACE.
+- **pytm mitigations:** Administrators should disable support for HTTP TRACE at the destination's web server. Vendors should disable TRACE by default. Patch web browser against known security origin policy bypass exploits.
+
+#### F-1033 — Data Leak  `DS06`
+
+- **Element:** Console calls with the personal session (accountant/admin) (flow)
+- **Response:** accepted — Handling limits are declared per endpoint (SECRET where a service receives its own credentials, PUBLIC for the open web and anonymous callers) and per flow (SECRET on the trusted host or under TLS, PUBLIC in clear across the internet boundary), so what fires here is deliberate: every lookup tells the public source which name is being researched (search queries and discovery traffic, plaintext DNS/WHOIS included; Amass's provider keys go to the providers that issued them, over TLS), and the operator's API key, OIDC session, Keycloak password and OpenCTI admin password and UI session cross the host boundary in clear on :8000, :8080 and the shipped OIDC overlay, which terminates no TLS (ADR-005), and the reports, findings and evidence come back to the operator the same way. The disclosure to the sources queried is inherent to OSINT and bounded by the per-target authorisation. Hardening: a TLS terminator in front of :8000, :8002, OpenCTI's UI (:8080, APP__BASE_URL on the https:// name) and Keycloak's browser endpoint (:8085), with KC_HOSTNAME and OIDC_BROWSER_LOGIN_URL on the https:// name. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1036 — Cross Site Tracing  `CR02`
+
+- **Element:** Dossier write: evidence decisions, reasons and conclusion (flow)
+- **Response:** accepted — FastAPI answers TRACE with 405 and the console ships no inline script that could read reflected headers; the plaintext proxied hop itself is the DS06 decision (shipped overlay without TLS). Hardening: TLS terminator that drops TRACE.
+- **pytm mitigations:** Administrators should disable support for HTTP TRACE at the destination's web server. Vendors should disable TRACE by default. Patch web browser against known security origin policy bypass exploits.
+
+#### F-1042 — Data Leak  `DS06`
+
+- **Element:** Dossier write: evidence decisions, reasons and conclusion (flow)
+- **Response:** accepted — Handling limits are declared per endpoint (SECRET where a service receives its own credentials, PUBLIC for the open web and anonymous callers) and per flow (SECRET on the trusted host or under TLS, PUBLIC in clear across the internet boundary), so what fires here is deliberate: every lookup tells the public source which name is being researched (search queries and discovery traffic, plaintext DNS/WHOIS included; Amass's provider keys go to the providers that issued them, over TLS), and the operator's API key, OIDC session, Keycloak password and OpenCTI admin password and UI session cross the host boundary in clear on :8000, :8080 and the shipped OIDC overlay, which terminates no TLS (ADR-005), and the reports, findings and evidence come back to the operator the same way. The disclosure to the sources queried is inherent to OSINT and bounded by the per-target authorisation. Hardening: a TLS terminator in front of :8000, :8002, OpenCTI's UI (:8080, APP__BASE_URL on the https:// name) and Keycloak's browser endpoint (:8085), with KC_HOSTNAME and OIDC_BROWSER_LOGIN_URL on the https:// name. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1049 — Data Leak  `DS06`
+
+- **Element:** Issued report version (markdown/PDF download) (flow)
+- **Response:** accepted — Handling limits are declared per endpoint (SECRET where a service receives its own credentials, PUBLIC for the open web and anonymous callers) and per flow (SECRET on the trusted host or under TLS, PUBLIC in clear across the internet boundary), so what fires here is deliberate: every lookup tells the public source which name is being researched (search queries and discovery traffic, plaintext DNS/WHOIS included; Amass's provider keys go to the providers that issued them, over TLS), and the operator's API key, OIDC session, Keycloak password and OpenCTI admin password and UI session cross the host boundary in clear on :8000, :8080 and the shipped OIDC overlay, which terminates no TLS (ADR-005), and the reports, findings and evidence come back to the operator the same way. The disclosure to the sources queried is inherent to OSINT and bounded by the per-target authorisation. Hardening: a TLS terminator in front of :8000, :8002, OpenCTI's UI (:8080, APP__BASE_URL on the https:// name) and Keycloak's browser endpoint (:8085), with KC_HOSTNAME and OIDC_BROWSER_LOGIN_URL on the https:// name. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1056 — Data Leak  `DS06`
+
 - **Element:** GET /health, /metrics (flow)
 - **Response:** accepted — GET /metrics answers without an API key by design (scrapers are not API clients; ORCHESTRATOR_METRICS_ENABLED defaults to true): target ids, run status, durations and observable counts go to whoever reaches :8000, which ADR-005 limits to the trusted host. Hardening: ORCHESTRATOR_METRICS_ENABLED=false, or a scraper-only network policy or an authenticating TLS terminator in front of /metrics.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-1022 — Data Leak  `DS06`
+#### F-1063 — Data Leak  `DS06`
 
 - **Element:** POST /bundles (STIX intake) (flow)
 - **Response:** accepted — Handling limits are declared per endpoint (SECRET where a service receives its own credentials, PUBLIC for the open web and anonymous callers) and per flow (SECRET on the trusted host or under TLS, PUBLIC in clear across the internet boundary), so what fires here is deliberate: every lookup tells the public source which name is being researched (search queries and discovery traffic, plaintext DNS/WHOIS included; Amass's provider keys go to the providers that issued them, over TLS), and the operator's API key, OIDC session, Keycloak password and OpenCTI admin password and UI session cross the host boundary in clear on :8000, :8080 and the shipped OIDC overlay, which terminates no TLS (ADR-005), and the reports, findings and evidence come back to the operator the same way. The disclosure to the sources queried is inherent to OSINT and bounded by the per-target authorisation. Hardening: a TLS terminator in front of :8000, :8002, OpenCTI's UI (:8080, APP__BASE_URL on the https:// name) and Keycloak's browser endpoint (:8085), with KC_HOSTNAME and OIDC_BROWSER_LOGIN_URL on the https:// name. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-1057 — Data Leak  `DS06`
+#### F-1098 — Data Leak  `DS06`
 
 - **Element:** Passive data-source queries (datasources.yaml keys) (flow)
 - **Response:** accepted — Handling limits are declared per endpoint (SECRET where a service receives its own credentials, PUBLIC for the open web and anonymous callers) and per flow (SECRET on the trusted host or under TLS, PUBLIC in clear across the internet boundary), so what fires here is deliberate: every lookup tells the public source which name is being researched (search queries and discovery traffic, plaintext DNS/WHOIS included; Amass's provider keys go to the providers that issued them, over TLS), and the operator's API key, OIDC session, Keycloak password and OpenCTI admin password and UI session cross the host boundary in clear on :8000, :8080 and the shipped OIDC overlay, which terminates no TLS (ADR-005), and the reports, findings and evidence come back to the operator the same way. The disclosure to the sources queried is inherent to OSINT and bounded by the per-target authorisation. Hardening: a TLS terminator in front of :8000, :8002, OpenCTI's UI (:8080, APP__BASE_URL on the https:// name) and Keycloak's browser endpoint (:8085), with KC_HOSTNAME and OIDC_BROWSER_LOGIN_URL on the https:// name. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-1064 — Data Leak  `DS06`
+#### F-1105 — Data Leak  `DS06`
 
 - **Element:** DNS resolution and active probes (zone transfers, certificate grabs when enabled) (flow)
 - **Response:** accepted — Handling limits are declared per endpoint (SECRET where a service receives its own credentials, PUBLIC for the open web and anonymous callers) and per flow (SECRET on the trusted host or under TLS, PUBLIC in clear across the internet boundary), so what fires here is deliberate: every lookup tells the public source which name is being researched (search queries and discovery traffic, plaintext DNS/WHOIS included; Amass's provider keys go to the providers that issued them, over TLS), and the operator's API key, OIDC session, Keycloak password and OpenCTI admin password and UI session cross the host boundary in clear on :8000, :8080 and the shipped OIDC overlay, which terminates no TLS (ADR-005), and the reports, findings and evidence come back to the operator the same way. The disclosure to the sources queried is inherent to OSINT and bounded by the per-target authorisation. Hardening: a TLS terminator in front of :8000, :8002, OpenCTI's UI (:8080, APP__BASE_URL on the https:// name) and Keycloak's browser endpoint (:8085), with KC_HOSTNAME and OIDC_BROWSER_LOGIN_URL on the https:// name. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-1104 — Data Leak  `DS06`
+#### F-1145 — Data Leak  `DS06`
 
 - **Element:** DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois) (flow)
 - **Response:** accepted — Handling limits are declared per endpoint (SECRET where a service receives its own credentials, PUBLIC for the open web and anonymous callers) and per flow (SECRET on the trusted host or under TLS, PUBLIC in clear across the internet boundary), so what fires here is deliberate: every lookup tells the public source which name is being researched (search queries and discovery traffic, plaintext DNS/WHOIS included; Amass's provider keys go to the providers that issued them, over TLS), and the operator's API key, OIDC session, Keycloak password and OpenCTI admin password and UI session cross the host boundary in clear on :8000, :8080 and the shipped OIDC overlay, which terminates no TLS (ADR-005), and the reports, findings and evidence come back to the operator the same way. The disclosure to the sources queried is inherent to OSINT and bounded by the per-target authorisation. Hardening: a TLS terminator in front of :8000, :8002, OpenCTI's UI (:8080, APP__BASE_URL on the https:// name) and Keycloak's browser endpoint (:8085), with KC_HOSTNAME and OIDC_BROWSER_LOGIN_URL on the https:// name. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-1110 — Data Leak  `DS06`
+#### F-1151 — Data Leak  `DS06`
 
 - **Element:** TLS certificate and HTTPS fetches (sfp_sslcert) (flow)
 - **Response:** accepted — Handling limits are declared per endpoint (SECRET where a service receives its own credentials, PUBLIC for the open web and anonymous callers) and per flow (SECRET on the trusted host or under TLS, PUBLIC in clear across the internet boundary), so what fires here is deliberate: every lookup tells the public source which name is being researched (search queries and discovery traffic, plaintext DNS/WHOIS included; Amass's provider keys go to the providers that issued them, over TLS), and the operator's API key, OIDC session, Keycloak password and OpenCTI admin password and UI session cross the host boundary in clear on :8000, :8080 and the shipped OIDC overlay, which terminates no TLS (ADR-005), and the reports, findings and evidence come back to the operator the same way. The disclosure to the sources queried is inherent to OSINT and bounded by the per-target authorisation. Hardening: a TLS terminator in front of :8000, :8002, OpenCTI's UI (:8080, APP__BASE_URL on the https:// name) and Keycloak's browser endpoint (:8085), with KC_HOSTNAME and OIDC_BROWSER_LOGIN_URL on the https:// name. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-1128 — Data Leak  `DS06`
+#### F-1169 — Data Leak  `DS06`
 
 - **Element:** DNS and WHOIS pivots (OpenOSINT) (flow)
 - **Response:** accepted — Handling limits are declared per endpoint (SECRET where a service receives its own credentials, PUBLIC for the open web and anonymous callers) and per flow (SECRET on the trusted host or under TLS, PUBLIC in clear across the internet boundary), so what fires here is deliberate: every lookup tells the public source which name is being researched (search queries and discovery traffic, plaintext DNS/WHOIS included; Amass's provider keys go to the providers that issued them, over TLS), and the operator's API key, OIDC session, Keycloak password and OpenCTI admin password and UI session cross the host boundary in clear on :8000, :8080 and the shipped OIDC overlay, which terminates no TLS (ADR-005), and the reports, findings and evidence come back to the operator the same way. The disclosure to the sources queried is inherent to OSINT and bounded by the per-target authorisation. Hardening: a TLS terminator in front of :8000, :8002, OpenCTI's UI (:8080, APP__BASE_URL on the https:// name) and Keycloak's browser endpoint (:8085), with KC_HOSTNAME and OIDC_BROWSER_LOGIN_URL on the https:// name. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-1134 — Data Leak  `DS06`
+#### F-1175 — Data Leak  `DS06`
 
 - **Element:** HTTPS source lookups (OpenOSINT) (flow)
 - **Response:** accepted — Handling limits are declared per endpoint (SECRET where a service receives its own credentials, PUBLIC for the open web and anonymous callers) and per flow (SECRET on the trusted host or under TLS, PUBLIC in clear across the internet boundary), so what fires here is deliberate: every lookup tells the public source which name is being researched (search queries and discovery traffic, plaintext DNS/WHOIS included; Amass's provider keys go to the providers that issued them, over TLS), and the operator's API key, OIDC session, Keycloak password and OpenCTI admin password and UI session cross the host boundary in clear on :8000, :8080 and the shipped OIDC overlay, which terminates no TLS (ADR-005), and the reports, findings and evidence come back to the operator the same way. The disclosure to the sources queried is inherent to OSINT and bounded by the per-target authorisation. Hardening: a TLS terminator in front of :8000, :8002, OpenCTI's UI (:8080, APP__BASE_URL on the https:// name) and Keycloak's browser endpoint (:8085), with KC_HOSTNAME and OIDC_BROWSER_LOGIN_URL on the https:// name. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-1188 — Data Leak  `DS06`
+#### F-1229 — Data Leak  `DS06`
 
 - **Element:** Reports, findings and evidence (direct loopback) (flow)
 - **Response:** accepted — Handling limits are declared per endpoint (SECRET where a service receives its own credentials, PUBLIC for the open web and anonymous callers) and per flow (SECRET on the trusted host or under TLS, PUBLIC in clear across the internet boundary), so what fires here is deliberate: every lookup tells the public source which name is being researched (search queries and discovery traffic, plaintext DNS/WHOIS included; Amass's provider keys go to the providers that issued them, over TLS), and the operator's API key, OIDC session, Keycloak password and OpenCTI admin password and UI session cross the host boundary in clear on :8000, :8080 and the shipped OIDC overlay, which terminates no TLS (ADR-005), and the reports, findings and evidence come back to the operator the same way. The disclosure to the sources queried is inherent to OSINT and bounded by the per-target authorisation. Hardening: a TLS terminator in front of :8000, :8002, OpenCTI's UI (:8080, APP__BASE_URL on the https:// name) and Keycloak's browser endpoint (:8085), with KC_HOSTNAME and OIDC_BROWSER_LOGIN_URL on the https:// name. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-1197 — Cross Site Tracing  `CR02`
+#### F-1238 — Cross Site Tracing  `CR02`
 
 - **Element:** Proxied responses to the browser (shipped overlay) (flow)
 - **Response:** accepted — FastAPI answers TRACE with 405 and the console ships no inline script that could read reflected headers; the plaintext proxied hop itself is the DS06 decision (shipped overlay without TLS). Hardening: TLS terminator that drops TRACE.
 - **pytm mitigations:** Administrators should disable support for HTTP TRACE at the destination's web server. Vendors should disable TRACE by default. Patch web browser against known security origin policy bypass exploits.
 
-#### F-1203 — Data Leak  `DS06`
+#### F-1244 — Data Leak  `DS06`
 
 - **Element:** Proxied responses to the browser (shipped overlay) (flow)
 - **Response:** accepted — Handling limits are declared per endpoint (SECRET where a service receives its own credentials, PUBLIC for the open web and anonymous callers) and per flow (SECRET on the trusted host or under TLS, PUBLIC in clear across the internet boundary), so what fires here is deliberate: every lookup tells the public source which name is being researched (search queries and discovery traffic, plaintext DNS/WHOIS included; Amass's provider keys go to the providers that issued them, over TLS), and the operator's API key, OIDC session, Keycloak password and OpenCTI admin password and UI session cross the host boundary in clear on :8000, :8080 and the shipped OIDC overlay, which terminates no TLS (ADR-005), and the reports, findings and evidence come back to the operator the same way. The disclosure to the sources queried is inherent to OSINT and bounded by the per-target authorisation. Hardening: a TLS terminator in front of :8000, :8002, OpenCTI's UI (:8080, APP__BASE_URL on the https:// name) and Keycloak's browser endpoint (:8085), with KC_HOSTNAME and OIDC_BROWSER_LOGIN_URL on the https:// name. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-### Severity: High (530)
+#### F-1251 — Data Leak  `DS06`
+
+- **Element:** Run/state SQL (flow)
+- **Response:** accepted — Handling limits are declared per endpoint (SECRET where a service receives its own credentials, PUBLIC for the open web and anonymous callers) and per flow (SECRET on the trusted host or under TLS, PUBLIC in clear across the internet boundary), so what fires here is deliberate: every lookup tells the public source which name is being researched (search queries and discovery traffic, plaintext DNS/WHOIS included; Amass's provider keys go to the providers that issued them, over TLS), and the operator's API key, OIDC session, Keycloak password and OpenCTI admin password and UI session cross the host boundary in clear on :8000, :8080 and the shipped OIDC overlay, which terminates no TLS (ADR-005), and the reports, findings and evidence come back to the operator the same way. The disclosure to the sources queried is inherent to OSINT and bounded by the per-target authorisation. Hardening: a TLS terminator in front of :8000, :8002, OpenCTI's UI (:8080, APP__BASE_URL on the https:// name) and Keycloak's browser endpoint (:8085), with KC_HOSTNAME and OIDC_BROWSER_LOGIN_URL on the https:// name. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1259 — Data Leak  `DS06`
+
+- **Element:** Read accounts, sessions and dossiers (flow)
+- **Response:** accepted — Handling limits are declared per endpoint (SECRET where a service receives its own credentials, PUBLIC for the open web and anonymous callers) and per flow (SECRET on the trusted host or under TLS, PUBLIC in clear across the internet boundary), so what fires here is deliberate: every lookup tells the public source which name is being researched (search queries and discovery traffic, plaintext DNS/WHOIS included; Amass's provider keys go to the providers that issued them, over TLS), and the operator's API key, OIDC session, Keycloak password and OpenCTI admin password and UI session cross the host boundary in clear on :8000, :8080 and the shipped OIDC overlay, which terminates no TLS (ADR-005), and the reports, findings and evidence come back to the operator the same way. The disclosure to the sources queried is inherent to OSINT and bounded by the per-target authorisation. Hardening: a TLS terminator in front of :8000, :8002, OpenCTI's UI (:8080, APP__BASE_URL on the https:// name) and Keycloak's browser endpoint (:8085), with KC_HOSTNAME and OIDC_BROWSER_LOGIN_URL on the https:// name. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+### Severity: High (547)
 
 #### F-1 — Direct Prompt Injection  `LLM01`
 
@@ -1531,8 +1599,8 @@ Every finding carries a triage response:
 
 #### F-206 — Audit Log Manipulation  `DE04`
 
-- **Element:** SQLite run store (store)
-- **Response:** accepted — Run rows are outside the manifest chain: /targets/{id}/chain/verify checks the manifest hash, signature, chain link and artefact files (evidence.py), not a row's status, collectors or timestamps, so an edit to those fields with the manifest intact goes undetected. Hardening: database file permissions, backups and disk encryption.
+- **Element:** SQLite store (orchestrator.db) (store)
+- **Response:** mitigated — Run artefacts are HMAC-signed and chained per target (ADR-007): tampering with daily_reports is detectable through /targets/{id}/chain/verify. targets.yaml is mounted read-only. The Amass asset database carries collector input, not audit data. Application logs are stdout for the operator's shipper.
 - **pytm mitigations:** Use Principle of Least Privilege to avoid unauthorized access to log files leading to manipulation/injection on those files. Do not allow tainted data to be written in the log file without prior input validation. Whitelisting may be used to properly validate the data. Use synchronization to control the flow of execution. Use static analysis tool to identify log forging vulnerabilities. Avoid viewing logs with tools that may interpret control characters in the file, such as command-line shells.
 
 #### F-210 — Audit Log Manipulation  `DE04`
@@ -3475,737 +3543,839 @@ Every finding carries a triage response:
 
 #### F-1013 — Communication Channel Manipulation  `CR06`
 
-- **Element:** GET /health, /metrics (flow)
+- **Element:** POST /auth/login (sign-in) (flow)
 - **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
 #### F-1016 — Unprotected Sensitive Data  `DR01`
 
+- **Element:** POST /auth/login (sign-in) (flow)
+- **Response:** accepted — The password crosses loopback in clear, which ADR-005 accepts for the trusted host: it is a pydantic SecretStr, so no log line or traceback can print it, and the response is sent with Cache-Control: no-store. Hardening: a TLS terminator in front of :8000, at which point this pair disappears from the finding set.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1017 — Session Sidejacking  `CR01`
+
+- **Element:** Set-Cookie orchestrator_session (login response) (flow)
+- **Response:** accepted — The token is minted server-side and handed over with HttpOnly, SameSite=Strict and Secure (ORCHESTRATOR_COOKIE_SECURE defaults to true, and docs/configuration.md tells an operator to keep it so), so no script can read it and no cross-site page can send it. Secure is not the protection here: the API ships on http://localhost:8000, which browsers treat as a trustworthy origin, so the cookie still travels in clear over loopback and anyone who can read that socket on the host — which ADR-005 trusts — can copy a live session for up to the 8-hour lifetime (accounts.SESSION_SECONDS). The store keeps only the digest, so a copied cookie is the sole way to use a session that leaks. Hardening: a TLS terminator in front of :8000 on a real hostname, or a shorter lifetime in accounts.py.
+- **pytm mitigations:** Make sure that HTTPS is used to communicate with the target system. Alternatively, use VPN if possible. It is important to ensure that all communication between the client and the server happens via an encrypted secure channel. Modify the session token with each transmission and protect it with cryptography. Add the idea of request sequencing that gives the server an ability to detect replay attacks.
+
+#### F-1022 — Communication Channel Manipulation  `CR06`
+
+- **Element:** Set-Cookie orchestrator_session (login response) (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1025 — Unprotected Sensitive Data  `DR01`
+
+- **Element:** Set-Cookie orchestrator_session (login response) (flow)
+- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1026 — Session Sidejacking  `CR01`
+
+- **Element:** Console calls with the personal session (accountant/admin) (flow)
+- **Response:** accepted — The shipped OIDC overlay runs oauth2-proxy on plain HTTP on loopback and hardcodes OAUTH2_PROXY_COOKIE_SECURE=false (no variable reads it): the session cookie is exposed to anything on the host, which ADR-005 trusts. Production: a TLS terminator in front of the proxy and of Keycloak's browser endpoint (KC_HOSTNAME and OIDC_BROWSER_LOGIN_URL on the https:// name) and a Compose override that sets OAUTH2_PROXY_COOKIE_SECURE to true. OpenCTI's own UI session on loopback :8080 (APP__BASE_URL http://localhost:8080) is the same case: plain HTTP on the trusted host, a TLS terminator and an https:// APP__BASE_URL in production.
+- **pytm mitigations:** Make sure that HTTPS is used to communicate with the target system. Alternatively, use VPN if possible. It is important to ensure that all communication between the client and the server happens via an encrypted secure channel. Modify the session token with each transmission and protect it with cryptography. Add the idea of request sequencing that gives the server an ability to detect replay attacks.
+
+#### F-1031 — Communication Channel Manipulation  `CR06`
+
+- **Element:** Console calls with the personal session (accountant/admin) (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1034 — Unprotected Sensitive Data  `DR01`
+
+- **Element:** Console calls with the personal session (accountant/admin) (flow)
+- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1035 — Session Sidejacking  `CR01`
+
+- **Element:** Dossier write: evidence decisions, reasons and conclusion (flow)
+- **Response:** accepted — The shipped OIDC overlay runs oauth2-proxy on plain HTTP on loopback and hardcodes OAUTH2_PROXY_COOKIE_SECURE=false (no variable reads it): the session cookie is exposed to anything on the host, which ADR-005 trusts. Production: a TLS terminator in front of the proxy and of Keycloak's browser endpoint (KC_HOSTNAME and OIDC_BROWSER_LOGIN_URL on the https:// name) and a Compose override that sets OAUTH2_PROXY_COOKIE_SECURE to true. OpenCTI's own UI session on loopback :8080 (APP__BASE_URL http://localhost:8080) is the same case: plain HTTP on the trusted host, a TLS terminator and an https:// APP__BASE_URL in production.
+- **pytm mitigations:** Make sure that HTTPS is used to communicate with the target system. Alternatively, use VPN if possible. It is important to ensure that all communication between the client and the server happens via an encrypted secure channel. Modify the session token with each transmission and protect it with cryptography. Add the idea of request sequencing that gives the server an ability to detect replay attacks.
+
+#### F-1040 — Communication Channel Manipulation  `CR06`
+
+- **Element:** Dossier write: evidence decisions, reasons and conclusion (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1043 — Unprotected Sensitive Data  `DR01`
+
+- **Element:** Dossier write: evidence decisions, reasons and conclusion (flow)
+- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1047 — Communication Channel Manipulation  `CR06`
+
+- **Element:** Issued report version (markdown/PDF download) (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1050 — Unprotected Sensitive Data  `DR01`
+
+- **Element:** Issued report version (markdown/PDF download) (flow)
+- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1054 — Communication Channel Manipulation  `CR06`
+
+- **Element:** GET /health, /metrics (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1057 — Unprotected Sensitive Data  `DR01`
+
 - **Element:** GET /health, /metrics (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-1020 — Communication Channel Manipulation  `CR06`
+#### F-1061 — Communication Channel Manipulation  `CR06`
 
 - **Element:** POST /bundles (STIX intake) (flow)
 - **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-1023 — Unprotected Sensitive Data  `DR01`
+#### F-1064 — Unprotected Sensitive Data  `DR01`
 
 - **Element:** POST /bundles (STIX intake) (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-1024 — Credentials Disclosure  `AC23`
+#### F-1065 — Credentials Disclosure  `AC23`
 
 - **Element:** POST /bundles (STIX intake) (flow)
 - **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI.
 - **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
 
-#### F-1028 — Communication Channel Manipulation  `CR06`
+#### F-1069 — Communication Channel Manipulation  `CR06`
 
 - **Element:** Cron dispatch (in-process) (flow)
 - **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-1033 — Communication Channel Manipulation  `CR06`
+#### F-1074 — Communication Channel Manipulation  `CR06`
 
 - **Element:** Scan control & results (flow)
 - **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-1035 — Unprotected Sensitive Data  `DR01`
+#### F-1076 — Unprotected Sensitive Data  `DR01`
 
 - **Element:** Scan control & results (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-1039 — Communication Channel Manipulation  `CR06`
+#### F-1080 — Communication Channel Manipulation  `CR06`
 
 - **Element:** Enumeration submit (oam_enum) (flow)
 - **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-1044 — Communication Channel Manipulation  `CR06`
-
-- **Element:** Engine writes asset.db (flow)
-- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
-
-#### F-1046 — Unprotected Sensitive Data  `DR01`
-
-- **Element:** Engine writes asset.db (flow)
-- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
-
-#### F-1050 — Communication Channel Manipulation  `CR06`
-
-- **Element:** Read discovered names (oam_subs, shared volume) (flow)
-- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
-
-#### F-1052 — Unprotected Sensitive Data  `DR01`
-
-- **Element:** Read discovered names (oam_subs, shared volume) (flow)
-- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
-
-#### F-1056 — Communication Channel Manipulation  `CR06`
-
-- **Element:** Passive data-source queries (datasources.yaml keys) (flow)
-- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
-
-#### F-1058 — Credentials Disclosure  `AC23`
-
-- **Element:** Passive data-source queries (datasources.yaml keys) (flow)
-- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI.
-- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
-
-#### F-1062 — Communication Channel Manipulation  `CR06`
-
-- **Element:** DNS resolution and active probes (zone transfers, certificate grabs when enabled) (flow)
-- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
-
-#### F-1065 — Unprotected Sensitive Data  `DR01`
-
-- **Element:** DNS resolution and active probes (zone transfers, certificate grabs when enabled) (flow)
-- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
-
-#### F-1069 — Communication Channel Manipulation  `CR06`
-
-- **Element:** Platform collection jobs (flow)
-- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
-
-#### F-1071 — Unprotected Sensitive Data  `DR01`
-
-- **Element:** Platform collection jobs (flow)
-- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
-
-#### F-1075 — Communication Channel Manipulation  `CR06`
-
-- **Element:** SocialOSINT text and vision prompts (own endpoint and key) (flow)
-- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
-
-#### F-1076 — Credentials Disclosure  `AC23`
-
-- **Element:** SocialOSINT text and vision prompts (own endpoint and key) (flow)
-- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI.
-- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
-
-#### F-1080 — Communication Channel Manipulation  `CR06`
-
-- **Element:** Platform collection (operator's API tokens) (flow)
-- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
-
-#### F-1081 — Credentials Disclosure  `AC23`
-
-- **Element:** Platform collection (operator's API tokens) (flow)
-- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI.
-- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
-
 #### F-1085 — Communication Channel Manipulation  `CR06`
 
-- **Element:** Cache collected profiles and posts (/app/data) (flow)
+- **Element:** Engine writes asset.db (flow)
 - **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
 #### F-1087 — Unprotected Sensitive Data  `DR01`
 
-- **Element:** Cache collected profiles and posts (/app/data) (flow)
+- **Element:** Engine writes asset.db (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
 #### F-1091 — Communication Channel Manipulation  `CR06`
 
-- **Element:** Read cached profiles for later sessions (flow)
+- **Element:** Read discovered names (oam_subs, shared volume) (flow)
 - **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
 #### F-1093 — Unprotected Sensitive Data  `DR01`
 
-- **Element:** Read cached profiles for later sessions (flow)
+- **Element:** Read discovered names (oam_subs, shared volume) (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
 #### F-1097 — Communication Channel Manipulation  `CR06`
 
+- **Element:** Passive data-source queries (datasources.yaml keys) (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1099 — Credentials Disclosure  `AC23`
+
+- **Element:** Passive data-source queries (datasources.yaml keys) (flow)
+- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI.
+- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
+
+#### F-1103 — Communication Channel Manipulation  `CR06`
+
+- **Element:** DNS resolution and active probes (zone transfers, certificate grabs when enabled) (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1106 — Unprotected Sensitive Data  `DR01`
+
+- **Element:** DNS resolution and active probes (zone transfers, certificate grabs when enabled) (flow)
+- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1110 — Communication Channel Manipulation  `CR06`
+
+- **Element:** Platform collection jobs (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1112 — Unprotected Sensitive Data  `DR01`
+
+- **Element:** Platform collection jobs (flow)
+- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1116 — Communication Channel Manipulation  `CR06`
+
+- **Element:** SocialOSINT text and vision prompts (own endpoint and key) (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1117 — Credentials Disclosure  `AC23`
+
+- **Element:** SocialOSINT text and vision prompts (own endpoint and key) (flow)
+- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI.
+- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
+
+#### F-1121 — Communication Channel Manipulation  `CR06`
+
+- **Element:** Platform collection (operator's API tokens) (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1122 — Credentials Disclosure  `AC23`
+
+- **Element:** Platform collection (operator's API tokens) (flow)
+- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI.
+- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
+
+#### F-1126 — Communication Channel Manipulation  `CR06`
+
+- **Element:** Cache collected profiles and posts (/app/data) (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1128 — Unprotected Sensitive Data  `DR01`
+
+- **Element:** Cache collected profiles and posts (/app/data) (flow)
+- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1132 — Communication Channel Manipulation  `CR06`
+
+- **Element:** Read cached profiles for later sessions (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1134 — Unprotected Sensitive Data  `DR01`
+
+- **Element:** Read cached profiles for later sessions (flow)
+- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1138 — Communication Channel Manipulation  `CR06`
+
 - **Element:** Due-diligence queries (flow)
 - **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-1098 — Credentials Disclosure  `AC23`
+#### F-1139 — Credentials Disclosure  `AC23`
 
 - **Element:** Due-diligence queries (flow)
 - **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI.
 - **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
 
-#### F-1102 — Communication Channel Manipulation  `CR06`
+#### F-1143 — Communication Channel Manipulation  `CR06`
 
 - **Element:** DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois) (flow)
-- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
-
-#### F-1105 — Unprotected Sensitive Data  `DR01`
-
-- **Element:** DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois) (flow)
-- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
-
-#### F-1109 — Communication Channel Manipulation  `CR06`
-
-- **Element:** TLS certificate and HTTPS fetches (sfp_sslcert) (flow)
-- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
-
-#### F-1114 — Communication Channel Manipulation  `CR06`
-
-- **Element:** Write scan results and logs (flow)
-- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
-
-#### F-1116 — Unprotected Sensitive Data  `DR01`
-
-- **Element:** Write scan results and logs (flow)
-- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
-
-#### F-1120 — Communication Channel Manipulation  `CR06`
-
-- **Element:** Read scan results for the API (flow)
-- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
-
-#### F-1122 — Unprotected Sensitive Data  `DR01`
-
-- **Element:** Read scan results for the API (flow)
-- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
-
-#### F-1126 — Communication Channel Manipulation  `CR06`
-
-- **Element:** DNS and WHOIS pivots (OpenOSINT) (flow)
-- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
-
-#### F-1129 — Unprotected Sensitive Data  `DR01`
-
-- **Element:** DNS and WHOIS pivots (OpenOSINT) (flow)
-- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
-
-#### F-1133 — Communication Channel Manipulation  `CR06`
-
-- **Element:** HTTPS source lookups (OpenOSINT) (flow)
-- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
-
-#### F-1138 — Communication Channel Manipulation  `CR06`
-
-- **Element:** Qualification & synthesis prompts (local HTTP API) (flow)
-- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
-
-#### F-1140 — Unprotected Sensitive Data  `DR01`
-
-- **Element:** Qualification & synthesis prompts (local HTTP API) (flow)
-- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
-
-#### F-1144 — Communication Channel Manipulation  `CR06`
-
-- **Element:** Local model inference (flow)
 - **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
 #### F-1146 — Unprotected Sensitive Data  `DR01`
 
-- **Element:** Local model inference (flow)
+- **Element:** DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois) (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
 #### F-1150 — Communication Channel Manipulation  `CR06`
 
-- **Element:** Qualification & synthesis prompts (cloud) (flow)
+- **Element:** TLS certificate and HTTPS fetches (sfp_sslcert) (flow)
 - **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-1151 — Credentials Disclosure  `AC23`
-
-- **Element:** Qualification & synthesis prompts (cloud) (flow)
-- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI.
-- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
-
 #### F-1155 — Communication Channel Manipulation  `CR06`
 
-- **Element:** Scan results (JSON events, HTTP) (flow)
+- **Element:** Write scan results and logs (flow)
 - **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
 #### F-1157 — Unprotected Sensitive Data  `DR01`
 
-- **Element:** Scan results (JSON events, HTTP) (flow)
+- **Element:** Write scan results and logs (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
 #### F-1161 — Communication Channel Manipulation  `CR06`
 
-- **Element:** Analysis report (Markdown, HTTP) (flow)
+- **Element:** Read scan results for the API (flow)
 - **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
 #### F-1163 — Unprotected Sensitive Data  `DR01`
 
-- **Element:** Analysis report (Markdown, HTTP) (flow)
+- **Element:** Read scan results for the API (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
-
-#### F-1165 — Communication Channel Manipulation  `CR06`
-
-- **Element:** Search results (HTTPS) (flow)
-- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
 #### F-1167 — Communication Channel Manipulation  `CR06`
 
-- **Element:** Model replies (JSON, HTTPS) (flow)
+- **Element:** DNS and WHOIS pivots (OpenOSINT) (flow)
 - **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-1171 — Communication Channel Manipulation  `CR06`
+#### F-1170 — Unprotected Sensitive Data  `DR01`
 
-- **Element:** Model replies (JSON, local HTTP) (flow)
-- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+- **Element:** DNS and WHOIS pivots (OpenOSINT) (flow)
+- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
 #### F-1174 — Communication Channel Manipulation  `CR06`
 
-- **Element:** Text and vision analysis (Markdown, HTTPS) (flow)
+- **Element:** HTTPS source lookups (OpenOSINT) (flow)
 - **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-1176 — Communication Channel Manipulation  `CR06`
+#### F-1179 — Communication Channel Manipulation  `CR06`
 
-- **Element:** Polled events (HTTPS, certificate unverified) (flow)
+- **Element:** Qualification & synthesis prompts (local HTTP API) (flow)
 - **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-1180 — Communication Channel Manipulation  `CR06`
+#### F-1181 — Unprotected Sensitive Data  `DR01`
 
-- **Element:** Tokens and userinfo (HTTP) (flow)
-- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
-
-#### F-1182 — Unprotected Sensitive Data  `DR01`
-
-- **Element:** Tokens and userinfo (HTTP) (flow)
+- **Element:** Qualification & synthesis prompts (local HTTP API) (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-1186 — Communication Channel Manipulation  `CR06`
+#### F-1185 — Communication Channel Manipulation  `CR06`
 
-- **Element:** Reports, findings and evidence (direct loopback) (flow)
+- **Element:** Local model inference (flow)
 - **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-1189 — Unprotected Sensitive Data  `DR01`
+#### F-1187 — Unprotected Sensitive Data  `DR01`
 
-- **Element:** Reports, findings and evidence (direct loopback) (flow)
+- **Element:** Local model inference (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-1193 — Communication Channel Manipulation  `CR06`
+#### F-1191 — Communication Channel Manipulation  `CR06`
 
-- **Element:** Proxied responses (reports, findings, evidence) (flow)
+- **Element:** Qualification & synthesis prompts (cloud) (flow)
 - **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-1195 — Unprotected Sensitive Data  `DR01`
+#### F-1192 — Credentials Disclosure  `AC23`
 
-- **Element:** Proxied responses (reports, findings, evidence) (flow)
+- **Element:** Qualification & synthesis prompts (cloud) (flow)
+- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI.
+- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
+
+#### F-1196 — Communication Channel Manipulation  `CR06`
+
+- **Element:** Scan results (JSON events, HTTP) (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1198 — Unprotected Sensitive Data  `DR01`
+
+- **Element:** Scan results (JSON events, HTTP) (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-1196 — Session Sidejacking  `CR01`
+#### F-1202 — Communication Channel Manipulation  `CR06`
 
-- **Element:** Proxied responses to the browser (shipped overlay) (flow)
-- **Response:** accepted — The shipped OIDC overlay runs oauth2-proxy on plain HTTP on loopback and hardcodes OAUTH2_PROXY_COOKIE_SECURE=false (no variable reads it): the session cookie is exposed to anything on the host, which ADR-005 trusts. Production: a TLS terminator in front of the proxy and of Keycloak's browser endpoint (KC_HOSTNAME and OIDC_BROWSER_LOGIN_URL on the https:// name) and a Compose override that sets OAUTH2_PROXY_COOKIE_SECURE to true. OpenCTI's own UI session on loopback :8080 (APP__BASE_URL http://localhost:8080) is the same case: plain HTTP on the trusted host, a TLS terminator and an https:// APP__BASE_URL in production.
-- **pytm mitigations:** Make sure that HTTPS is used to communicate with the target system. Alternatively, use VPN if possible. It is important to ensure that all communication between the client and the server happens via an encrypted secure channel. Modify the session token with each transmission and protect it with cryptography. Add the idea of request sequencing that gives the server an ability to detect replay attacks.
-
-#### F-1201 — Communication Channel Manipulation  `CR06`
-
-- **Element:** Proxied responses to the browser (shipped overlay) (flow)
+- **Element:** Analysis report (Markdown, HTTP) (flow)
 - **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
 #### F-1204 — Unprotected Sensitive Data  `DR01`
 
+- **Element:** Analysis report (Markdown, HTTP) (flow)
+- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1206 — Communication Channel Manipulation  `CR06`
+
+- **Element:** Search results (HTTPS) (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1208 — Communication Channel Manipulation  `CR06`
+
+- **Element:** Model replies (JSON, HTTPS) (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1212 — Communication Channel Manipulation  `CR06`
+
+- **Element:** Model replies (JSON, local HTTP) (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1215 — Communication Channel Manipulation  `CR06`
+
+- **Element:** Text and vision analysis (Markdown, HTTPS) (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1217 — Communication Channel Manipulation  `CR06`
+
+- **Element:** Polled events (HTTPS, certificate unverified) (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1221 — Communication Channel Manipulation  `CR06`
+
+- **Element:** Tokens and userinfo (HTTP) (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1223 — Unprotected Sensitive Data  `DR01`
+
+- **Element:** Tokens and userinfo (HTTP) (flow)
+- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1227 — Communication Channel Manipulation  `CR06`
+
+- **Element:** Reports, findings and evidence (direct loopback) (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1230 — Unprotected Sensitive Data  `DR01`
+
+- **Element:** Reports, findings and evidence (direct loopback) (flow)
+- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1234 — Communication Channel Manipulation  `CR06`
+
+- **Element:** Proxied responses (reports, findings, evidence) (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1236 — Unprotected Sensitive Data  `DR01`
+
+- **Element:** Proxied responses (reports, findings, evidence) (flow)
+- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1237 — Session Sidejacking  `CR01`
+
+- **Element:** Proxied responses to the browser (shipped overlay) (flow)
+- **Response:** accepted — The shipped OIDC overlay runs oauth2-proxy on plain HTTP on loopback and hardcodes OAUTH2_PROXY_COOKIE_SECURE=false (no variable reads it): the session cookie is exposed to anything on the host, which ADR-005 trusts. Production: a TLS terminator in front of the proxy and of Keycloak's browser endpoint (KC_HOSTNAME and OIDC_BROWSER_LOGIN_URL on the https:// name) and a Compose override that sets OAUTH2_PROXY_COOKIE_SECURE to true. OpenCTI's own UI session on loopback :8080 (APP__BASE_URL http://localhost:8080) is the same case: plain HTTP on the trusted host, a TLS terminator and an https:// APP__BASE_URL in production.
+- **pytm mitigations:** Make sure that HTTPS is used to communicate with the target system. Alternatively, use VPN if possible. It is important to ensure that all communication between the client and the server happens via an encrypted secure channel. Modify the session token with each transmission and protect it with cryptography. Add the idea of request sequencing that gives the server an ability to detect replay attacks.
+
+#### F-1242 — Communication Channel Manipulation  `CR06`
+
+- **Element:** Proxied responses to the browser (shipped overlay) (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1245 — Unprotected Sensitive Data  `DR01`
+
 - **Element:** Proxied responses to the browser (shipped overlay) (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-1208 — Communication Channel Manipulation  `CR06`
+#### F-1249 — Communication Channel Manipulation  `CR06`
 
 - **Element:** Run/state SQL (flow)
 - **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-1210 — Unprotected Sensitive Data  `DR01`
+#### F-1252 — Unprotected Sensitive Data  `DR01`
 
 - **Element:** Run/state SQL (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-1214 — Communication Channel Manipulation  `CR06`
+#### F-1253 — Credentials Disclosure  `AC23`
 
-- **Element:** Seal run artefacts + manifest (flow)
-- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
-
-#### F-1216 — Unprotected Sensitive Data  `DR01`
-
-- **Element:** Seal run artefacts + manifest (flow)
-- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
-
-#### F-1220 — Communication Channel Manipulation  `CR06`
-
-- **Element:** Read target inventory (flow)
-- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
-
-#### F-1225 — Communication Channel Manipulation  `CR06`
-
-- **Element:** STIX ingest (pycti, outbox retries) (flow)
-- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
-
-#### F-1227 — Unprotected Sensitive Data  `DR01`
-
-- **Element:** STIX ingest (pycti, outbox retries) (flow)
-- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
-
-#### F-1228 — Credentials Disclosure  `AC23`
-
-- **Element:** STIX ingest (pycti, outbox retries) (flow)
-- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI.
+- **Element:** Run/state SQL (flow)
+- **Response:** accepted — Same hop as the read direction: the digests and the dossier rows are written to the same plaintext SQLite file the runs use, and the store is where they live out their lifetime. A copied database yields no usable session (only digests) but does yield the dossiers themselves. Hardening: volume encryption or an encrypted SQLite build.
 - **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
 
-#### F-1232 — Communication Channel Manipulation  `CR06`
+#### F-1257 — Communication Channel Manipulation  `CR06`
 
-- **Element:** Elasticsearch indices (flow)
-- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
-
-#### F-1234 — Unprotected Sensitive Data  `DR01`
-
-- **Element:** Elasticsearch indices (flow)
-- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
-
-#### F-1238 — Communication Channel Manipulation  `CR06`
-
-- **Element:** MinIO objects (flow)
-- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
-
-#### F-1240 — Unprotected Sensitive Data  `DR01`
-
-- **Element:** MinIO objects (flow)
-- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
-
-#### F-1241 — Credentials Disclosure  `AC23`
-
-- **Element:** MinIO objects (flow)
-- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI.
-- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
-
-#### F-1245 — Communication Channel Manipulation  `CR06`
-
-- **Element:** RabbitMQ queues (flow)
-- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
-
-#### F-1247 — Unprotected Sensitive Data  `DR01`
-
-- **Element:** RabbitMQ queues (flow)
-- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
-
-#### F-1248 — Credentials Disclosure  `AC23`
-
-- **Element:** RabbitMQ queues (flow)
-- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI.
-- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
-
-#### F-1252 — Communication Channel Manipulation  `CR06`
-
-- **Element:** Redis cache (no authentication) (flow)
-- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
-
-#### F-1254 — Unprotected Sensitive Data  `DR01`
-
-- **Element:** Redis cache (no authentication) (flow)
-- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
-
-#### F-1258 — Communication Channel Manipulation  `CR06`
-
-- **Element:** MISP database (MySQL, compose-internal) (flow)
+- **Element:** Read accounts, sessions and dossiers (flow)
 - **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
 #### F-1260 — Unprotected Sensitive Data  `DR01`
 
-- **Element:** MISP database (MySQL, compose-internal) (flow)
+- **Element:** Read accounts, sessions and dossiers (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
 #### F-1261 — Credentials Disclosure  `AC23`
 
-- **Element:** MISP database (MySQL, compose-internal) (flow)
-- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI.
+- **Element:** Read accounts, sessions and dossiers (flow)
+- **Response:** accepted — What leaves the store is a password digest (pbkdf2), a session digest (SHA-256, usable only with the pre-image) and the account/dossier rows, over a host-local file hop. The credentials' own lifetime is bounded: a person rotates their password through POST /auth/password, an admin resets one, and a session row expires 8 hours after it was issued (accounts.SESSION_SECONDS). The plaintext file that holds them is the accepted at-rest gap (DR01).
 - **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
 
 #### F-1265 — Communication Channel Manipulation  `CR06`
 
-- **Element:** MISP cache and queues (Redis, no password) (flow)
+- **Element:** Seal run artefacts + manifest (flow)
 - **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
 #### F-1267 — Unprotected Sensitive Data  `DR01`
 
-- **Element:** MISP cache and queues (Redis, no password) (flow)
+- **Element:** Seal run artefacts + manifest (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
 #### F-1271 — Communication Channel Manipulation  `CR06`
 
-- **Element:** Elasticsearch persists its indices (volume) (flow)
+- **Element:** Read target inventory (flow)
 - **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-1273 — Unprotected Sensitive Data  `DR01`
+#### F-1276 — Communication Channel Manipulation  `CR06`
 
-- **Element:** Elasticsearch persists its indices (volume) (flow)
-- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
-
-#### F-1277 — Communication Channel Manipulation  `CR06`
-
-- **Element:** MinIO persists objects (volume) (flow)
+- **Element:** STIX ingest (pycti, outbox retries) (flow)
 - **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-1279 — Unprotected Sensitive Data  `DR01`
+#### F-1278 — Unprotected Sensitive Data  `DR01`
 
-- **Element:** MinIO persists objects (volume) (flow)
+- **Element:** STIX ingest (pycti, outbox retries) (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1279 — Credentials Disclosure  `AC23`
+
+- **Element:** STIX ingest (pycti, outbox retries) (flow)
+- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI.
+- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
 
 #### F-1283 — Communication Channel Manipulation  `CR06`
 
-- **Element:** RabbitMQ persists queues (volume) (flow)
+- **Element:** Elasticsearch indices (flow)
 - **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
 #### F-1285 — Unprotected Sensitive Data  `DR01`
 
-- **Element:** RabbitMQ persists queues (volume) (flow)
+- **Element:** Elasticsearch indices (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
 #### F-1289 — Communication Channel Manipulation  `CR06`
 
-- **Element:** Redis persists its snapshot (volume) (flow)
+- **Element:** MinIO objects (flow)
 - **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
 #### F-1291 — Unprotected Sensitive Data  `DR01`
 
+- **Element:** MinIO objects (flow)
+- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1292 — Credentials Disclosure  `AC23`
+
+- **Element:** MinIO objects (flow)
+- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI.
+- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
+
+#### F-1296 — Communication Channel Manipulation  `CR06`
+
+- **Element:** RabbitMQ queues (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1298 — Unprotected Sensitive Data  `DR01`
+
+- **Element:** RabbitMQ queues (flow)
+- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1299 — Credentials Disclosure  `AC23`
+
+- **Element:** RabbitMQ queues (flow)
+- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI.
+- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
+
+#### F-1303 — Communication Channel Manipulation  `CR06`
+
+- **Element:** Redis cache (no authentication) (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1305 — Unprotected Sensitive Data  `DR01`
+
+- **Element:** Redis cache (no authentication) (flow)
+- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1309 — Communication Channel Manipulation  `CR06`
+
+- **Element:** MISP database (MySQL, compose-internal) (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1311 — Unprotected Sensitive Data  `DR01`
+
+- **Element:** MISP database (MySQL, compose-internal) (flow)
+- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1312 — Credentials Disclosure  `AC23`
+
+- **Element:** MISP database (MySQL, compose-internal) (flow)
+- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI.
+- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
+
+#### F-1316 — Communication Channel Manipulation  `CR06`
+
+- **Element:** MISP cache and queues (Redis, no password) (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1318 — Unprotected Sensitive Data  `DR01`
+
+- **Element:** MISP cache and queues (Redis, no password) (flow)
+- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1322 — Communication Channel Manipulation  `CR06`
+
+- **Element:** Elasticsearch persists its indices (volume) (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1324 — Unprotected Sensitive Data  `DR01`
+
+- **Element:** Elasticsearch persists its indices (volume) (flow)
+- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1328 — Communication Channel Manipulation  `CR06`
+
+- **Element:** MinIO persists objects (volume) (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1330 — Unprotected Sensitive Data  `DR01`
+
+- **Element:** MinIO persists objects (volume) (flow)
+- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1334 — Communication Channel Manipulation  `CR06`
+
+- **Element:** RabbitMQ persists queues (volume) (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1336 — Unprotected Sensitive Data  `DR01`
+
+- **Element:** RabbitMQ persists queues (volume) (flow)
+- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1340 — Communication Channel Manipulation  `CR06`
+
+- **Element:** Redis persists its snapshot (volume) (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1342 — Unprotected Sensitive Data  `DR01`
+
 - **Element:** Redis persists its snapshot (volume) (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-1295 — Communication Channel Manipulation  `CR06`
+#### F-1346 — Communication Channel Manipulation  `CR06`
 
 - **Element:** MariaDB persists on misp-db-data (flow)
 - **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-1297 — Unprotected Sensitive Data  `DR01`
+#### F-1348 — Unprotected Sensitive Data  `DR01`
 
 - **Element:** MariaDB persists on misp-db-data (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-1301 — Communication Channel Manipulation  `CR06`
+#### F-1352 — Communication Channel Manipulation  `CR06`
 
 - **Element:** Redis persists on misp-redis-data (flow)
 - **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-1303 — Unprotected Sensitive Data  `DR01`
+#### F-1354 — Unprotected Sensitive Data  `DR01`
 
 - **Element:** Redis persists on misp-redis-data (flow)
 - **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
 
-#### F-1307 — Communication Channel Manipulation  `CR06`
+#### F-1358 — Communication Channel Manipulation  `CR06`
 
 - **Element:** Reference dataset download (GitHub master, mutable) (flow)
 - **Response:** accepted — The one unpinned input on record: connector-opencti fetches sectors.json and geography.json from the datasets repository's master branch, a mutable reference, over TLS to GitHub. A tampered file would land in OpenCTI as reference identities, locations and markings, never as a finding about a target, and the orchestrator reads nothing back from them. Hardening: pin CONFIG_SECTORS_FILE_URL and CONFIG_GEOGRAPHY_FILE_URL to a commit, or mirror the files.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-1311 — Communication Channel Manipulation  `CR06`
-
-- **Element:** Reference dataset ingestion (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
-- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
-
-#### F-1313 — Unprotected Sensitive Data  `DR01`
-
-- **Element:** Reference dataset ingestion (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
-- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
-
-#### F-1314 — Credentials Disclosure  `AC23`
-
-- **Element:** Reference dataset ingestion (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
-- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI.
-- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
-
-#### F-1318 — Communication Channel Manipulation  `CR06`
-
-- **Element:** Worker consumes the ingestion queues (AMQP, in clear) (flow)
-- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
-
-#### F-1320 — Unprotected Sensitive Data  `DR01`
-
-- **Element:** Worker consumes the ingestion queues (AMQP, in clear) (flow)
-- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
-
-#### F-1321 — Credentials Disclosure  `AC23`
-
-- **Element:** Worker consumes the ingestion queues (AMQP, in clear) (flow)
-- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI.
-- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
-
-#### F-1325 — Communication Channel Manipulation  `CR06`
-
-- **Element:** Worker writes processed bundles (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
-- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
-
-#### F-1327 — Unprotected Sensitive Data  `DR01`
-
-- **Element:** Worker writes processed bundles (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
-- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
-
-#### F-1328 — Credentials Disclosure  `AC23`
-
-- **Element:** Worker writes processed bundles (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
-- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI.
-- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
-
-#### F-1332 — Communication Channel Manipulation  `CR06`
-
-- **Element:** Fetch uploaded files and push the parsed bundle (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
-- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
-
-#### F-1334 — Unprotected Sensitive Data  `DR01`
-
-- **Element:** Fetch uploaded files and push the parsed bundle (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
-- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
-
-#### F-1335 — Credentials Disclosure  `AC23`
-
-- **Element:** Fetch uploaded files and push the parsed bundle (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
-- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI.
-- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
-
-#### F-1339 — Communication Channel Manipulation  `CR06`
-
-- **Element:** Enrichment and import modules (HTTP, compose-internal) (flow)
-- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
-
-#### F-1341 — Unprotected Sensitive Data  `DR01`
-
-- **Element:** Enrichment and import modules (HTTP, compose-internal) (flow)
-- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
-
-#### F-1345 — Communication Channel Manipulation  `CR06`
-
-- **Element:** connector-misp polls MISP events (flow)
-- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
-
-#### F-1346 — Credentials Disclosure  `AC23`
-
-- **Element:** connector-misp polls MISP events (flow)
-- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI.
-- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
-
-#### F-1350 — Communication Channel Manipulation  `CR06`
-
-- **Element:** connector-misp writes to OpenCTI (flow)
-- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
-
-#### F-1352 — Unprotected Sensitive Data  `DR01`
-
-- **Element:** connector-misp writes to OpenCTI (flow)
-- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
-
-#### F-1353 — Credentials Disclosure  `AC23`
-
-- **Element:** connector-misp writes to OpenCTI (flow)
-- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI.
-- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
-
-#### F-1357 — Communication Channel Manipulation  `CR06`
-
-- **Element:** Alert webhook (ALERT_WEBHOOK_URL) (flow)
-- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
-
-#### F-1358 — Credentials Disclosure  `AC23`
-
-- **Element:** Alert webhook (ALERT_WEBHOOK_URL) (flow)
-- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI.
-- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
-
 #### F-1362 — Communication Channel Manipulation  `CR06`
 
+- **Element:** Reference dataset ingestion (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1364 — Unprotected Sensitive Data  `DR01`
+
+- **Element:** Reference dataset ingestion (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
+- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1365 — Credentials Disclosure  `AC23`
+
+- **Element:** Reference dataset ingestion (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
+- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI.
+- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
+
+#### F-1369 — Communication Channel Manipulation  `CR06`
+
+- **Element:** Worker consumes the ingestion queues (AMQP, in clear) (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1371 — Unprotected Sensitive Data  `DR01`
+
+- **Element:** Worker consumes the ingestion queues (AMQP, in clear) (flow)
+- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1372 — Credentials Disclosure  `AC23`
+
+- **Element:** Worker consumes the ingestion queues (AMQP, in clear) (flow)
+- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI.
+- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
+
+#### F-1376 — Communication Channel Manipulation  `CR06`
+
+- **Element:** Worker writes processed bundles (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1378 — Unprotected Sensitive Data  `DR01`
+
+- **Element:** Worker writes processed bundles (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
+- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1379 — Credentials Disclosure  `AC23`
+
+- **Element:** Worker writes processed bundles (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
+- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI.
+- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
+
+#### F-1383 — Communication Channel Manipulation  `CR06`
+
+- **Element:** Fetch uploaded files and push the parsed bundle (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1385 — Unprotected Sensitive Data  `DR01`
+
+- **Element:** Fetch uploaded files and push the parsed bundle (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
+- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1386 — Credentials Disclosure  `AC23`
+
+- **Element:** Fetch uploaded files and push the parsed bundle (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
+- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI.
+- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
+
+#### F-1390 — Communication Channel Manipulation  `CR06`
+
+- **Element:** Enrichment and import modules (HTTP, compose-internal) (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1392 — Unprotected Sensitive Data  `DR01`
+
+- **Element:** Enrichment and import modules (HTTP, compose-internal) (flow)
+- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1396 — Communication Channel Manipulation  `CR06`
+
+- **Element:** connector-misp polls MISP events (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1397 — Credentials Disclosure  `AC23`
+
+- **Element:** connector-misp polls MISP events (flow)
+- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI.
+- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
+
+#### F-1401 — Communication Channel Manipulation  `CR06`
+
+- **Element:** connector-misp writes to OpenCTI (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1403 — Unprotected Sensitive Data  `DR01`
+
+- **Element:** connector-misp writes to OpenCTI (flow)
+- **Response:** accepted — Data at rest is plaintext by decision ADR-005 (SQLite, daily_reports, the Amass asset database, the SpiderFoot scan database, the SocialOSINT cache, OpenCTI stores) and host-internal hops carry it in clear, the personal data of the target's public footprint (observables in evidence, artefacts, prompts and alerts) included; credentials and personal data travel only to the service they belong to, under TLS when they leave the host. Hardening: encrypted volumes or disk encryption, TLS between services. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** All data should be encrypted in transit. All PII and restricted data must be encrypted at rest. If a service is storing credentials used to authenticate users or incoming connections, it must only store hashes of them created using cryptographic functions, so it is only possible to compare them against user input, without fully decoding them. If a client is storing credentials in either files or other data store, access to them must be as restrictive as possible, including using proper file permissions, database users with restricted access or separate storage.
+
+#### F-1404 — Credentials Disclosure  `AC23`
+
+- **Element:** connector-misp writes to OpenCTI (flow)
+- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI.
+- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
+
+#### F-1408 — Communication Channel Manipulation  `CR06`
+
+- **Element:** Alert webhook (ALERT_WEBHOOK_URL) (flow)
+- **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
+
+#### F-1409 — Credentials Disclosure  `AC23`
+
+- **Element:** Alert webhook (ALERT_WEBHOOK_URL) (flow)
+- **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI.
+- **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
+
+#### F-1413 — Communication Channel Manipulation  `CR06`
+
 - **Element:** Alert e-mail (SMTP, STARTTLS by default) (flow)
 - **Response:** accepted — Internet hops that carry credentials or evidence are TLS 1.2+ and the supply channel is pinned (git dependencies by 40-character SHA, images by explicit tag). Host-internal hops are plaintext by decision (DS06) and can be manipulated only from the host itself. Hardening as in DS06. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt all sensitive communications using properly-configured cryptography.Design the communication system such that it associates proper authentication/authorization with each channel/message.
 
-#### F-1363 — Credentials Disclosure  `AC23`
+#### F-1414 — Credentials Disclosure  `AC23`
 
 - **Element:** Alert e-mail (SMTP, STARTTLS by default) (flow)
 - **Response:** accepted — Credentials cross the network only inside TLS (TAVILY_API_KEY, the LLM provider key, MISP_KEY, SMTP credentials) or on host-local plaintext hops: X-API-Key on the loopback API and through the proxied console, OPENCTI_ADMIN_TOKEN on the compose bridge from the sink and from connector-misp. They are never logged (parameterized logging, explicit extra fields). Hardening: TLS terminator in front of :8000, :8002 and Keycloak's browser endpoint, and TLS to OpenCTI.
 - **pytm mitigations:** Long living credentials need to have high entropy and length to be future proof, especially if it is unknwon how long these credentials will be used. Further should there be a mechanism to revoke the credentials immediately if a disclosure is suspected. To detect disclosure of the credentials their use should be monitored for suspicions activity.
 
-### Severity: Medium (627)
+### Severity: Medium (651)
 
 #### F-8 — Excavation  `DS01`
 
@@ -4689,13 +4859,13 @@ Every finding carries a triage response:
 
 #### F-203 — Privilege Abuse  `AC01`
 
-- **Element:** SQLite run store (store)
+- **Element:** SQLite store (orchestrator.db) (store)
 - **Response:** accepted — One process owns each volume (uid 1000 for the orchestrator's stores, the engine for asset.db, SpiderFoot and the SocialOSINT sidecar for their own volumes); there is no finer privilege to abuse. Hardening: volume permissions and read-only mounts where possible.
 - **pytm mitigations:** Use strong authentication and authorization mechanisms. A proven protocol is OAuth 2.0, which enables a third-party application to obtain limited access to an API.
 
 #### F-204 — Excessive Allocation  `DO02`
 
-- **Element:** SQLite run store (store)
+- **Element:** SQLite store (orchestrator.db) (store)
 - **Response:** accepted — Stores grow with runs. The scheduler's retention purge bounds run rows and daily_reports but keeps seen_observables on purpose (retention.py: the delta memory between runs), so SQLite still grows with every new observable; asset.db is outside the purge and grows with every Amass run; targets.yaml grows with the inventory only. Hardening: disk quotas and monitoring on the volumes, and a prune of seen_observables for retired targets.
 - **pytm mitigations:** Limit the amount of resources that are accessible to unprivileged users. Assume all input is malicious. Consider all potentially relevant properties when validating input. Consider uniformly throttling all requests in order to make it more difficult to consume resources more quickly than they can again be freed. Use resource-limiting settings, if possible.
 
@@ -6645,1325 +6815,1469 @@ Every finding carries a triage response:
 
 #### F-1010 — Interception  `DE01`
 
-- **Element:** GET /health, /metrics (flow)
+- **Element:** POST /auth/login (sign-in) (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
 #### F-1011 — Content Spoofing  `AC05`
 
-- **Element:** GET /health, /metrics (flow)
-- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **Element:** POST /auth/login (sign-in) (flow)
+- **Response:** mitigated — The login route is unauthenticated by definition, so spoofing it means guessing a password. Five wrong attempts lock the account for 15 minutes (accounts.py::login), an unknown username gets the same 401 after a dummy digest so the timing does not disclose it, and accounts.py::check_browser_request rejects a cross-site or non-XHR post. What is NOT covered: no per-IP or global rate limit, no CAPTCHA, no MFA, so an attempt spread over many usernames is bounded per account only, and five deliberate failures deny a named accountant their sign-in for 15 minutes.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
 #### F-1012 — Sniffing Attacks  `DE03`
 
-- **Element:** GET /health, /metrics (flow)
+- **Element:** POST /auth/login (sign-in) (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
 #### F-1014 — Client-Server Protocol Manipulation  `CR08`
 
+- **Element:** POST /auth/login (sign-in) (flow)
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Use strong authentication protocols.
+
+#### F-1019 — Interception  `DE01`
+
+- **Element:** Set-Cookie orchestrator_session (login response) (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-1020 — Content Spoofing  `AC05`
+
+- **Element:** Set-Cookie orchestrator_session (login response) (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-1021 — Sniffing Attacks  `DE03`
+
+- **Element:** Set-Cookie orchestrator_session (login response) (flow)
+- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-1023 — Client-Server Protocol Manipulation  `CR08`
+
+- **Element:** Set-Cookie orchestrator_session (login response) (flow)
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Use strong authentication protocols.
+
+#### F-1028 — Interception  `DE01`
+
+- **Element:** Console calls with the personal session (accountant/admin) (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-1029 — Content Spoofing  `AC05`
+
+- **Element:** Console calls with the personal session (accountant/admin) (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-1030 — Sniffing Attacks  `DE03`
+
+- **Element:** Console calls with the personal session (accountant/admin) (flow)
+- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-1032 — Client-Server Protocol Manipulation  `CR08`
+
+- **Element:** Console calls with the personal session (accountant/admin) (flow)
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Use strong authentication protocols.
+
+#### F-1037 — Interception  `DE01`
+
+- **Element:** Dossier write: evidence decisions, reasons and conclusion (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-1038 — Content Spoofing  `AC05`
+
+- **Element:** Dossier write: evidence decisions, reasons and conclusion (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-1039 — Sniffing Attacks  `DE03`
+
+- **Element:** Dossier write: evidence decisions, reasons and conclusion (flow)
+- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-1041 — Client-Server Protocol Manipulation  `CR08`
+
+- **Element:** Dossier write: evidence decisions, reasons and conclusion (flow)
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Use strong authentication protocols.
+
+#### F-1044 — Interception  `DE01`
+
+- **Element:** Issued report version (markdown/PDF download) (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-1045 — Content Spoofing  `AC05`
+
+- **Element:** Issued report version (markdown/PDF download) (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-1046 — Sniffing Attacks  `DE03`
+
+- **Element:** Issued report version (markdown/PDF download) (flow)
+- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-1048 — Client-Server Protocol Manipulation  `CR08`
+
+- **Element:** Issued report version (markdown/PDF download) (flow)
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Use strong authentication protocols.
+
+#### F-1051 — Interception  `DE01`
+
+- **Element:** GET /health, /metrics (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-1052 — Content Spoofing  `AC05`
+
+- **Element:** GET /health, /metrics (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-1053 — Sniffing Attacks  `DE03`
+
+- **Element:** GET /health, /metrics (flow)
+- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-1055 — Client-Server Protocol Manipulation  `CR08`
+
 - **Element:** GET /health, /metrics (flow)
 - **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-1017 — Interception  `DE01`
+#### F-1058 — Interception  `DE01`
 
 - **Element:** POST /bundles (STIX intake) (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-1018 — Content Spoofing  `AC05`
+#### F-1059 — Content Spoofing  `AC05`
 
 - **Element:** POST /bundles (STIX intake) (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-1019 — Sniffing Attacks  `DE03`
+#### F-1060 — Sniffing Attacks  `DE03`
 
 - **Element:** POST /bundles (STIX intake) (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-1021 — Client-Server Protocol Manipulation  `CR08`
+#### F-1062 — Client-Server Protocol Manipulation  `CR08`
 
 - **Element:** POST /bundles (STIX intake) (flow)
-- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Use strong authentication protocols.
-
-#### F-1025 — Interception  `DE01`
-
-- **Element:** Cron dispatch (in-process) (flow)
-- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
-
-#### F-1026 — Content Spoofing  `AC05`
-
-- **Element:** Cron dispatch (in-process) (flow)
-- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
-
-#### F-1027 — Sniffing Attacks  `DE03`
-
-- **Element:** Cron dispatch (in-process) (flow)
-- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
-
-#### F-1029 — Client-Server Protocol Manipulation  `CR08`
-
-- **Element:** Cron dispatch (in-process) (flow)
-- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Use strong authentication protocols.
-
-#### F-1030 — Interception  `DE01`
-
-- **Element:** Scan control & results (flow)
-- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
-
-#### F-1031 — Content Spoofing  `AC05`
-
-- **Element:** Scan control & results (flow)
-- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
-
-#### F-1032 — Sniffing Attacks  `DE03`
-
-- **Element:** Scan control & results (flow)
-- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
-
-#### F-1034 — Client-Server Protocol Manipulation  `CR08`
-
-- **Element:** Scan control & results (flow)
-- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Use strong authentication protocols.
-
-#### F-1036 — Interception  `DE01`
-
-- **Element:** Enumeration submit (oam_enum) (flow)
-- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
-
-#### F-1037 — Content Spoofing  `AC05`
-
-- **Element:** Enumeration submit (oam_enum) (flow)
-- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
-
-#### F-1038 — Sniffing Attacks  `DE03`
-
-- **Element:** Enumeration submit (oam_enum) (flow)
-- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
-
-#### F-1040 — Client-Server Protocol Manipulation  `CR08`
-
-- **Element:** Enumeration submit (oam_enum) (flow)
-- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Use strong authentication protocols.
-
-#### F-1041 — Interception  `DE01`
-
-- **Element:** Engine writes asset.db (flow)
-- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
-
-#### F-1042 — Content Spoofing  `AC05`
-
-- **Element:** Engine writes asset.db (flow)
-- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
-
-#### F-1043 — Sniffing Attacks  `DE03`
-
-- **Element:** Engine writes asset.db (flow)
-- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
-
-#### F-1045 — Client-Server Protocol Manipulation  `CR08`
-
-- **Element:** Engine writes asset.db (flow)
-- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Use strong authentication protocols.
-
-#### F-1047 — Interception  `DE01`
-
-- **Element:** Read discovered names (oam_subs, shared volume) (flow)
-- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
-
-#### F-1048 — Content Spoofing  `AC05`
-
-- **Element:** Read discovered names (oam_subs, shared volume) (flow)
-- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
-
-#### F-1049 — Sniffing Attacks  `DE03`
-
-- **Element:** Read discovered names (oam_subs, shared volume) (flow)
-- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
-
-#### F-1051 — Client-Server Protocol Manipulation  `CR08`
-
-- **Element:** Read discovered names (oam_subs, shared volume) (flow)
-- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Use strong authentication protocols.
-
-#### F-1053 — Interception  `DE01`
-
-- **Element:** Passive data-source queries (datasources.yaml keys) (flow)
-- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
-
-#### F-1054 — Content Spoofing  `AC05`
-
-- **Element:** Passive data-source queries (datasources.yaml keys) (flow)
-- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
-
-#### F-1055 — Sniffing Attacks  `DE03`
-
-- **Element:** Passive data-source queries (datasources.yaml keys) (flow)
-- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
-
-#### F-1059 — Interception  `DE01`
-
-- **Element:** DNS resolution and active probes (zone transfers, certificate grabs when enabled) (flow)
-- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
-
-#### F-1060 — Content Spoofing  `AC05`
-
-- **Element:** DNS resolution and active probes (zone transfers, certificate grabs when enabled) (flow)
-- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
-
-#### F-1061 — Sniffing Attacks  `DE03`
-
-- **Element:** DNS resolution and active probes (zone transfers, certificate grabs when enabled) (flow)
-- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
-
-#### F-1063 — Client-Server Protocol Manipulation  `CR08`
-
-- **Element:** DNS resolution and active probes (zone transfers, certificate grabs when enabled) (flow)
 - **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Use strong authentication protocols.
 
 #### F-1066 — Interception  `DE01`
 
-- **Element:** Platform collection jobs (flow)
+- **Element:** Cron dispatch (in-process) (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
 #### F-1067 — Content Spoofing  `AC05`
 
-- **Element:** Platform collection jobs (flow)
+- **Element:** Cron dispatch (in-process) (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
 #### F-1068 — Sniffing Attacks  `DE03`
 
-- **Element:** Platform collection jobs (flow)
+- **Element:** Cron dispatch (in-process) (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
 #### F-1070 — Client-Server Protocol Manipulation  `CR08`
 
-- **Element:** Platform collection jobs (flow)
+- **Element:** Cron dispatch (in-process) (flow)
 - **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-1072 — Interception  `DE01`
+#### F-1071 — Interception  `DE01`
 
-- **Element:** SocialOSINT text and vision prompts (own endpoint and key) (flow)
+- **Element:** Scan control & results (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-1073 — Content Spoofing  `AC05`
+#### F-1072 — Content Spoofing  `AC05`
 
-- **Element:** SocialOSINT text and vision prompts (own endpoint and key) (flow)
+- **Element:** Scan control & results (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-1074 — Sniffing Attacks  `DE03`
+#### F-1073 — Sniffing Attacks  `DE03`
 
-- **Element:** SocialOSINT text and vision prompts (own endpoint and key) (flow)
+- **Element:** Scan control & results (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
+#### F-1075 — Client-Server Protocol Manipulation  `CR08`
+
+- **Element:** Scan control & results (flow)
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Use strong authentication protocols.
+
 #### F-1077 — Interception  `DE01`
 
-- **Element:** Platform collection (operator's API tokens) (flow)
+- **Element:** Enumeration submit (oam_enum) (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
 #### F-1078 — Content Spoofing  `AC05`
 
-- **Element:** Platform collection (operator's API tokens) (flow)
+- **Element:** Enumeration submit (oam_enum) (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
 #### F-1079 — Sniffing Attacks  `DE03`
 
-- **Element:** Platform collection (operator's API tokens) (flow)
+- **Element:** Enumeration submit (oam_enum) (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
+#### F-1081 — Client-Server Protocol Manipulation  `CR08`
+
+- **Element:** Enumeration submit (oam_enum) (flow)
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Use strong authentication protocols.
+
 #### F-1082 — Interception  `DE01`
 
-- **Element:** Cache collected profiles and posts (/app/data) (flow)
+- **Element:** Engine writes asset.db (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
 #### F-1083 — Content Spoofing  `AC05`
 
-- **Element:** Cache collected profiles and posts (/app/data) (flow)
+- **Element:** Engine writes asset.db (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
 #### F-1084 — Sniffing Attacks  `DE03`
 
-- **Element:** Cache collected profiles and posts (/app/data) (flow)
+- **Element:** Engine writes asset.db (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
 #### F-1086 — Client-Server Protocol Manipulation  `CR08`
 
-- **Element:** Cache collected profiles and posts (/app/data) (flow)
+- **Element:** Engine writes asset.db (flow)
 - **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Use strong authentication protocols.
 
 #### F-1088 — Interception  `DE01`
 
-- **Element:** Read cached profiles for later sessions (flow)
+- **Element:** Read discovered names (oam_subs, shared volume) (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
 #### F-1089 — Content Spoofing  `AC05`
 
-- **Element:** Read cached profiles for later sessions (flow)
+- **Element:** Read discovered names (oam_subs, shared volume) (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
 #### F-1090 — Sniffing Attacks  `DE03`
 
-- **Element:** Read cached profiles for later sessions (flow)
+- **Element:** Read discovered names (oam_subs, shared volume) (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
 #### F-1092 — Client-Server Protocol Manipulation  `CR08`
 
-- **Element:** Read cached profiles for later sessions (flow)
+- **Element:** Read discovered names (oam_subs, shared volume) (flow)
 - **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Use strong authentication protocols.
 
 #### F-1094 — Interception  `DE01`
 
-- **Element:** Due-diligence queries (flow)
+- **Element:** Passive data-source queries (datasources.yaml keys) (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
 #### F-1095 — Content Spoofing  `AC05`
 
-- **Element:** Due-diligence queries (flow)
+- **Element:** Passive data-source queries (datasources.yaml keys) (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
 #### F-1096 — Sniffing Attacks  `DE03`
 
-- **Element:** Due-diligence queries (flow)
+- **Element:** Passive data-source queries (datasources.yaml keys) (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-1099 — Interception  `DE01`
+#### F-1100 — Interception  `DE01`
 
-- **Element:** DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois) (flow)
+- **Element:** DNS resolution and active probes (zone transfers, certificate grabs when enabled) (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-1100 — Content Spoofing  `AC05`
+#### F-1101 — Content Spoofing  `AC05`
 
-- **Element:** DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois) (flow)
+- **Element:** DNS resolution and active probes (zone transfers, certificate grabs when enabled) (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-1101 — Sniffing Attacks  `DE03`
+#### F-1102 — Sniffing Attacks  `DE03`
 
-- **Element:** DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois) (flow)
+- **Element:** DNS resolution and active probes (zone transfers, certificate grabs when enabled) (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-1103 — Client-Server Protocol Manipulation  `CR08`
+#### F-1104 — Client-Server Protocol Manipulation  `CR08`
 
-- **Element:** DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois) (flow)
+- **Element:** DNS resolution and active probes (zone transfers, certificate grabs when enabled) (flow)
 - **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-1106 — Interception  `DE01`
+#### F-1107 — Interception  `DE01`
 
-- **Element:** TLS certificate and HTTPS fetches (sfp_sslcert) (flow)
+- **Element:** Platform collection jobs (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-1107 — Content Spoofing  `AC05`
+#### F-1108 — Content Spoofing  `AC05`
 
-- **Element:** TLS certificate and HTTPS fetches (sfp_sslcert) (flow)
+- **Element:** Platform collection jobs (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-1108 — Sniffing Attacks  `DE03`
+#### F-1109 — Sniffing Attacks  `DE03`
 
-- **Element:** TLS certificate and HTTPS fetches (sfp_sslcert) (flow)
+- **Element:** Platform collection jobs (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-1111 — Interception  `DE01`
+#### F-1111 — Client-Server Protocol Manipulation  `CR08`
 
-- **Element:** Write scan results and logs (flow)
-- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
-
-#### F-1112 — Content Spoofing  `AC05`
-
-- **Element:** Write scan results and logs (flow)
-- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
-
-#### F-1113 — Sniffing Attacks  `DE03`
-
-- **Element:** Write scan results and logs (flow)
-- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
-
-#### F-1115 — Client-Server Protocol Manipulation  `CR08`
-
-- **Element:** Write scan results and logs (flow)
+- **Element:** Platform collection jobs (flow)
 - **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-1117 — Interception  `DE01`
+#### F-1113 — Interception  `DE01`
 
-- **Element:** Read scan results for the API (flow)
+- **Element:** SocialOSINT text and vision prompts (own endpoint and key) (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-1118 — Content Spoofing  `AC05`
+#### F-1114 — Content Spoofing  `AC05`
 
-- **Element:** Read scan results for the API (flow)
+- **Element:** SocialOSINT text and vision prompts (own endpoint and key) (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-1119 — Sniffing Attacks  `DE03`
+#### F-1115 — Sniffing Attacks  `DE03`
 
-- **Element:** Read scan results for the API (flow)
+- **Element:** SocialOSINT text and vision prompts (own endpoint and key) (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-1121 — Client-Server Protocol Manipulation  `CR08`
+#### F-1118 — Interception  `DE01`
 
-- **Element:** Read scan results for the API (flow)
-- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Use strong authentication protocols.
+- **Element:** Platform collection (operator's API tokens) (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-1119 — Content Spoofing  `AC05`
+
+- **Element:** Platform collection (operator's API tokens) (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-1120 — Sniffing Attacks  `DE03`
+
+- **Element:** Platform collection (operator's API tokens) (flow)
+- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
 #### F-1123 — Interception  `DE01`
 
-- **Element:** DNS and WHOIS pivots (OpenOSINT) (flow)
+- **Element:** Cache collected profiles and posts (/app/data) (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
 #### F-1124 — Content Spoofing  `AC05`
 
-- **Element:** DNS and WHOIS pivots (OpenOSINT) (flow)
+- **Element:** Cache collected profiles and posts (/app/data) (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
 #### F-1125 — Sniffing Attacks  `DE03`
 
-- **Element:** DNS and WHOIS pivots (OpenOSINT) (flow)
+- **Element:** Cache collected profiles and posts (/app/data) (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
 #### F-1127 — Client-Server Protocol Manipulation  `CR08`
 
-- **Element:** DNS and WHOIS pivots (OpenOSINT) (flow)
+- **Element:** Cache collected profiles and posts (/app/data) (flow)
 - **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-1130 — Interception  `DE01`
+#### F-1129 — Interception  `DE01`
 
-- **Element:** HTTPS source lookups (OpenOSINT) (flow)
+- **Element:** Read cached profiles for later sessions (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-1131 — Content Spoofing  `AC05`
+#### F-1130 — Content Spoofing  `AC05`
 
-- **Element:** HTTPS source lookups (OpenOSINT) (flow)
+- **Element:** Read cached profiles for later sessions (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-1132 — Sniffing Attacks  `DE03`
+#### F-1131 — Sniffing Attacks  `DE03`
 
-- **Element:** HTTPS source lookups (OpenOSINT) (flow)
+- **Element:** Read cached profiles for later sessions (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
+#### F-1133 — Client-Server Protocol Manipulation  `CR08`
+
+- **Element:** Read cached profiles for later sessions (flow)
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Use strong authentication protocols.
+
 #### F-1135 — Interception  `DE01`
 
-- **Element:** Qualification & synthesis prompts (local HTTP API) (flow)
+- **Element:** Due-diligence queries (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
 #### F-1136 — Content Spoofing  `AC05`
 
-- **Element:** Qualification & synthesis prompts (local HTTP API) (flow)
+- **Element:** Due-diligence queries (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
 #### F-1137 — Sniffing Attacks  `DE03`
 
-- **Element:** Qualification & synthesis prompts (local HTTP API) (flow)
+- **Element:** Due-diligence queries (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-1139 — Client-Server Protocol Manipulation  `CR08`
+#### F-1140 — Interception  `DE01`
 
-- **Element:** Qualification & synthesis prompts (local HTTP API) (flow)
-- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Use strong authentication protocols.
-
-#### F-1141 — Interception  `DE01`
-
-- **Element:** Local model inference (flow)
+- **Element:** DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois) (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-1142 — Content Spoofing  `AC05`
+#### F-1141 — Content Spoofing  `AC05`
 
-- **Element:** Local model inference (flow)
+- **Element:** DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois) (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-1143 — Sniffing Attacks  `DE03`
+#### F-1142 — Sniffing Attacks  `DE03`
 
-- **Element:** Local model inference (flow)
+- **Element:** DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois) (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-1145 — Client-Server Protocol Manipulation  `CR08`
+#### F-1144 — Client-Server Protocol Manipulation  `CR08`
 
-- **Element:** Local model inference (flow)
+- **Element:** DNS, WHOIS and plaintext probes (sfp_dnsresolve, sfp_whois) (flow)
 - **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Use strong authentication protocols.
 
 #### F-1147 — Interception  `DE01`
 
-- **Element:** Qualification & synthesis prompts (cloud) (flow)
+- **Element:** TLS certificate and HTTPS fetches (sfp_sslcert) (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
 #### F-1148 — Content Spoofing  `AC05`
 
-- **Element:** Qualification & synthesis prompts (cloud) (flow)
+- **Element:** TLS certificate and HTTPS fetches (sfp_sslcert) (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
 #### F-1149 — Sniffing Attacks  `DE03`
 
-- **Element:** Qualification & synthesis prompts (cloud) (flow)
+- **Element:** TLS certificate and HTTPS fetches (sfp_sslcert) (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
 #### F-1152 — Interception  `DE01`
 
-- **Element:** Scan results (JSON events, HTTP) (flow)
+- **Element:** Write scan results and logs (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
 #### F-1153 — Content Spoofing  `AC05`
 
-- **Element:** Scan results (JSON events, HTTP) (flow)
+- **Element:** Write scan results and logs (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
 #### F-1154 — Sniffing Attacks  `DE03`
 
-- **Element:** Scan results (JSON events, HTTP) (flow)
+- **Element:** Write scan results and logs (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
 #### F-1156 — Client-Server Protocol Manipulation  `CR08`
 
-- **Element:** Scan results (JSON events, HTTP) (flow)
+- **Element:** Write scan results and logs (flow)
 - **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Use strong authentication protocols.
 
 #### F-1158 — Interception  `DE01`
 
-- **Element:** Analysis report (Markdown, HTTP) (flow)
+- **Element:** Read scan results for the API (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
 #### F-1159 — Content Spoofing  `AC05`
 
-- **Element:** Analysis report (Markdown, HTTP) (flow)
+- **Element:** Read scan results for the API (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
 #### F-1160 — Sniffing Attacks  `DE03`
 
-- **Element:** Analysis report (Markdown, HTTP) (flow)
+- **Element:** Read scan results for the API (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
 #### F-1162 — Client-Server Protocol Manipulation  `CR08`
 
+- **Element:** Read scan results for the API (flow)
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Use strong authentication protocols.
+
+#### F-1164 — Interception  `DE01`
+
+- **Element:** DNS and WHOIS pivots (OpenOSINT) (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-1165 — Content Spoofing  `AC05`
+
+- **Element:** DNS and WHOIS pivots (OpenOSINT) (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-1166 — Sniffing Attacks  `DE03`
+
+- **Element:** DNS and WHOIS pivots (OpenOSINT) (flow)
+- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-1168 — Client-Server Protocol Manipulation  `CR08`
+
+- **Element:** DNS and WHOIS pivots (OpenOSINT) (flow)
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Use strong authentication protocols.
+
+#### F-1171 — Interception  `DE01`
+
+- **Element:** HTTPS source lookups (OpenOSINT) (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-1172 — Content Spoofing  `AC05`
+
+- **Element:** HTTPS source lookups (OpenOSINT) (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-1173 — Sniffing Attacks  `DE03`
+
+- **Element:** HTTPS source lookups (OpenOSINT) (flow)
+- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-1176 — Interception  `DE01`
+
+- **Element:** Qualification & synthesis prompts (local HTTP API) (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-1177 — Content Spoofing  `AC05`
+
+- **Element:** Qualification & synthesis prompts (local HTTP API) (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-1178 — Sniffing Attacks  `DE03`
+
+- **Element:** Qualification & synthesis prompts (local HTTP API) (flow)
+- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-1180 — Client-Server Protocol Manipulation  `CR08`
+
+- **Element:** Qualification & synthesis prompts (local HTTP API) (flow)
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Use strong authentication protocols.
+
+#### F-1182 — Interception  `DE01`
+
+- **Element:** Local model inference (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-1183 — Content Spoofing  `AC05`
+
+- **Element:** Local model inference (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-1184 — Sniffing Attacks  `DE03`
+
+- **Element:** Local model inference (flow)
+- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-1186 — Client-Server Protocol Manipulation  `CR08`
+
+- **Element:** Local model inference (flow)
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Use strong authentication protocols.
+
+#### F-1188 — Interception  `DE01`
+
+- **Element:** Qualification & synthesis prompts (cloud) (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-1189 — Content Spoofing  `AC05`
+
+- **Element:** Qualification & synthesis prompts (cloud) (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-1190 — Sniffing Attacks  `DE03`
+
+- **Element:** Qualification & synthesis prompts (cloud) (flow)
+- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-1193 — Interception  `DE01`
+
+- **Element:** Scan results (JSON events, HTTP) (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-1194 — Content Spoofing  `AC05`
+
+- **Element:** Scan results (JSON events, HTTP) (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-1195 — Sniffing Attacks  `DE03`
+
+- **Element:** Scan results (JSON events, HTTP) (flow)
+- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-1197 — Client-Server Protocol Manipulation  `CR08`
+
+- **Element:** Scan results (JSON events, HTTP) (flow)
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Use strong authentication protocols.
+
+#### F-1199 — Interception  `DE01`
+
+- **Element:** Analysis report (Markdown, HTTP) (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-1200 — Content Spoofing  `AC05`
+
+- **Element:** Analysis report (Markdown, HTTP) (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-1201 — Sniffing Attacks  `DE03`
+
+- **Element:** Analysis report (Markdown, HTTP) (flow)
+- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-1203 — Client-Server Protocol Manipulation  `CR08`
+
 - **Element:** Analysis report (Markdown, HTTP) (flow)
 - **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-1164 — Sniffing Attacks  `DE03`
+#### F-1205 — Sniffing Attacks  `DE03`
 
 - **Element:** Search results (HTTPS) (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-1166 — Sniffing Attacks  `DE03`
+#### F-1207 — Sniffing Attacks  `DE03`
 
 - **Element:** Model replies (JSON, HTTPS) (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-1168 — Interception  `DE01`
+#### F-1209 — Interception  `DE01`
 
 - **Element:** Model replies (JSON, local HTTP) (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-1169 — Content Spoofing  `AC05`
+#### F-1210 — Content Spoofing  `AC05`
 
 - **Element:** Model replies (JSON, local HTTP) (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-1170 — Sniffing Attacks  `DE03`
+#### F-1211 — Sniffing Attacks  `DE03`
 
 - **Element:** Model replies (JSON, local HTTP) (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-1172 — Client-Server Protocol Manipulation  `CR08`
+#### F-1213 — Client-Server Protocol Manipulation  `CR08`
 
 - **Element:** Model replies (JSON, local HTTP) (flow)
 - **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-1173 — Sniffing Attacks  `DE03`
+#### F-1214 — Sniffing Attacks  `DE03`
 
 - **Element:** Text and vision analysis (Markdown, HTTPS) (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-1175 — Sniffing Attacks  `DE03`
+#### F-1216 — Sniffing Attacks  `DE03`
 
 - **Element:** Polled events (HTTPS, certificate unverified) (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-1177 — Interception  `DE01`
+#### F-1218 — Interception  `DE01`
 
 - **Element:** Tokens and userinfo (HTTP) (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-1178 — Content Spoofing  `AC05`
+#### F-1219 — Content Spoofing  `AC05`
 
 - **Element:** Tokens and userinfo (HTTP) (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-1179 — Sniffing Attacks  `DE03`
+#### F-1220 — Sniffing Attacks  `DE03`
 
 - **Element:** Tokens and userinfo (HTTP) (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-1181 — Client-Server Protocol Manipulation  `CR08`
+#### F-1222 — Client-Server Protocol Manipulation  `CR08`
 
 - **Element:** Tokens and userinfo (HTTP) (flow)
 - **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-1183 — Interception  `DE01`
+#### F-1224 — Interception  `DE01`
 
 - **Element:** Reports, findings and evidence (direct loopback) (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-1184 — Content Spoofing  `AC05`
+#### F-1225 — Content Spoofing  `AC05`
 
 - **Element:** Reports, findings and evidence (direct loopback) (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-1185 — Sniffing Attacks  `DE03`
+#### F-1226 — Sniffing Attacks  `DE03`
 
 - **Element:** Reports, findings and evidence (direct loopback) (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-1187 — Client-Server Protocol Manipulation  `CR08`
+#### F-1228 — Client-Server Protocol Manipulation  `CR08`
 
 - **Element:** Reports, findings and evidence (direct loopback) (flow)
 - **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-1190 — Interception  `DE01`
+#### F-1231 — Interception  `DE01`
 
 - **Element:** Proxied responses (reports, findings, evidence) (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-1191 — Content Spoofing  `AC05`
+#### F-1232 — Content Spoofing  `AC05`
 
 - **Element:** Proxied responses (reports, findings, evidence) (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-1192 — Sniffing Attacks  `DE03`
+#### F-1233 — Sniffing Attacks  `DE03`
 
 - **Element:** Proxied responses (reports, findings, evidence) (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-1194 — Client-Server Protocol Manipulation  `CR08`
+#### F-1235 — Client-Server Protocol Manipulation  `CR08`
 
 - **Element:** Proxied responses (reports, findings, evidence) (flow)
 - **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-1198 — Interception  `DE01`
+#### F-1239 — Interception  `DE01`
 
 - **Element:** Proxied responses to the browser (shipped overlay) (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-1199 — Content Spoofing  `AC05`
+#### F-1240 — Content Spoofing  `AC05`
 
 - **Element:** Proxied responses to the browser (shipped overlay) (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-1200 — Sniffing Attacks  `DE03`
+#### F-1241 — Sniffing Attacks  `DE03`
 
 - **Element:** Proxied responses to the browser (shipped overlay) (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-1202 — Client-Server Protocol Manipulation  `CR08`
+#### F-1243 — Client-Server Protocol Manipulation  `CR08`
 
 - **Element:** Proxied responses to the browser (shipped overlay) (flow)
 - **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-1205 — Interception  `DE01`
+#### F-1246 — Interception  `DE01`
 
 - **Element:** Run/state SQL (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-1206 — Content Spoofing  `AC05`
+#### F-1247 — Content Spoofing  `AC05`
 
 - **Element:** Run/state SQL (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-1207 — Sniffing Attacks  `DE03`
+#### F-1248 — Sniffing Attacks  `DE03`
 
 - **Element:** Run/state SQL (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-1209 — Client-Server Protocol Manipulation  `CR08`
+#### F-1250 — Client-Server Protocol Manipulation  `CR08`
 
 - **Element:** Run/state SQL (flow)
 - **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-1211 — Interception  `DE01`
+#### F-1254 — Interception  `DE01`
 
-- **Element:** Seal run artefacts + manifest (flow)
+- **Element:** Read accounts, sessions and dossiers (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-1212 — Content Spoofing  `AC05`
+#### F-1255 — Content Spoofing  `AC05`
 
-- **Element:** Seal run artefacts + manifest (flow)
+- **Element:** Read accounts, sessions and dossiers (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-1213 — Sniffing Attacks  `DE03`
+#### F-1256 — Sniffing Attacks  `DE03`
 
-- **Element:** Seal run artefacts + manifest (flow)
+- **Element:** Read accounts, sessions and dossiers (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-1215 — Client-Server Protocol Manipulation  `CR08`
+#### F-1258 — Client-Server Protocol Manipulation  `CR08`
 
-- **Element:** Seal run artefacts + manifest (flow)
-- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Use strong authentication protocols.
-
-#### F-1217 — Interception  `DE01`
-
-- **Element:** Read target inventory (flow)
-- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
-
-#### F-1218 — Content Spoofing  `AC05`
-
-- **Element:** Read target inventory (flow)
-- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
-
-#### F-1219 — Sniffing Attacks  `DE03`
-
-- **Element:** Read target inventory (flow)
-- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
-
-#### F-1221 — Client-Server Protocol Manipulation  `CR08`
-
-- **Element:** Read target inventory (flow)
-- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Use strong authentication protocols.
-
-#### F-1222 — Interception  `DE01`
-
-- **Element:** STIX ingest (pycti, outbox retries) (flow)
-- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
-
-#### F-1223 — Content Spoofing  `AC05`
-
-- **Element:** STIX ingest (pycti, outbox retries) (flow)
-- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
-
-#### F-1224 — Sniffing Attacks  `DE03`
-
-- **Element:** STIX ingest (pycti, outbox retries) (flow)
-- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
-
-#### F-1226 — Client-Server Protocol Manipulation  `CR08`
-
-- **Element:** STIX ingest (pycti, outbox retries) (flow)
-- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Use strong authentication protocols.
-
-#### F-1229 — Interception  `DE01`
-
-- **Element:** Elasticsearch indices (flow)
-- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
-
-#### F-1230 — Content Spoofing  `AC05`
-
-- **Element:** Elasticsearch indices (flow)
-- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
-
-#### F-1231 — Sniffing Attacks  `DE03`
-
-- **Element:** Elasticsearch indices (flow)
-- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
-
-#### F-1233 — Client-Server Protocol Manipulation  `CR08`
-
-- **Element:** Elasticsearch indices (flow)
-- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Use strong authentication protocols.
-
-#### F-1235 — Interception  `DE01`
-
-- **Element:** MinIO objects (flow)
-- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
-
-#### F-1236 — Content Spoofing  `AC05`
-
-- **Element:** MinIO objects (flow)
-- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
-
-#### F-1237 — Sniffing Attacks  `DE03`
-
-- **Element:** MinIO objects (flow)
-- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
-
-#### F-1239 — Client-Server Protocol Manipulation  `CR08`
-
-- **Element:** MinIO objects (flow)
-- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Use strong authentication protocols.
-
-#### F-1242 — Interception  `DE01`
-
-- **Element:** RabbitMQ queues (flow)
-- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
-
-#### F-1243 — Content Spoofing  `AC05`
-
-- **Element:** RabbitMQ queues (flow)
-- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
-
-#### F-1244 — Sniffing Attacks  `DE03`
-
-- **Element:** RabbitMQ queues (flow)
-- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
-
-#### F-1246 — Client-Server Protocol Manipulation  `CR08`
-
-- **Element:** RabbitMQ queues (flow)
-- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Use strong authentication protocols.
-
-#### F-1249 — Interception  `DE01`
-
-- **Element:** Redis cache (no authentication) (flow)
-- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
-
-#### F-1250 — Content Spoofing  `AC05`
-
-- **Element:** Redis cache (no authentication) (flow)
-- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
-
-#### F-1251 — Sniffing Attacks  `DE03`
-
-- **Element:** Redis cache (no authentication) (flow)
-- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
-
-#### F-1253 — Client-Server Protocol Manipulation  `CR08`
-
-- **Element:** Redis cache (no authentication) (flow)
-- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Use strong authentication protocols.
-
-#### F-1255 — Interception  `DE01`
-
-- **Element:** MISP database (MySQL, compose-internal) (flow)
-- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
-
-#### F-1256 — Content Spoofing  `AC05`
-
-- **Element:** MISP database (MySQL, compose-internal) (flow)
-- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
-
-#### F-1257 — Sniffing Attacks  `DE03`
-
-- **Element:** MISP database (MySQL, compose-internal) (flow)
-- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
-
-#### F-1259 — Client-Server Protocol Manipulation  `CR08`
-
-- **Element:** MISP database (MySQL, compose-internal) (flow)
+- **Element:** Read accounts, sessions and dossiers (flow)
 - **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Use strong authentication protocols.
 
 #### F-1262 — Interception  `DE01`
 
-- **Element:** MISP cache and queues (Redis, no password) (flow)
+- **Element:** Seal run artefacts + manifest (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
 #### F-1263 — Content Spoofing  `AC05`
 
-- **Element:** MISP cache and queues (Redis, no password) (flow)
+- **Element:** Seal run artefacts + manifest (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
 #### F-1264 — Sniffing Attacks  `DE03`
 
-- **Element:** MISP cache and queues (Redis, no password) (flow)
+- **Element:** Seal run artefacts + manifest (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
 #### F-1266 — Client-Server Protocol Manipulation  `CR08`
 
-- **Element:** MISP cache and queues (Redis, no password) (flow)
+- **Element:** Seal run artefacts + manifest (flow)
 - **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Use strong authentication protocols.
 
 #### F-1268 — Interception  `DE01`
 
-- **Element:** Elasticsearch persists its indices (volume) (flow)
+- **Element:** Read target inventory (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
 #### F-1269 — Content Spoofing  `AC05`
 
-- **Element:** Elasticsearch persists its indices (volume) (flow)
+- **Element:** Read target inventory (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
 #### F-1270 — Sniffing Attacks  `DE03`
 
-- **Element:** Elasticsearch persists its indices (volume) (flow)
+- **Element:** Read target inventory (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
 #### F-1272 — Client-Server Protocol Manipulation  `CR08`
 
-- **Element:** Elasticsearch persists its indices (volume) (flow)
+- **Element:** Read target inventory (flow)
 - **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-1274 — Interception  `DE01`
+#### F-1273 — Interception  `DE01`
 
-- **Element:** MinIO persists objects (volume) (flow)
+- **Element:** STIX ingest (pycti, outbox retries) (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-1275 — Content Spoofing  `AC05`
+#### F-1274 — Content Spoofing  `AC05`
 
-- **Element:** MinIO persists objects (volume) (flow)
+- **Element:** STIX ingest (pycti, outbox retries) (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-1276 — Sniffing Attacks  `DE03`
+#### F-1275 — Sniffing Attacks  `DE03`
 
-- **Element:** MinIO persists objects (volume) (flow)
+- **Element:** STIX ingest (pycti, outbox retries) (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-1278 — Client-Server Protocol Manipulation  `CR08`
+#### F-1277 — Client-Server Protocol Manipulation  `CR08`
 
-- **Element:** MinIO persists objects (volume) (flow)
+- **Element:** STIX ingest (pycti, outbox retries) (flow)
 - **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Use strong authentication protocols.
 
 #### F-1280 — Interception  `DE01`
 
-- **Element:** RabbitMQ persists queues (volume) (flow)
+- **Element:** Elasticsearch indices (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
 #### F-1281 — Content Spoofing  `AC05`
 
-- **Element:** RabbitMQ persists queues (volume) (flow)
+- **Element:** Elasticsearch indices (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
 #### F-1282 — Sniffing Attacks  `DE03`
 
-- **Element:** RabbitMQ persists queues (volume) (flow)
+- **Element:** Elasticsearch indices (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
 #### F-1284 — Client-Server Protocol Manipulation  `CR08`
 
-- **Element:** RabbitMQ persists queues (volume) (flow)
+- **Element:** Elasticsearch indices (flow)
 - **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Use strong authentication protocols.
 
 #### F-1286 — Interception  `DE01`
 
-- **Element:** Redis persists its snapshot (volume) (flow)
+- **Element:** MinIO objects (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
 #### F-1287 — Content Spoofing  `AC05`
 
-- **Element:** Redis persists its snapshot (volume) (flow)
+- **Element:** MinIO objects (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
 #### F-1288 — Sniffing Attacks  `DE03`
 
-- **Element:** Redis persists its snapshot (volume) (flow)
+- **Element:** MinIO objects (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
 #### F-1290 — Client-Server Protocol Manipulation  `CR08`
 
+- **Element:** MinIO objects (flow)
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Use strong authentication protocols.
+
+#### F-1293 — Interception  `DE01`
+
+- **Element:** RabbitMQ queues (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-1294 — Content Spoofing  `AC05`
+
+- **Element:** RabbitMQ queues (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-1295 — Sniffing Attacks  `DE03`
+
+- **Element:** RabbitMQ queues (flow)
+- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-1297 — Client-Server Protocol Manipulation  `CR08`
+
+- **Element:** RabbitMQ queues (flow)
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Use strong authentication protocols.
+
+#### F-1300 — Interception  `DE01`
+
+- **Element:** Redis cache (no authentication) (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-1301 — Content Spoofing  `AC05`
+
+- **Element:** Redis cache (no authentication) (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-1302 — Sniffing Attacks  `DE03`
+
+- **Element:** Redis cache (no authentication) (flow)
+- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-1304 — Client-Server Protocol Manipulation  `CR08`
+
+- **Element:** Redis cache (no authentication) (flow)
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Use strong authentication protocols.
+
+#### F-1306 — Interception  `DE01`
+
+- **Element:** MISP database (MySQL, compose-internal) (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-1307 — Content Spoofing  `AC05`
+
+- **Element:** MISP database (MySQL, compose-internal) (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-1308 — Sniffing Attacks  `DE03`
+
+- **Element:** MISP database (MySQL, compose-internal) (flow)
+- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-1310 — Client-Server Protocol Manipulation  `CR08`
+
+- **Element:** MISP database (MySQL, compose-internal) (flow)
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Use strong authentication protocols.
+
+#### F-1313 — Interception  `DE01`
+
+- **Element:** MISP cache and queues (Redis, no password) (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-1314 — Content Spoofing  `AC05`
+
+- **Element:** MISP cache and queues (Redis, no password) (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-1315 — Sniffing Attacks  `DE03`
+
+- **Element:** MISP cache and queues (Redis, no password) (flow)
+- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-1317 — Client-Server Protocol Manipulation  `CR08`
+
+- **Element:** MISP cache and queues (Redis, no password) (flow)
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Use strong authentication protocols.
+
+#### F-1319 — Interception  `DE01`
+
+- **Element:** Elasticsearch persists its indices (volume) (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-1320 — Content Spoofing  `AC05`
+
+- **Element:** Elasticsearch persists its indices (volume) (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-1321 — Sniffing Attacks  `DE03`
+
+- **Element:** Elasticsearch persists its indices (volume) (flow)
+- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-1323 — Client-Server Protocol Manipulation  `CR08`
+
+- **Element:** Elasticsearch persists its indices (volume) (flow)
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Use strong authentication protocols.
+
+#### F-1325 — Interception  `DE01`
+
+- **Element:** MinIO persists objects (volume) (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-1326 — Content Spoofing  `AC05`
+
+- **Element:** MinIO persists objects (volume) (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-1327 — Sniffing Attacks  `DE03`
+
+- **Element:** MinIO persists objects (volume) (flow)
+- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-1329 — Client-Server Protocol Manipulation  `CR08`
+
+- **Element:** MinIO persists objects (volume) (flow)
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Use strong authentication protocols.
+
+#### F-1331 — Interception  `DE01`
+
+- **Element:** RabbitMQ persists queues (volume) (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-1332 — Content Spoofing  `AC05`
+
+- **Element:** RabbitMQ persists queues (volume) (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-1333 — Sniffing Attacks  `DE03`
+
+- **Element:** RabbitMQ persists queues (volume) (flow)
+- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-1335 — Client-Server Protocol Manipulation  `CR08`
+
+- **Element:** RabbitMQ persists queues (volume) (flow)
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Use strong authentication protocols.
+
+#### F-1337 — Interception  `DE01`
+
+- **Element:** Redis persists its snapshot (volume) (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-1338 — Content Spoofing  `AC05`
+
+- **Element:** Redis persists its snapshot (volume) (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-1339 — Sniffing Attacks  `DE03`
+
+- **Element:** Redis persists its snapshot (volume) (flow)
+- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-1341 — Client-Server Protocol Manipulation  `CR08`
+
 - **Element:** Redis persists its snapshot (volume) (flow)
 - **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-1292 — Interception  `DE01`
+#### F-1343 — Interception  `DE01`
 
 - **Element:** MariaDB persists on misp-db-data (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-1293 — Content Spoofing  `AC05`
+#### F-1344 — Content Spoofing  `AC05`
 
 - **Element:** MariaDB persists on misp-db-data (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-1294 — Sniffing Attacks  `DE03`
+#### F-1345 — Sniffing Attacks  `DE03`
 
 - **Element:** MariaDB persists on misp-db-data (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-1296 — Client-Server Protocol Manipulation  `CR08`
+#### F-1347 — Client-Server Protocol Manipulation  `CR08`
 
 - **Element:** MariaDB persists on misp-db-data (flow)
 - **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-1298 — Interception  `DE01`
+#### F-1349 — Interception  `DE01`
 
 - **Element:** Redis persists on misp-redis-data (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-1299 — Content Spoofing  `AC05`
+#### F-1350 — Content Spoofing  `AC05`
 
 - **Element:** Redis persists on misp-redis-data (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-1300 — Sniffing Attacks  `DE03`
+#### F-1351 — Sniffing Attacks  `DE03`
 
 - **Element:** Redis persists on misp-redis-data (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
-#### F-1302 — Client-Server Protocol Manipulation  `CR08`
+#### F-1353 — Client-Server Protocol Manipulation  `CR08`
 
 - **Element:** Redis persists on misp-redis-data (flow)
 - **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Use strong authentication protocols.
 
-#### F-1304 — Interception  `DE01`
+#### F-1355 — Interception  `DE01`
 
 - **Element:** Reference dataset download (GitHub master, mutable) (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
-#### F-1305 — Content Spoofing  `AC05`
+#### F-1356 — Content Spoofing  `AC05`
 
 - **Element:** Reference dataset download (GitHub master, mutable) (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
-#### F-1306 — Sniffing Attacks  `DE03`
+#### F-1357 — Sniffing Attacks  `DE03`
 
 - **Element:** Reference dataset download (GitHub master, mutable) (flow)
-- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
-
-#### F-1308 — Interception  `DE01`
-
-- **Element:** Reference dataset ingestion (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
-- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
-
-#### F-1309 — Content Spoofing  `AC05`
-
-- **Element:** Reference dataset ingestion (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
-- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
-
-#### F-1310 — Sniffing Attacks  `DE03`
-
-- **Element:** Reference dataset ingestion (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
-- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
-
-#### F-1312 — Client-Server Protocol Manipulation  `CR08`
-
-- **Element:** Reference dataset ingestion (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
-- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Use strong authentication protocols.
-
-#### F-1315 — Interception  `DE01`
-
-- **Element:** Worker consumes the ingestion queues (AMQP, in clear) (flow)
-- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
-
-#### F-1316 — Content Spoofing  `AC05`
-
-- **Element:** Worker consumes the ingestion queues (AMQP, in clear) (flow)
-- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
-
-#### F-1317 — Sniffing Attacks  `DE03`
-
-- **Element:** Worker consumes the ingestion queues (AMQP, in clear) (flow)
-- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
-
-#### F-1319 — Client-Server Protocol Manipulation  `CR08`
-
-- **Element:** Worker consumes the ingestion queues (AMQP, in clear) (flow)
-- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Use strong authentication protocols.
-
-#### F-1322 — Interception  `DE01`
-
-- **Element:** Worker writes processed bundles (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
-- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
-
-#### F-1323 — Content Spoofing  `AC05`
-
-- **Element:** Worker writes processed bundles (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
-- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
-
-#### F-1324 — Sniffing Attacks  `DE03`
-
-- **Element:** Worker writes processed bundles (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
-- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
-
-#### F-1326 — Client-Server Protocol Manipulation  `CR08`
-
-- **Element:** Worker writes processed bundles (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
-- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Use strong authentication protocols.
-
-#### F-1329 — Interception  `DE01`
-
-- **Element:** Fetch uploaded files and push the parsed bundle (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
-- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
-
-#### F-1330 — Content Spoofing  `AC05`
-
-- **Element:** Fetch uploaded files and push the parsed bundle (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
-- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
-
-#### F-1331 — Sniffing Attacks  `DE03`
-
-- **Element:** Fetch uploaded files and push the parsed bundle (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
-- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
-
-#### F-1333 — Client-Server Protocol Manipulation  `CR08`
-
-- **Element:** Fetch uploaded files and push the parsed bundle (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
-- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Use strong authentication protocols.
-
-#### F-1336 — Interception  `DE01`
-
-- **Element:** Enrichment and import modules (HTTP, compose-internal) (flow)
-- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
-
-#### F-1337 — Content Spoofing  `AC05`
-
-- **Element:** Enrichment and import modules (HTTP, compose-internal) (flow)
-- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
-
-#### F-1338 — Sniffing Attacks  `DE03`
-
-- **Element:** Enrichment and import modules (HTTP, compose-internal) (flow)
-- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
-
-#### F-1340 — Client-Server Protocol Manipulation  `CR08`
-
-- **Element:** Enrichment and import modules (HTTP, compose-internal) (flow)
-- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Use strong authentication protocols.
-
-#### F-1342 — Interception  `DE01`
-
-- **Element:** connector-misp polls MISP events (flow)
-- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
-
-#### F-1343 — Content Spoofing  `AC05`
-
-- **Element:** connector-misp polls MISP events (flow)
-- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
-
-#### F-1344 — Sniffing Attacks  `DE03`
-
-- **Element:** connector-misp polls MISP events (flow)
-- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
-
-#### F-1347 — Interception  `DE01`
-
-- **Element:** connector-misp writes to OpenCTI (flow)
-- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
-
-#### F-1348 — Content Spoofing  `AC05`
-
-- **Element:** connector-misp writes to OpenCTI (flow)
-- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
-
-#### F-1349 — Sniffing Attacks  `DE03`
-
-- **Element:** connector-misp writes to OpenCTI (flow)
-- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
-
-#### F-1351 — Client-Server Protocol Manipulation  `CR08`
-
-- **Element:** connector-misp writes to OpenCTI (flow)
-- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Use strong authentication protocols.
-
-#### F-1354 — Interception  `DE01`
-
-- **Element:** Alert webhook (ALERT_WEBHOOK_URL) (flow)
-- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
-- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
-
-#### F-1355 — Content Spoofing  `AC05`
-
-- **Element:** Alert webhook (ALERT_WEBHOOK_URL) (flow)
-- **Response:** accepted — With ALERT_WEBHOOK_SECRET unset (the modelled default) the receiver gets no orchestrator signature, so a custom endpoint without caller authentication cannot tell a forged alert from a real one; hosted Slack, Teams and Discord URLs authenticate the sender through the URL's own token instead. Hardening: set ALERT_WEBHOOK_SECRET and verify the HMAC-SHA256 signature at the receiver.
-- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
-
-#### F-1356 — Sniffing Attacks  `DE03`
-
-- **Element:** Alert webhook (ALERT_WEBHOOK_URL) (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
 
 #### F-1359 — Interception  `DE01`
 
-- **Element:** Alert e-mail (SMTP, STARTTLS by default) (flow)
+- **Element:** Reference dataset ingestion (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
 - **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
 
 #### F-1360 — Content Spoofing  `AC05`
 
-- **Element:** Alert e-mail (SMTP, STARTTLS by default) (flow)
+- **Element:** Reference dataset ingestion (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
 - **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
 - **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
 
 #### F-1361 — Sniffing Attacks  `DE03`
+
+- **Element:** Reference dataset ingestion (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
+- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-1363 — Client-Server Protocol Manipulation  `CR08`
+
+- **Element:** Reference dataset ingestion (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Use strong authentication protocols.
+
+#### F-1366 — Interception  `DE01`
+
+- **Element:** Worker consumes the ingestion queues (AMQP, in clear) (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-1367 — Content Spoofing  `AC05`
+
+- **Element:** Worker consumes the ingestion queues (AMQP, in clear) (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-1368 — Sniffing Attacks  `DE03`
+
+- **Element:** Worker consumes the ingestion queues (AMQP, in clear) (flow)
+- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-1370 — Client-Server Protocol Manipulation  `CR08`
+
+- **Element:** Worker consumes the ingestion queues (AMQP, in clear) (flow)
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Use strong authentication protocols.
+
+#### F-1373 — Interception  `DE01`
+
+- **Element:** Worker writes processed bundles (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-1374 — Content Spoofing  `AC05`
+
+- **Element:** Worker writes processed bundles (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-1375 — Sniffing Attacks  `DE03`
+
+- **Element:** Worker writes processed bundles (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
+- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-1377 — Client-Server Protocol Manipulation  `CR08`
+
+- **Element:** Worker writes processed bundles (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Use strong authentication protocols.
+
+#### F-1380 — Interception  `DE01`
+
+- **Element:** Fetch uploaded files and push the parsed bundle (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-1381 — Content Spoofing  `AC05`
+
+- **Element:** Fetch uploaded files and push the parsed bundle (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-1382 — Sniffing Attacks  `DE03`
+
+- **Element:** Fetch uploaded files and push the parsed bundle (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
+- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-1384 — Client-Server Protocol Manipulation  `CR08`
+
+- **Element:** Fetch uploaded files and push the parsed bundle (OPENCTI_ADMIN_TOKEN, HTTP) (flow)
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Use strong authentication protocols.
+
+#### F-1387 — Interception  `DE01`
+
+- **Element:** Enrichment and import modules (HTTP, compose-internal) (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-1388 — Content Spoofing  `AC05`
+
+- **Element:** Enrichment and import modules (HTTP, compose-internal) (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-1389 — Sniffing Attacks  `DE03`
+
+- **Element:** Enrichment and import modules (HTTP, compose-internal) (flow)
+- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-1391 — Client-Server Protocol Manipulation  `CR08`
+
+- **Element:** Enrichment and import modules (HTTP, compose-internal) (flow)
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Use strong authentication protocols.
+
+#### F-1393 — Interception  `DE01`
+
+- **Element:** connector-misp polls MISP events (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-1394 — Content Spoofing  `AC05`
+
+- **Element:** connector-misp polls MISP events (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-1395 — Sniffing Attacks  `DE03`
+
+- **Element:** connector-misp polls MISP events (flow)
+- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-1398 — Interception  `DE01`
+
+- **Element:** connector-misp writes to OpenCTI (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-1399 — Content Spoofing  `AC05`
+
+- **Element:** connector-misp writes to OpenCTI (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-1400 — Sniffing Attacks  `DE03`
+
+- **Element:** connector-misp writes to OpenCTI (flow)
+- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-1402 — Client-Server Protocol Manipulation  `CR08`
+
+- **Element:** connector-misp writes to OpenCTI (flow)
+- **Response:** accepted — The orchestrator validates protocol and headers on everything it serves and sends well-formed requests; POST /bundles parses its body as JSON without checking the declared media type, and the schema validation that follows is what bounds it. Manipulating a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Use strong authentication protocols.
+
+#### F-1405 — Interception  `DE01`
+
+- **Element:** Alert webhook (ALERT_WEBHOOK_URL) (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-1406 — Content Spoofing  `AC05`
+
+- **Element:** Alert webhook (ALERT_WEBHOOK_URL) (flow)
+- **Response:** accepted — With ALERT_WEBHOOK_SECRET unset (the modelled default) the receiver gets no orchestrator signature, so a custom endpoint without caller authentication cannot tell a forged alert from a real one; hosted Slack, Teams and Discord URLs authenticate the sender through the URL's own token instead. Hardening: set ALERT_WEBHOOK_SECRET and verify the HMAC-SHA256 signature at the receiver.
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-1407 — Sniffing Attacks  `DE03`
+
+- **Element:** Alert webhook (ALERT_WEBHOOK_URL) (flow)
+- **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Encrypt sensitive information when transmitted on insecure mediums to prevent interception.
+
+#### F-1410 — Interception  `DE01`
+
+- **Element:** Alert e-mail (SMTP, STARTTLS by default) (flow)
+- **Response:** accepted — Host-internal plaintext flows (loopback, compose bridge, in-process, files) are within the trusted boundary of ADR-005; what leaves the host with a credential or evidence inside is TLS. The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Leverage encryption to encode the transmission of data thus making it accessible only to authorized parties.
+
+#### F-1411 — Content Spoofing  `AC05`
+
+- **Element:** Alert e-mail (SMTP, STARTTLS by default) (flow)
+- **Response:** accepted — Everything that arrives through these flows is treated as untrusted text: escaped by React under CSP in the console, delimited in prompts, validated as STIX on intake. Spoofing the content of a host-internal plaintext hop needs a position on the host (DS06). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
+- **pytm mitigations:** Validation of user input for type, length, data-range, format, etc. Encoding any user input that will be output by the web application.
+
+#### F-1412 — Sniffing Attacks  `DE03`
 
 - **Element:** Alert e-mail (SMTP, STARTTLS by default) (flow)
 - **Response:** accepted — The rule fires on the absence of a VPN, which no hop uses; what protects each hop differs. Internet hops carry credentials and evidence under TLS 1.2+ with certificate verification (Tavily, the cloud and SocialOSINT LLM endpoints, the social platforms, GitHub's datasets, the webhook over https://, SMTP with STARTTLS), so sniffing them needs a broken TLS, not a position on the path. Host-internal hops are plaintext by decision ADR-005 and sniffing them needs a position on the host, out of the modelled scope. The exception on record: connector-misp polls MISP with MISP_SSL_VERIFY=false, TLS without certificate verification, so a position on the compose network could impersonate MISP (hardening: a trusted certificate and MISP_SSL_VERIFY=true). The collectors' own discovery traffic (SpiderFoot's and Amass's DNS, WHOIS and probes of the target's surface) is plaintext by nature: it carries the target name and what the public already serves, never a credential, and its answers are treated as untrusted input.
@@ -8033,7 +8347,7 @@ Every finding carries a triage response:
 
 #### F-205 — Encryption Brute Forcing  `CR05`
 
-- **Element:** SQLite run store (store)
+- **Element:** SQLite store (orchestrator.db) (store)
 - **Response:** accepted — Nothing is encrypted at rest to brute-force (DR01).
 - **pytm mitigations:** Use commonly accepted algorithms and recommended key sizes. The key size used will depend on how important it is to keep the data confidential and for how long.In theory a brute force attack performing an exhaustive key space search will always succeed, so the goal is to have computational security. Moore's law needs to be taken into account that suggests that computing resources double every eighteen months.
 

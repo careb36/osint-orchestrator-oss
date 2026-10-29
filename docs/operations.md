@@ -517,7 +517,10 @@ optional OIDC edge, compose network, OpenCTI platform), the orchestrator, its
 sidecars, the vendor services it talks to (Tavily, the cloud LLM, Keycloak,
 oauth2-proxy, OpenCTI and its MISP connector, the alert webhook and SMTP
 relay), the data stores and every flow with its protocol, TLS version and the
-credentials it carries. Each component asserts only the controls its own code
+credentials it carries. The personal-access surface of ADR-012 is modelled as
+its own flows: sign-in, the session cookie, the console call that rides it, a
+dossier write and an issued report, with the account, session, dossier and
+report records as assets. Each component asserts only the controls its own code
 or image ships: the orchestrator's validation, CSP or non-root user never
 count for a sidecar or a vendor service. Each endpoint declares the protocol
 it serves and the highest classification it is entrusted with, and each flow
@@ -552,9 +555,13 @@ rationale, and review the diff: an accepted finding is a decision on record,
 never a silence. The accepted set is deliberate — plaintext host-internal
 flows and stores on a single trusted host (ADR-005), the shipped OIDC overlay
 without TLS termination, static API keys and tokens (ADR-005), the
-loopback-only unauthenticated sidecars, the unsigned webhook by default, and
-the residual risk that a schema-valid model reply skews a risk level — each
-with the hardening step a shared-infrastructure deployment must add.
+loopback-only unauthenticated sidecars, the unsigned webhook by default, the
+residual risk that a schema-valid model reply skews a risk level, and the two
+gaps personal access (ADR-012) leaves open: passwords only, with no MFA and no
+per-IP rate limit on sign-in (a counter locks an account for 15 minutes after
+five failures), and any signed-in person able to read every dossier, which is
+the shared-practice model rather than per-dossier scoping — each with the
+hardening step a shared-infrastructure deployment must add.
 
 ## Accepted container findings
 
