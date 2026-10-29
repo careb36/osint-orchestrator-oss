@@ -6,7 +6,7 @@ FROM owaspamass/amass:v5.1.3 AS amass
 
 # React operator dashboard (ui/). Built here so the runtime image needs no
 # Node: the output is static files the orchestrator serves under /console.
-FROM node:22.12.0-alpine3.20 AS ui-builder
+FROM node:24.1.0-alpine3.20 AS ui-builder
 WORKDIR /ui
 COPY ui/package.json ui/package-lock.json ./
 RUN --mount=type=secret,id=proxy_ca \
