@@ -20,7 +20,31 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     server: {
       proxy: Object.fromEntries(
-        API_PATH_PREFIXES.map((prefix) => [prefix, { target: devApiTarget, changeOrigin: true, configure: (proxy) => { proxy.on('proxyReq', (outgoing, incoming) => { if (incoming.headers.origin) outgoing.setHeader('Origin', new URL(devApiTarget).origin); }); } }]),
+        API_PATH_PREFIXES.map((prefix) => [
+          prefix,
+          {
+            target: devApiTarget,
+            changeOrigin: true,
+            // Vite re-exports the proxy server extending Node's EventEmitter,
+            // but this project has no @types/node, so `on` is missing from the type.
+            configure: (proxy) => {
+              const server = proxy as unknown as {
+                on: (
+                  event: string,
+                  handler: (
+                    outgoing: { setHeader: (k: string, v: string) => void },
+                    incoming: { headers: Record<string, string | undefined> },
+                  ) => void,
+                ) => void;
+              };
+              server.on('proxyReq', (outgoing, incoming) => {
+                if (incoming.headers.origin) {
+                  outgoing.setHeader('Origin', new URL(devApiTarget).origin);
+                }
+              });
+            },
+          },
+        ]),
       ),
     },
     build: {
@@ -31,9 +55,10 @@ export default defineConfig(({ mode }) => {
           // The libraries change far less often than the views: one vendor
           // chunk keeps its immutable cache entry across dashboard releases,
           // and each lazily loaded view (src/App.tsx) gets its own chunk.
-          manualChunks: {
-            react: ['react', 'react-dom', 'react-router-dom'],
-            query: ['@tanstack/react-query'],
+          manualChunks: (id: string) => {
+            if (/node_modules\/(react|react-dom|react-router|react-router-dom|scheduler)\//.test(id)) return 'react';
+            if (id.includes('node_modules/@tanstack/react-query')) return 'query';
+            return undefined;
           },
         },
       },
