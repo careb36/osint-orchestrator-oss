@@ -1,10 +1,10 @@
 """
 OWASP pytm threat model of the OSINT Orchestrator.
 
-Model source of truth: docs/architecture.md, docs/adr/ (001-011; the
-account, session and dossier elements of 012 are still unmapped),
+Model source of truth: docs/architecture.md, docs/adr/ (001-012),
 docker-compose*.yml, the Dockerfiles, orchestrator/config.py,
-orchestrator/auth.py, orchestrator/alerts/__init__.py and the collectors.
+orchestrator/auth.py, orchestrator/accounts.py, orchestrator/personal_api.py,
+orchestrator/dossiers.py, orchestrator/alerts/__init__.py and the collectors.
 
 pytm is a modelling tool, not a runtime dependency of the service: it lives in
 a throwaway virtualenv and never in pyproject.toml (see docs/operations.md,
@@ -69,9 +69,11 @@ tm.description = (
     "Modular monolith (ADR-001): one FastAPI process with an in-process APScheduler and a "
     "SQLite store drives OSINT collectors, qualifies evidence with an LLM, normalises findings "
     "to STIX 2.1 (ADR-002), ingests them into OpenCTI (ADR-003/008), seals a signed report chain "
-    "per run (ADR-007) and dispatches alerts by webhook and e-mail. Access uses static API keys "
-    "and a single instance (ADR-005), with an optional OIDC proxy perimeter (ADR-006) and an "
-    "external STIX intake (ADR-011). Operator prose is Spanish, code English (ADR-004)."
+    "per run (ADR-007) and dispatches alerts by webhook and e-mail. Automation authenticates with "
+    "static API keys (ADR-005), while staff use personal accounts with two roles and sign the "
+    "professional dossiers of ADR-012; deployment is a single instance, with an optional OIDC "
+    "proxy perimeter (ADR-006) and an external STIX intake (ADR-011). Operator prose is Spanish, "
+    "code English (ADR-004)."
 )
 tm.assumptions = [
     "Single-instance deployment on a trusted Docker host; loopback-published ports are reachable "
@@ -79,6 +81,28 @@ tm.assumptions = [
     "The Docker host and the compose network are operated by the same team as the orchestrator.",
     "ORCHESTRATOR_API_KEY is set. require_api_key is a no-op with an empty key (open mode, "
     "documented in ADR-005 and ADR-006); that mode is out of this model's scope.",
+    "Personal accounts (ADR-012): one administrator creates them, passwords are at least 12 "
+    "characters and chosen by staff, and the machine key cannot act as a person. An install "
+    "with no accounts yet still answers on the legacy key path, and that pre-upgrade state is "
+    "the ADR-005 model, not this one.",
+    "The two roles separate the decision from the collection: an admin, and only a person, "
+    "manages accounts (require_admin), an accountant decides on evidence and issues reports, "
+    "and dossiers.py::_reviewer rejects anyone else. The operational admin routes — target "
+    "reload, alert DLQ replay, OpenCTI outbox replay and POST /bundles — accept a machine key as "
+    "well, which is the documented automation path of require_admin_or_machine. Least privilege "
+    "is partial on purpose and the model keeps it as a control that is NOT met: any signed-in "
+    "person can list and read every "
+    "dossier (dossiers.py::list_cases filters by nothing but limit and offset), which is the "
+    "shared-practice model the ADR describes, so a compromised accountant account reads the "
+    "whole practice. Per-dossier scoping would be the fix, and it is a product decision.",
+    "Login brute force is bounded by a counter, not by a WAF: every wrong password increments "
+    "user_accounts.failed_logins and the fifth locks the account for 15 minutes "
+    "(accounts.py::login). An unknown username is not an oracle — same 401, and a dummy digest "
+    "is verified so the timing matches — but there is no per-IP limit, no CAPTCHA and no MFA, "
+    "so a distributed attempt against many usernames is slowed per account only, and whoever "
+    "knows an accountant's username can lock them out for 15 minutes at will. The pytm library "
+    "has no brute-force threat to attach this to, so it is recorded here and in the triage "
+    "notes of the login flow.",
     "The shipped docker-compose.auth.yml terminates no TLS: oauth2-proxy listens on plain HTTP "
     "on loopback and hardcodes OAUTH2_PROXY_COOKIE_SECURE=false, and the browser logs in at "
     "Keycloak's own HTTP endpoint (KC_HOSTNAME http://localhost:8085, OIDC_BROWSER_LOGIN_URL). "
@@ -101,10 +125,12 @@ tm.assumptions = [
     "compose boundary. OllamaClient posts to whatever URL is configured (providers/ollama.py), "
     "so a remote LLM_BASE_URL turns `llm: local` into the cloud-provider case of this model; a "
     "remote Ollama is not modelled separately.",
-    "The operator's browser is outside the model. The console keeps ORCHESTRATOR_API_KEY in "
-    "sessionStorage and, with 'Remember me', in localStorage in clear (ui/src/lib/api.ts), so "
-    "a key retained in a shared or compromised browser is the operator's residual risk. "
-    "Hardening: no 'Remember me' on shared machines and rotation through the comma-separated "
+    "The operator's browser is outside the model. Before an administrator exists the console "
+    "keeps ORCHESTRATOR_API_KEY in sessionStorage and, with 'Remember me', in localStorage in "
+    "clear (ui/src/lib/api.ts); once personal accounts exist it holds an HttpOnly session "
+    "cookie it cannot read, and the key is only an automation credential. Either way a "
+    "credential retained in a shared or compromised browser is the operator's residual risk. "
+    "Hardening: no 'Remember me' on shared machines, and rotation through the comma-separated "
     "key set.",
 ]
 
@@ -262,6 +288,72 @@ operator_session = Data(
     isCredentials=True,
     credentialsLife=Lifetime.SHORT,
     classification=Classification.SECRET,
+)
+login_credentials = Data(
+    name="Login credentials",
+    description=(
+        "POST /auth/login body: the username, and the password as a pydantic SecretStr so no "
+        "traceback or log line can print it (personal_api.py)."
+    ),
+    isCredentials=True,
+    credentialsLife=Lifetime.SHORT,
+    classification=Classification.SECRET,
+)
+personal_session = Data(
+    name="Personal session cookie (orchestrator_session)",
+    description=(
+        "Opaque token from secrets.token_urlsafe(32) — 256 bits — signed out with HttpOnly, "
+        "SameSite=Strict and Secure (ORCHESTRATOR_COOKIE_SECURE defaults to true), so no script "
+        "and no cross-site page can use it; the store keeps only its SHA-256 digest, so a copied "
+        "database holds no usable session (accounts.py)."
+    ),
+    isCredentials=True,
+    credentialsLife=Lifetime.SHORT,
+    classification=Classification.SECRET,
+)
+password_digest = Data(
+    name="Password digest",
+    description=(
+        "pbkdf2-sha256 digest, 600 000 iterations, salt per account, in "
+        "user_accounts.password_hash; public_user() never serialises it, and an unknown "
+        "username still pays the derivation so timing does not disclose it."
+    ),
+    isCredentials=True,
+    credentialsLife=Lifetime.LONG,
+    classification=Classification.SECRET,
+)
+staff_directory = Data(
+    name="Account directory",
+    description=(
+        "user_accounts: username, display name, role (admin|accountant), active flag, "
+        "failed_logins and locked_until counters — the lockout state lives here."
+    ),
+    classification=Classification.RESTRICTED,
+)
+dossier_record = Data(
+    isPII=True,
+    name="Dossier record",
+    description=(
+        "dossiers, evidence_reviews and dossier_events: the subject's identity and scope, each "
+        "evidence decision with its written reason and its accountant, the conclusion and an "
+        "append-only audit trail. Personal data about a person or company under review."
+    ),
+    classification=Classification.RESTRICTED,
+    isStored=True,
+    isDestEncryptedAtRest=False,
+)
+dossier_report = Data(
+    isPII=True,
+    name="Issued dossier report",
+    description=(
+        "dossier_reports: frozen snapshot, markdown and PDF, HMAC-signed with "
+        "ORCHESTRATOR_SECRET_KEY (and the previous key while rotating), so a stored version "
+        "detects any later edit (dossiers.py::_verified)."
+    ),
+    classification=Classification.RESTRICTED,
+    isStored=True,
+    isDestEncryptedAtRest=False,
+    isDestEncryptedInTransit=False,
 )
 evidence = Data(
     isPII=True,
@@ -441,7 +533,10 @@ ORCHESTRATOR_CONTROLS = dict(
     isHardened=True,  # Dockerfile: USER 1000, pinned base image and dependencies
     hasAccessControl=True,
     implementsAuthenticationScheme=True,
-    authenticationScheme="static X-API-Key / Bearer (ADR-005), assumed configured",
+    authenticationScheme=(
+        "personal session cookie, HttpOnly SameSite=Strict, digest at rest (ADR-012), or the "
+        "static X-API-Key / Bearer key for automation (ADR-005), assumed configured"
+    ),
     authorizesSource=True,
     implementsServerSideValidation=True,  # pydantic models on every route body
     validatesInput=True,
@@ -461,10 +556,17 @@ ORCHESTRATOR_CONTROLS = dict(
     providesIntegrity=True,  # HMAC-signed manifest chain (ADR-007); not code signing
     usesSecureFunctions=True,
     tracksExecutionFlow=True,
-    implementsPOLP=False,  # one operator key, no per-user roles (ADR-005)
-    usesMFA=False,
+    # Roles and route-level authorization exist (ADR-012): _reviewer admits only an accountant,
+    # require_admin only an admin, and a machine key cannot act as a person. It is not
+    # least privilege all the same: every signed-in person reads every dossier, and an admin
+    # manages the accounts that grant its own powers. Set to False on purpose, so AC12/AC13/
+    # AC14/AC15 keep firing on this element and carry that gap.
+    implementsPOLP=False,
+    usesMFA=False,  # passwords only: one 8-hour session per sign-in, no second factor
 )
 orchestrator.controls = Controls(**ORCHESTRATOR_CONTROLS)
+orchestrator.usesSessionTokens = True  # orchestrator_session cookie (ADR-012)
+orchestrator.controls.usesStrongSessionIdentifiers = True  # token_urlsafe(32), 256 bits
 
 scheduler = Process("APScheduler cron jobs")
 scheduler.inBoundary = compose
@@ -474,9 +576,14 @@ scheduler.description = (
 )
 scheduler.controls = Controls(**ORCHESTRATOR_CONTROLS)
 
-sqlite = Datastore("SQLite run store")
+sqlite = Datastore("SQLite store (orchestrator.db)")
 sqlite.inBoundary = compose
 sqlite.isSQL = True
+sqlite.description = (
+    "One file for runs, evidence, the outbox, and since ADR-012 the accounts, the session "
+    "digests, the dossiers with their reasoned decisions and audit trail, and the signed "
+    "report versions. It is the whole practice in one plaintext file."
+)
 sqlite.controls = Controls(
     isEncryptedAtRest=False,  # volume-backed plaintext SQLite
     usesParameterizedInput=True,  # SQLModel / SQLAlchemy ORM
@@ -896,6 +1003,69 @@ flow(
     data=[api_key],
     controls=Controls(isEncrypted=False, authenticatesSource=True),
 )
+# ── Personal access (ADR-012) ────────────────────────────────────────────
+flow(
+    operator,
+    orchestrator,
+    "POST /auth/login (sign-in)",
+    protocol="HTTP",
+    tlsVersion=TLSVersion.NONE,
+    data=[login_credentials],
+    # Not authenticated by definition: this is the exchange that mints the session.
+    controls=Controls(
+        isEncrypted=False, authenticatesSource=False, validatesInput=True, validatesHeaders=True
+    ),
+)
+flow(
+    orchestrator,
+    operator,
+    "Set-Cookie orchestrator_session (login response)",
+    protocol="HTTP",
+    tlsVersion=TLSVersion.NONE,
+    isResponse=True,
+    usesSessionTokens=True,
+    data=[personal_session],
+    # Secure only when ORCHESTRATOR_COOKIE_SECURE is set; the shipped compose publishes on
+    # loopback, so the cookie crosses the operator boundary in clear.
+    controls=Controls(isEncrypted=False, authenticatesSource=False),
+)
+flow(
+    operator,
+    orchestrator,
+    "Console calls with the personal session (accountant/admin)",
+    protocol="HTTP",
+    tlsVersion=TLSVersion.NONE,
+    usesSessionTokens=True,
+    data=[personal_session, dossier_record, dossier_report],
+    controls=Controls(isEncrypted=False, authenticatesSource=True, hasAccessControl=True),
+)
+flow(
+    operator,
+    orchestrator,
+    "Dossier write: evidence decisions, reasons and conclusion",
+    protocol="HTTP",
+    tlsVersion=TLSVersion.NONE,
+    usesSessionTokens=True,
+    data=[dossier_record],
+    # Only an accountant may decide or issue; an admin is rejected (dossiers.py::_reviewer).
+    controls=Controls(
+        isEncrypted=False,
+        authenticatesSource=True,
+        hasAccessControl=True,
+        validatesInput=True,
+        authorizesSource=True,
+    ),
+)
+flow(
+    orchestrator,
+    operator,
+    "Issued report version (markdown/PDF download)",
+    protocol="HTTP",
+    tlsVersion=TLSVersion.NONE,
+    isResponse=True,
+    data=[dossier_report, dossier_record],
+    controls=Controls(isEncrypted=False, authenticatesSource=False),
+)
 flow(
     orchestrator,
     anonymous,
@@ -1228,7 +1398,23 @@ flow(
     sqlite,
     "Run/state SQL",
     protocol="SQL",
-    data=[evidence],
+    data=[
+        evidence,
+        staff_directory,
+        password_digest,
+        personal_session,
+        dossier_record,
+        dossier_report,
+    ],
+    controls=Controls(isEncrypted=False, usesParameterizedInput=True),
+)
+flow(
+    sqlite,
+    orchestrator,
+    "Read accounts, sessions and dossiers",
+    protocol="SQL",
+    isResponse=True,
+    data=[staff_directory, password_digest, personal_session, dossier_record, dossier_report],
     controls=Controls(isEncrypted=False, usesParameterizedInput=True),
 )
 flow(
@@ -2084,6 +2270,62 @@ _UNAUTHENTICATED_BACKING: Response = (
     "or network policies that pin each backing service to its platform.",
 )
 OVERRIDES: dict[tuple[str, str], Response] = {
+    # ── Personal access (ADR-012) ────────────────────────────────────────
+    # The generic flow answers describe collected web text and vendor hops; these five pairs are
+    # a sign-in and its cookie, and they deserve the answer that belongs to them.
+    ("POST /auth/login (sign-in)", "AC05"): (
+        "mitigated",
+        "The login route is unauthenticated by definition, so spoofing it means guessing a "
+        "password. Five wrong attempts lock the account for 15 minutes (accounts.py::login), an "
+        "unknown username gets the same 401 after a dummy digest so the timing does not disclose "
+        "it, and accounts.py::check_browser_request rejects a cross-site or non-XHR post. What "
+        "is NOT covered: no per-IP or global rate limit, no CAPTCHA, no MFA, so an attempt "
+        "spread over many usernames is bounded per account only, and five deliberate failures "
+        "deny a named accountant their sign-in for 15 minutes.",
+    ),
+    ("POST /auth/login (sign-in)", "DR01"): (
+        "accepted",
+        "The password crosses loopback in clear, which ADR-005 accepts for the trusted host: it "
+        "is a pydantic SecretStr, so no log line or traceback can print it, and the response is "
+        "sent with Cache-Control: no-store. Hardening: a TLS terminator in front of :8000, at "
+        "which point this pair disappears from the finding set.",
+    ),
+    ("Set-Cookie orchestrator_session (login response)", "CR01"): (
+        "accepted",
+        "The token is minted server-side and handed over with HttpOnly, SameSite=Strict and "
+        "Secure (ORCHESTRATOR_COOKIE_SECURE defaults to true, and docs/configuration.md tells an "
+        "operator to keep it so), so no script can read it and no cross-site page can send it. "
+        "Secure is not the protection here: the API ships on http://localhost:8000, which "
+        "browsers treat as a trustworthy origin, so the cookie still travels in clear over "
+        "loopback and anyone who can read that socket on the host — which ADR-005 trusts — can "
+        "copy a live session for up to the 8-hour lifetime (accounts.SESSION_SECONDS). The store "
+        "keeps only the digest, so a copied cookie is the sole way to use a session that leaks. "
+        "Hardening: a TLS terminator in front of :8000 on a real hostname, or a shorter lifetime "
+        "in accounts.py.",
+    ),
+    ("Set-Cookie orchestrator_session (login response)", "DS06"): (
+        "accepted",
+        "The flow's limit is PUBLIC because the sink is the operator's boundary and the hop is "
+        "not encrypted, so a SECRET session token on it is reported by construction. It is the "
+        "same decision as the cookie exposure: the host is trusted, the token is HttpOnly, "
+        "SameSite=Strict and revoked on logout, and it expires. Hardening: TLS in front of :8000.",
+    ),
+    ("Read accounts, sessions and dossiers", "AC23"): (
+        "accepted",
+        "What leaves the store is a password digest (pbkdf2), a session digest (SHA-256, usable "
+        "only with the pre-image) and the account/dossier rows, over a host-local file hop. The "
+        "credentials' own lifetime is bounded: a person rotates their password through "
+        "POST /auth/password, an admin resets one, and a session row expires 8 hours after it "
+        "was issued (accounts.SESSION_SECONDS). The plaintext file that holds them is the "
+        "accepted at-rest gap (DR01).",
+    ),
+    ("Run/state SQL", "AC23"): (
+        "accepted",
+        "Same hop as the read direction: the digests and the dossier rows are written to the "
+        "same plaintext SQLite file the runs use, and the store is where they live out their "
+        "lifetime. A copied database yields no usable session (only digests) but does yield the "
+        "dossiers themselves. Hardening: volume encryption or an encrypted SQLite build.",
+    ),
     ("OpenCTI UI login and session (loopback :8080, HTTP)", "CR02"): (
         "transferred",
         "TRACE handling on OpenCTI's web UI is the platform's; the UI is published on loopback "
