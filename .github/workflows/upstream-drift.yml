@@ -1,0 +1,117 @@
+name: Upstream pin drift
+
+# Dependabot covers the image tags and the PyPI ranges. It has no support for a
+# dependency referenced by a git commit, for a compose `build.context` pointing
+# at a repository, or for an `ARG <NAME>=<sha>` inside a Dockerfile — which is
+# how OpenOSINT, SpiderFoot and SocialOSINT are pinned. Nothing else in the
+# repository would ever say that those three moved, so this is the whole
+# channel for them.
+#
+# Weekly, and on demand. A pin is immutable, so noticing a month late costs the
+# same as noticing a day late; a daily issue would not buy anything and would
+# train the reader to ignore the one that matters.
+#
+# `scripts/check_upstream_pins.py` reads the pins from the files themselves, so
+# this job has no version numbers of its own to fall out of date.
+
+on:
+  schedule:
+    - cron: "43 4 * * 1" # Mondays, 04:43 UTC, after the security baseline
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-pin-drift
+  cancel-in-progress: true
+
+jobs:
+  drift:
+    name: Check the pins Dependabot cannot see
+    runs-on: ${{ fromJSON(vars.CI_RUNS_ON || '"ubuntu-latest"') }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Exit codes: 0 all current, 1 a pin moved, 2 the pins could not be read.
+      # The status is kept rather than raised here so the issue step still runs
+      # on the failure path.
+      - name: Check the pins
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          python scripts/check_upstream_pins.py > report.md 2> error.txt
+          status=$?
+          cat report.md
+          cat error.txt >&2
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+
+      # One issue at a time: a pin that stays behind must not open a new issue
+      # every Monday. `gh api` instead of actions/github-script, like
+      # docker-publish.yml, to keep one fewer third-party action in the graph.
+      - name: Open or update the drift issue
+        if: steps.check.outputs.status != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          STATUS: ${{ steps.check.outputs.status }}
+        run: |
+          {
+            if [ "$STATUS" = "2" ]; then
+              echo "The check could not complete: a pin changed shape, or a repository"
+              echo "could not be read. Until it runs clean, this report proves nothing,"
+              echo "so treat it as a broken check rather than as \"no drift\"."
+              echo ""
+            else
+              echo "An upstream repository moved past the commit this project pins."
+              echo "The pin still builds: nothing is broken by this issue. What it means"
+              echo "is that the code we parse as untrusted input has changed under us,"
+              echo "and nobody looked."
+              echo ""
+            fi
+            echo "| Pin | Pinned | Upstream head | Commits upstream since the pin | Status |"
+            echo "| --- | --- | --- | --- | --- |"
+            sed -n '3,$p' report.md
+            echo ""
+            echo "Raise the pin in its own commit, in the file the table names, and say"
+            echo "why. \`openosint\` is pinned at the fork \`careb36/OpenOSINT\`, so the"
+            echo "upstream row is the one that matters for it: the fork's own head can"
+            echo "be current while upstream runs ahead."
+            echo ""
+            echo "For \`openosint\`, a bump also needs \`orchestrator/collectors/openosint.py\`"
+            echo "to still import \`investigate()\`: upstream does not ship it."
+            echo ""
+            echo "Run: $RUN_URL"
+            echo ""
+            echo "_Opened by a workflow on behalf of the maintainer._"
+          } > body.md
+          # Search a short marker, not the whole title (see docker-publish.yml).
+          existing=$(gh issue list --state open --search 'in:title "Upstream pins moved"' \
+            --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file body.md
+          else
+            gh issue create --title "Upstream pins moved: Dependabot cannot see these" \
+              --body-file body.md --label security
+          fi
+
+      - name: Fail when a pin moved
+        if: steps.check.outputs.status == '1'
+        run: |
+          echo "::error::An upstream repository moved past its pin. See the issue."
+          exit 1
+
+      - name: Fail when the check could not run
+        if: steps.check.outputs.status == '2'
+        run: |
+          cat error.txt >&2 || true
+          echo "::error::The pin check could not complete, so it proves nothing."
+          exit 1

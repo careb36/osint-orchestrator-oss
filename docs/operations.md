@@ -580,6 +580,61 @@ finding in a `Suppressed Vulnerabilities` table on each run, so the decision is
 visible in the log of the pull request that touched the image, not only in this
 file.
 
+## Dependency pins and upstream drift
+
+Every third-party component is pinned to an exact version or commit. Dependabot
+(`.github/dependabot.yml`) proposes the ones it understands: PyPI packages,
+npm, image tags in `docker-compose*.yml` and the `FROM` lines of the
+Dockerfiles.
+
+Three pins are outside what Dependabot can read, because nothing in them looks
+like a package version:
+
+| Component | Pin | Where |
+| --- | --- | --- |
+| OpenOSINT | commit on the fork `careb36/OpenOSINT` | `pyproject.toml`, PEP 508 direct reference |
+| SpiderFoot | commit in a compose `build.context` | `docker-compose.yml`, service `spiderfoot` |
+| SocialOSINT | `ARG SOCIALOSINT_REF` | `Dockerfile.socialosint` |
+
+`.github/workflows/upstream-drift.yml` runs weekly (Mondays, 04:43 UTC) and on
+demand. It executes `scripts/check_upstream_pins.py`, which reads the pins from
+the files above — never from a list of its own, so it cannot disagree with
+them — and compares each one against the default branch of its repository with
+`git ls-remote`. No token, no clone. When something moved it opens one issue
+labelled `security` (or comments on the one already open) and fails the run.
+
+Read the table by the *Status* column:
+
+- **current** — the pinned commit is the upstream head.
+- **MOVED** — upstream moved. Nothing is broken: a pin is immutable, so an old
+  commit builds exactly as before. What changed is the code we parse as
+  untrusted input, and nobody has looked at the difference.
+- **fork tip** — the pinned repository is a fork and its own head has advanced
+  past the pin. Informational only: a fork's own commits are ours to make, and
+  the pin is a specific commit rather than the tip, so this is not drift. The
+  verdict for a fork is the row below it.
+- **incomplete** — the repository (or the parent lookup) could not be read, so
+  this row proves nothing. The job exits 2.
+- **unparseable** — a declaration the checker was written to read no longer
+  parses (for example a pin relaxed from a commit to a branch). The job exits 2,
+  because a green run over fewer pins than it was written to watch is the
+  failure that looks like success.
+
+For a fork the checker prints two rows. The first (`careb36/OpenOSINT`) shows
+the fork's own tip and is always informational; the second
+(`OpenOSINT/OpenOSINT`, *"upstream of the … fork"*) is the verdict. The verdict
+is decided by the *commits upstream since the pin* count, not by comparing the
+pin against the parent head: the pin is a fork commit, so it is never equal to
+the parent head, and a fork that has merged every upstream commit reports 0 and
+must be treated as current.
+
+Raising a pin is its own commit, in the file the table names, with the reason in
+the message. For OpenOSINT, verify first that
+`orchestrator/collectors/openosint.py` still resolves `investigate()` and
+`InvestigationBudget`: upstream does not ship `openosint/investigate.py`, only
+the fork does, so moving the pin to upstream breaks the collector at import
+time rather than at runtime.
+
 ## Release checklist and support SOP
 
 A release is a `vX.Y.Z` tag on `main`: the image workflow publishes

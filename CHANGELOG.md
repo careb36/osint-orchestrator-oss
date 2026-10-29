@@ -9,6 +9,21 @@ from [SECURITY.md](SECURITY.md).
 
 ## [Unreleased]
 
+### Added
+
+- Weekly check for the three dependency pins Dependabot cannot see. Dependabot
+  reads package versions, so a dependency referenced by a git commit, a compose
+  `build.context` and an `ARG <NAME>=<sha>` in a Dockerfile were invisible: that
+  is how OpenOSINT, SpiderFoot and SocialOSINT are pinned, and nothing in the
+  repository would ever have said that they moved.
+  `.github/workflows/upstream-drift.yml` runs `scripts/check_upstream_pins.py`
+  on Mondays, which reads the pins from the files that hold them and compares
+  each one against its upstream default branch with `git ls-remote`. When one
+  moved it opens a single `security` issue and fails the run. It reports a fork
+  and its parent separately, because the pin that matters most — `openosint` —
+  points at a fork whose own head looks current while `OpenOSINT/OpenOSINT`
+  runs 161 commits ahead of it.
+
 ### Fixed
 
 - STIX objects no longer get a fresh `modified` on every run. `stix2` defaults
