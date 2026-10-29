@@ -13,6 +13,35 @@ artificiosos frecuentes en textos automáticos. **No** afirmar que un texto es
 «indetectable», ni simular experiencia personal, fuentes o autoría humana que no
 consten.
 
+## Alcance dentro de este repositorio
+
+Esta skill **no** cambia qué se escribe en cada idioma; para eso manda
+[ADR-004](../../../docs/adr/ADR-004-language-policy.md) y, si hubiera conflicto,
+`AGENTS.md`. Antes de aplicar cualquier corrección, ubicar el texto:
+
+| Dónde está el texto | Idioma | Qué hacer |
+| --- | --- | --- |
+| `orchestrator/**/*.py`, comentarios, logs, mensajes de commit, `README.md`, `docs/**`, ADR | Inglés | No traducir ni «mejorar» el español de un texto inglés. Esta skill no aplica |
+| Claves `es` de `orchestrator/i18n.py`, cuerpos de informe, asuntos y cuerpos de alertas, síntesis del LLM | Español | Aquí sí aplica |
+| `README.es.md` | Español | Aplicar, y mantenerlo con las mismas secciones que `README.md` |
+
+Reglas que se derivan de eso:
+
+- **Cada clave de `i18n.py` lleva `es` y `en`.** Al retocar una cadena en un
+  idioma, revisar la pareja: `test_catalogue_is_complete` y
+  `test_every_translation_takes_the_same_placeholders` fallan si falta una
+  traducción o si una cambia los marcadores de formato.
+- **Lo que se persiste o se compara no se traduce**: `risk_level` (`low`,
+  `medium`, `high`, `critical`, `unknown`), `RunStatus`, tipos STIX y valores
+  de enum siguen en inglés en los dos idiomas. Traducirlos rompe comparaciones y
+  la correspondencia con OpenCTI.
+- **Placeholders intactos.** `{qualified}`, `{collected}`, `{target}` y demás
+  marcadores de formato se conservan literalmente; cambiar su nombre o su
+  número rompe el formateo en tiempo de ejecución.
+- **El texto en español de este repo es neutro y formal.** No introducir
+  regionalismos ni voseo en cadenas de producto, aunque el destinatario sea
+  rioplatense: el registro de la interfaz es uniforme para todos los operadores.
+
 ## Principios de actuación
 
 1. **Fidelidad primero.** Preservar hechos, fechas, responsables, nombres
@@ -25,10 +54,14 @@ consten.
    signos y dudas léxicas, consultar los recursos académicos complementarios de
    `references/fuentes-rae.md`. No atribuir a la Gramática reglas que provengan
    de otras obras.
-3. **Español de Uruguay, cuando no se indique otra variante.** Mantener un
-   registro profesional natural; respetar usos panhispánicos válidos y
-   preferencias locales. No introducir voseo en textos formales impersonales ni
-   corregir variedades regionales válidas por mero gusto.
+3. **Español panhispánico por defecto; variedad regional solo si el documento
+   la pide.** El texto de producto de este proyecto (claves `es` de
+   `orchestrator/i18n.py`, cuerpos de informe, alertas) está escrito en español
+   neutro y formal, tratando al lector de usted: «Revise los campos», «Se
+   evaluaron 5 de 7 evidencias». Mantener ese registro al editar esas cadenas.
+   Si el documento tiene un destinatario regional identificable, respetar su
+   variedad; no introducir voseo donde el resto del texto no lo usa ni corregir
+   variedades válidas por gusto.
 4. **Claridad con rigor.** Preferir sujeto, verbo y complemento claros; términos
    concretos; párrafos con una idea principal; relaciones causales explícitas
    cuando estén acreditadas. Evitar simplificaciones que modifiquen el alcance
@@ -145,6 +178,27 @@ condición, con qué efecto y qué queda pendiente. No convertir observaciones e
 diagnósticos no demostrados. Preferir «El servicio devuelve HTTP 403» a «Se
 evidencia una problemática en la capa de autenticación» si solo consta la
 respuesta HTTP.
+
+### Informes ejecutivos para dirección no técnica
+
+Es el caso de uso más frecuente en este repositorio (el informe periódico del
+estado de los sistemas). Reglas que se derivan de cómo se lee ese documento:
+
+- **Evidencia antes que valoración.** Primero qué se observó y con qué fuente;
+  después el semáforo, los riesgos y las decisiones pendientes. Un semáforo sin
+  evidencia debajo no es un informe, es una opinión.
+- **Semáforo explícito y comparable.** Cada sistema lleva su estado en una
+  palabra (verde, amarillo, rojo) y una frase que diga qué lo sostiene. No usar
+  «preocupante» o «mejorable» como sustituto del estado.
+- **Sin jerga sin traducir.** Si hace falta un término técnico, definirlo la
+  primera vez en la misma frase; no dejarlo como abreviatura suelta (`PR`, `CI`,
+  `ADR`) sin explicación.
+- **Decisiones pendientes con nombre y consecuencia.** Qué se decide, quién lo
+  decide y qué pasa si no se decide. Una lista de temas abiertos sin
+  consecuencia no permite decidir.
+- **No atribuir causas no demostradas.** «El servicio devolvió 502 durante 40
+  minutos» es un hecho; «por un problema de infraestructura» es una hipótesis
+  hasta que conste.
 
 ### Informes institucionales y administrativos
 

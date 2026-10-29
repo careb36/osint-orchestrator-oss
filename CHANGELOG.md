@@ -37,6 +37,18 @@ from [SECURITY.md](SECURITY.md).
 
 ### Changed
 
+- The Spanish writing skill said it was "the portable version for projects in
+  `/home/caro/Dev`" and defaulted to Uruguayan Spanish, while the product
+  strings in `orchestrator/i18n.py` are neutral and formal («Revise los
+  campos»). It also framed itself as a Codex skill and never mentioned the
+  language policy, so an agent could have applied it to `docs/` and produced
+  Spanish where ADR-004 requires English. It now opens with a scope table
+  (which files are Spanish, which are not, `AGENTS.md` wins), states the
+  `es`/`en` pairing on every `i18n.py` key, the identifiers that stay English
+  (`risk_level`, `RunStatus`, STIX types) and the formatting placeholders that
+  must survive a rewrite, and gains the genre this repository actually uses:
+  executive reports, where evidence precedes the traffic light.
+
 - Publishing an image is now gated by the event, not only by the ref. Any event
   that was not a pull request used to push, so a `workflow_dispatch` from a
   feature branch published `:<branch>` and `:sha-<short>` to GHCR. Only a
