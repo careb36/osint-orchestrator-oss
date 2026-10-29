@@ -248,7 +248,7 @@ async def test_replay_seals_chains_and_opens_cases(db, tmp_path: Path) -> None:
         "qualified_evidence.json",
     }
     report = (run_dir / "report.md").read_text(encoding="utf-8")
-    assert "## New since previous run" in report
+    assert "## New since the previous run" in report
     assert "meridian-ridge-trading.example" in report
     qualified = json.loads((run_dir / "qualified_evidence.json").read_text(encoding="utf-8"))
     assert len(qualified) == 7

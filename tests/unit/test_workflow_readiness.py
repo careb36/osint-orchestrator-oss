@@ -90,7 +90,11 @@ def test_pdf_keeps_unicode_content_and_all_words_inside_pages(tmp_path):
     )
     _write_optional_pdf(path, text)
     output = subprocess.check_output(["pdftotext", str(path), "-"], text=True)
-    assert "Autorización: Pérez € 42" in output
+    # Accents survive as themselves; the glyphs outside Latin-1 that the core
+    # font cannot draw are transliterated by the documented table in
+    # reports/pdf.py rather than dropped, and the dashes with them.
+    assert "Autorización: Pérez EUR 42" in output
+    assert "Informe - revisión" in output
     for i in range(65):
         assert f"Cliente-{i:03d}" in output
     bbox = ET.fromstring(subprocess.check_output(["pdftotext", "-bbox", str(path), "-"]))

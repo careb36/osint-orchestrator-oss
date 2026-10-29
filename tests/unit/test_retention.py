@@ -20,6 +20,8 @@ from orchestrator.models import (
     AlertDeliveryStatus,
     AlertRecord,
     AlertStatus,
+    Dossier,
+    DossierRun,
     EvidenceQualification,
     FindingRecord,
     OpenCTIOutbox,
@@ -134,7 +136,6 @@ async def test_purge_deletes_old_run_and_dependents(tmp_path, monkeypatch):
         session.add(
             EvidenceQualification(run_id=old_run.id, target_id="t1", url="https://old.example/news")
         )
-        session.add(AlertCase(run_id=old_run.id, target_id="t1", run_status="success"))
 
         # Recent run and its dependents
         recent_run = Run(
@@ -194,7 +195,7 @@ async def test_purge_deletes_old_run_and_dependents(tmp_path, monkeypatch):
     assert summary.alert_deliveries_deleted == 1
     assert summary.opencti_outbox_deleted == 1
     assert summary.evidence_qualifications_deleted == 1
-    assert summary.alert_cases_deleted == 1
+    assert summary.runs_retained_protected == 0
 
     # Verify DB state
     async with AsyncSession(engine, expire_on_commit=False) as session:
@@ -223,6 +224,158 @@ async def test_purge_deletes_old_run_and_dependents(tmp_path, monkeypatch):
         # seen_observables untouched
         seen = (await session.exec(select(SeenObservable))).all()
         assert len(seen) == 1, "seen_observables must not be deleted by retention"
+
+
+@pytest.mark.asyncio
+async def test_purge_keeps_runs_that_opened_an_alert_case(tmp_path, monkeypatch):
+    """A run with an alert case is the compliance file: it survives the cutoff
+    with its dependents and its report directory, while a case-less run of the
+    same age is purged."""
+    engine = _make_engine()
+    await _setup_db(engine)
+
+    reports = tmp_path / "daily_reports"
+    kept_day = reports / "2026-06-01"  # the filed run started here
+    purged_day = reports / "2026-05-01"  # only the case-less run started here
+    kept_day.mkdir(parents=True)
+    purged_day.mkdir(parents=True)
+    filed_started = datetime(2026, 6, 1, 8, 0, tzinfo=UTC)
+    plain_started = datetime(2026, 5, 1, 8, 0, tzinfo=UTC)
+
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        filed_run = Run(
+            target_id="t1",
+            started_at=filed_started,
+            finished_at=filed_started,
+            status=RunStatus.SUCCESS,
+        )
+        plain_run = Run(
+            target_id="t1",
+            started_at=plain_started,
+            finished_at=plain_started,
+            status=RunStatus.SUCCESS,
+        )
+        session.add(filed_run)
+        session.add(plain_run)
+        await session.commit()
+        await session.refresh(filed_run)
+        await session.refresh(plain_run)
+        for run in (filed_run, plain_run):
+            session.add(
+                FindingRecord(
+                    run_id=run.id,
+                    target_id="t1",
+                    summary="s",
+                    new_since_last_run="[]",
+                    suggested_pivots="[]",
+                )
+            )
+            session.add(
+                EvidenceQualification(
+                    run_id=run.id, target_id="t1", url=f"https://e.example/{run.id}"
+                )
+            )
+        session.add(
+            AlertCase(
+                run_id=filed_run.id,
+                target_id="t1",
+                run_status="success",
+                acknowledged_by="Ana",
+                note="falso positivo documentado",
+            )
+        )
+        await session.commit()
+
+    monkeypatch.setattr("orchestrator.retention.get_session", _session_factory(engine))
+    monkeypatch.setattr("orchestrator.retention.settings.orchestrator_retention_days", 30)
+    monkeypatch.setattr(
+        "orchestrator.retention.settings.targets_file", str(tmp_path / "notfound.yaml")
+    )
+    monkeypatch.setattr("orchestrator.retention._collect_report_dirs", lambda: {str(reports)})
+
+    summary = await purge_expired(now=NOW)
+
+    assert summary.runs_deleted == 1
+    assert summary.runs_retained_protected == 1
+    assert summary.findings_deleted == 1
+    assert summary.evidence_qualifications_deleted == 1
+    assert summary.report_dirs_deleted == 1
+    assert kept_day.is_dir(), "the filed run's report directory must survive"
+    assert not purged_day.exists()
+
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        runs = (await session.exec(select(Run))).all()
+        assert [run.id for run in runs] == [filed_run.id]
+        cases = (await session.exec(select(AlertCase))).all()
+        assert len(cases) == 1 and cases[0].note == "falso positivo documentado"
+        findings = (await session.exec(select(FindingRecord))).all()
+        assert [row.run_id for row in findings] == [filed_run.id]
+        evidence = (await session.exec(select(EvidenceQualification))).all()
+        assert [row.run_id for row in evidence] == [filed_run.id]
+
+
+@pytest.mark.asyncio
+async def test_dossier_citation_keeps_a_contiguous_chain_prefix(tmp_path, monkeypatch):
+    """A dossier-cited run must not leave a hole in the evidence chain.
+
+    Excluding the cited runs from the purge one by one deletes the older
+    uncited run and keeps the cited one, so verification reads the surviving
+    chain as tampered (a gap in the middle is indistinguishable from a
+    deleted manifest). Everything from the oldest protected run onward has to
+    survive instead, exactly as the alert-case floor already does.
+    """
+    engine = _make_engine()
+    await _setup_db(engine)
+
+    reports = tmp_path / "daily_reports"
+    days = [reports / f"2026-06-{day:02d}" for day in (1, 2, 3)]
+    for day in days:
+        day.mkdir(parents=True)
+
+    started = [datetime(2026, 6, day, 8, 0, tzinfo=UTC) for day in (1, 2, 3)]
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        runs = [
+            Run(target_id="t1", started_at=moment, finished_at=moment, status=RunStatus.SUCCESS)
+            for moment in started
+        ]
+        for run in runs:
+            session.add(run)
+        await session.commit()
+        for run in runs:
+            await session.refresh(run)
+        session.add(
+            Dossier(id=1, title="d", entity_name="e", entity_type="org", purpose="p", owner_id=1)
+        )
+        # The middle run is cited: the purge may drop the older run, never the
+        # newer one, or the chain loses its tail.
+        session.add(DossierRun(dossier_id=1, run_id=runs[1].id))
+        await session.commit()
+        ids = [run.id for run in runs]
+
+    monkeypatch.setattr("orchestrator.retention.get_session", _session_factory(engine))
+    monkeypatch.setattr("orchestrator.retention.settings.orchestrator_retention_days", 30)
+    monkeypatch.setattr(
+        "orchestrator.retention.settings.targets_file", str(tmp_path / "notfound.yaml")
+    )
+    monkeypatch.setattr("orchestrator.retention._collect_report_dirs", lambda: {str(reports)})
+
+    summary = await purge_expired(now=datetime(2026, 8, 1, tzinfo=UTC))
+
+    assert summary.runs_deleted == 1
+    assert summary.runs_retained_protected == 2
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        survived = sorted(row.id for row in (await session.exec(select(Run))).all())
+    assert survived == ids[1:], "the cited run and everything after it must survive"
+    assert days[2].is_dir(), "the surviving newer run keeps its report directory"
+
+
+def test_retention_is_disabled_by_default(monkeypatch):
+    """A fresh Settings() never purges: evidence is kept until an operator
+    sets a period on purpose."""
+    from orchestrator.config import Settings
+
+    monkeypatch.delenv("ORCHESTRATOR_RETENTION_DAYS", raising=False)
+    assert Settings().orchestrator_retention_days == 0
 
 
 # ─── Report directory purge tests ─────────────────────────────────────────────

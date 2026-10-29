@@ -12,7 +12,7 @@ import { formatDateTime, formatDuration, riskTone, runStatusTone } from '../lib/
 import { runTransitions } from '../lib/history';
 import { filterRuns, sortRuns, type RunSortKey } from '../lib/listing';
 import { isActiveStatus } from '../lib/overview';
-import type { RunStatus } from '../types';
+import type { RunStatus, TargetSummary } from '../types';
 
 const STATUSES: RunStatus[] = ['running', 'pending', 'failed', 'partial', 'success'];
 const DEFAULTS = { status: '' };
@@ -38,6 +38,17 @@ export function TargetDetailPage() {
   const visibleRuns = runs.data
     ? sortRuns(filterRuns(runs.data, { query: '', target: '', status: controls.get('status') as RunStatus | '', since: '' }, now), controls.sort, now)
     : [];
+
+  // Where the model prompts go after the global LLM_PROVIDER switches, as the
+  // API reports it (``processing``); an older API without it falls back to llm.
+  const processingOf = (data: TargetSummary) =>
+    data.processing ?? (!data.llm || data.llm === 'local' ? 'ollama' : data.llm);
+  const processingLabel = (processing: string) =>
+    processing === 'none'
+      ? t('target.processing.none')
+      : processing === 'ollama'
+        ? t('target.processing.local')
+        : t('target.processing.cloud', { provider: processing });
 
   return (
     <PageLayout
@@ -69,8 +80,17 @@ export function TargetDetailPage() {
             <strong>{String(target.data.schedule?.cron ?? '—')}</strong>
           </div>
           <div className="state-card">
+            <span className="label">{t('target.classification')}</span>
+            <strong>{tv(target.data.classification ?? 'osint')}</strong>
+            <small>
+              {target.data.classification === 'restricted'
+                ? t('target.classification.restricted')
+                : t('target.classification.osint')}
+            </small>
+          </div>
+          <div className="state-card">
             <span className="label">{t('target.llm')}</span>
-            <strong>{target.data.llm ?? 'local'}</strong>
+            <strong>{processingLabel(processingOf(target.data))}</strong>
           </div>
           <div className="state-card">
             <span className="label">{t('target.risk')}</span>

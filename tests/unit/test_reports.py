@@ -136,13 +136,133 @@ async def test_new_section_only_contains_is_new_true(tmp_path: Path) -> None:
     data = _sample_report_data()
     report = await generate_report(data, report_dir=str(tmp_path))
     text = report.read_text(encoding="utf-8")
+    # The identifiers live in the annex; the delta section lists values.
     assert "domain-name--1" in text
     assert "ipv4-addr--1" in text
-    new_section = text.split("## Nuevo desde la última corrida", 1)[1].split(
-        "## Inventario completo", 1
-    )[0]
-    assert "domain-name--1" in new_section
-    assert "ipv4-addr--1" not in new_section
+    new_section = text.split("## Novedades desde la corrida anterior", 1)[1].split("## Errores", 1)[
+        0
+    ]
+    assert "- dominio: `example.com`" in new_section
+    assert "1.2.3.4" not in new_section
+    assert "domain-name--1" not in new_section
+
+
+@pytest.mark.asyncio
+async def test_report_reads_executive_part_first_and_annex_last(tmp_path: Path) -> None:
+    """Synthesis, evidence and news come before the technical annex, and the
+    document data block closes the report."""
+    from orchestrator.models import Finding
+
+    finding = Finding(
+        target_id="alpha",
+        run_id=101,
+        summary="Resumen de prueba.",
+        new_since_last_run=["Dominio nuevo example.com"],
+        risk_level="high",
+        risk_justification="Motivo de prueba.",
+        suggested_pivots=["Registro mercantil"],
+        provider="nebius",
+        model="nvidia/test-model",
+    )
+    text = (
+        await generate_report(_sample_report_data(), report_dir=str(tmp_path), finding=finding)
+    ).read_text(encoding="utf-8")
+
+    order = [
+        text.index("## Síntesis"),
+        text.index("## Evidencia calificada"),
+        text.index("## Novedades desde la corrida anterior"),
+        text.index("## Errores"),
+        text.index("## Anexo técnico"),
+        text.index("### Estado por recolector"),
+        text.index("### Inventario completo"),
+        text.index("### Relaciones"),
+        text.index("## Datos del documento"),
+    ]
+    assert order == sorted(order)
+    # Labels for the reader, identifiers for the record.
+    assert "- **Estado:** exitosa (`success`)" in text
+    assert "**Riesgo**: alto (`high`) — Motivo de prueba." in text
+    assert "**Lo nuevo según el modelo**:\n- Dominio nuevo example.com" in text
+    assert "**Pivotes sugeridos**:\n- Registro mercantil" in text
+    assert "| openosint | correcto | 2 |" in text
+    assert "**dominio** (`domain-name`)" in text
+    assert "- resuelve a: `example.com` -> `1.2.3.4` (domain-name--1 -> ipv4-addr--1)" in text
+    assert "- **Generado por:** OSINT Orchestrator " in text
+    assert "- **Evaluación automática:** nebius · nvidia/test-model" in text
+    assert "No constituyen dictamen" in text
+
+
+@pytest.mark.asyncio
+async def test_report_dates_follow_the_configured_timezone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The local stamp is what a file is dated by; the UTC instant stays
+    beside it. An unknown zone falls back to UTC instead of failing."""
+    monkeypatch.setattr("orchestrator.timefmt.settings.orchestrator_timezone", "America/Montevideo")
+    text = (await generate_report(_sample_report_data(), report_dir=str(tmp_path))).read_text(
+        encoding="utf-8"
+    )
+    assert "- **Inicio:** 08/09/2026 07:00 -03 (`2026-09-08T10:00:00Z`)" in text
+
+    monkeypatch.setattr("orchestrator.timefmt.settings.orchestrator_timezone", "Mars/Olympus")
+    text = (
+        await generate_report(_sample_report_data(target_id="beta"), report_dir=str(tmp_path))
+    ).read_text(encoding="utf-8")
+    assert "- **Inicio:** 08/09/2026 10:00 UTC (`2026-09-08T10:00:00Z`)" in text
+
+
+@pytest.mark.asyncio
+async def test_qualified_evidence_shows_labels_and_percent(tmp_path: Path) -> None:
+    data = _sample_report_data().model_copy(
+        update={
+            "evidence": [
+                {
+                    "category": "adverse_media",
+                    "relevance": "high",
+                    "confidence": 0.86,
+                    "title": "Investigation",
+                    "url": "https://news.example/x",
+                    "rationale": "Trata de la entidad.",
+                }
+            ]
+        }
+    )
+    text = (await generate_report(data, report_dir=str(tmp_path))).read_text(encoding="utf-8")
+    assert "| prensa adversa | alta | 86 % | [Investigation](https://news.example/x) |" in text
+    assert "las asigna el modelo clasificador" in text
+
+
+@pytest.mark.asyncio
+async def test_report_without_finding_says_so_and_points_to_the_evidence(tmp_path: Path) -> None:
+    text = (
+        await generate_report(_sample_report_data(), report_dir=str(tmp_path), finding=None)
+    ).read_text(encoding="utf-8")
+    assert "Esta corrida no incluye evaluación automática de riesgo" in text
+    assert "- **Evaluación automática:** sin evaluación automática" in text
+
+
+@pytest.mark.asyncio
+async def test_daily_index_shows_labels(tmp_path: Path) -> None:
+    from orchestrator.models import Finding
+
+    finding = Finding(target_id="alpha", run_id=101, summary="s", risk_level="high")
+    await generate_report(_sample_report_data(), report_dir=str(tmp_path), finding=finding)
+    text = (tmp_path / "2026-09-08" / "index.md").read_text(encoding="utf-8")
+    assert "| alpha | exitosa (`success`) | 1 | alto (`high`) |" in text
+
+
+@pytest.mark.asyncio
+async def test_daily_index_keeps_one_language_when_targets_differ(tmp_path: Path) -> None:
+    """Rows written by a target reporting in another language are re-rendered
+    from their codes, so the index never mixes languages."""
+    await generate_report(_sample_report_data(target_id="alpha"), report_dir=str(tmp_path))
+    await generate_report(
+        _sample_report_data(target_id="beta"), report_dir=str(tmp_path), language="en"
+    )
+    text = (tmp_path / "2026-09-08" / "index.md").read_text(encoding="utf-8")
+    assert "| alpha | success (`success`) |" in text
+    assert "exitosa" not in text
 
 
 @pytest.mark.asyncio
@@ -257,3 +377,25 @@ async def test_report_renders_when_synthesis_failed(tmp_path: Path) -> None:
     )
     text = report_path.read_text(encoding="utf-8")
     assert any(t("synthesis_unavailable", language=lang) in text for lang in ("es", "en"))
+
+
+@pytest.mark.asyncio
+async def test_report_header_states_classification_and_processing(tmp_path: Path) -> None:
+    """The document says what it may contain and where the synthesis ran."""
+    data = _sample_report_data()  # defaults: osint, local
+    es_text = (await generate_report(data, report_dir=str(tmp_path))).read_text(encoding="utf-8")
+    assert "- **Clasificación:** fuentes abiertas (osint)" in es_text
+    assert "- **Procesamiento de la síntesis:** modelo local (Ollama)" in es_text
+
+    cloud = _sample_report_data(target_id="beta").model_copy(
+        update={"classification": "restricted", "processing": "nebius"}
+    )
+    en_text = (await generate_report(cloud, report_dir=str(tmp_path), language="en")).read_text(
+        encoding="utf-8"
+    )
+    assert "- **Classification:** restricted" in en_text
+    assert "- **Synthesis processing:** cloud: nebius" in en_text
+
+    off = _sample_report_data(target_id="gamma").model_copy(update={"processing": "none"})
+    off_text = (await generate_report(off, report_dir=str(tmp_path))).read_text(encoding="utf-8")
+    assert "- **Procesamiento de la síntesis:** sin síntesis (LLM_PROVIDER=none)" in off_text

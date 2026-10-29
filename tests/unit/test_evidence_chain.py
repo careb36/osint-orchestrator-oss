@@ -442,3 +442,50 @@ def test_startup_warns_on_an_empty_or_default_signing_key(
         r for r in caplog.records if getattr(r, "setting", None) == "ORCHESTRATOR_SECRET_KEY"
     ]
     assert bool(records) is warns
+
+
+async def test_retention_keeps_the_chain_verifiable_around_a_filed_run(
+    harness, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Retention must never leave a hole in a target's chain.
+
+    Three old runs; the middle one carries an alert case. The purge may only
+    take the run before it (a contiguous prefix, which verification accepts
+    as "retention removed the oldest runs"); purging the third run as well
+    would make the chain read as tampered with.
+    """
+    from datetime import timedelta
+
+    from sqlmodel import delete, select
+
+    import orchestrator.retention as retention_module
+    from orchestrator.models import AlertCase
+
+    await harness.setup()
+    first = await harness.run(0)
+    filed = await harness.run(1)
+    last = await harness.run(2)
+    async with harness.session() as session:
+        await session.exec(delete(AlertCase))  # the pipeline may have opened its own
+        session.add(AlertCase(run_id=filed.id, target_id=harness.target_id, run_status="success"))
+        await session.commit()
+
+    monkeypatch.setattr(retention_module, "get_session", harness.session)
+    monkeypatch.setattr(retention_module.settings, "orchestrator_retention_days", 1)
+    monkeypatch.setattr(retention_module, "_collect_report_dirs", lambda: {str(tmp_path)})
+
+    # The pipeline stamps finished_at with the wall clock, which is what
+    # retention ages runs by: look a month past it.
+    summary = await retention_module.purge_expired(now=datetime.now(UTC) + timedelta(days=30))
+
+    assert summary.runs_deleted == 1
+    assert summary.runs_retained_protected == 2
+    assert not Path(first.report_path).parent.exists(), "the purged run's directory goes"
+    assert Path(last.report_path).parent.exists()
+    async with harness.session() as session:
+        remaining = [run.id for run in (await session.exec(select(Run))).all()]
+    assert sorted(remaining) == [filed.id, last.id]
+
+    result = await harness.verify()
+    assert result["ok"] is True, result
+    assert result["anchor_run_id"] == filed.id

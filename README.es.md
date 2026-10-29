@@ -88,9 +88,10 @@ defecto, `llama3.2`, nombra un modelo de Ollama, no uno de Token Factory.
 ## Tavily
 
 El recolector de Tavily ([`collectors/tavily.py`](orchestrator/collectors/tavily.py))
-llama a la API de búsqueda en tiempo de ejecución con tres consultas de debida
-diligencia por término: prensa adversa y sanciones, estructura societaria, y
-procesos judiciales. Los términos son los nombres de la entidad configurados
+llama a la API de búsqueda en tiempo de ejecución con cinco consultas de debida
+diligencia por término: prensa adversa y sanciones, estructura societaria,
+procesos judiciales, antecedente penal y sanción administrativa, sin filtro
+temporal. Los términos son los nombres de la entidad configurados
 para el objetivo (por defecto, el dominio), entre comillas y buscados en
 fuentes de terceros. Cada página distinta genera un observable STIX `url` y una
 Nota, es calificada por Nemotron y queda registrada en
@@ -190,39 +191,6 @@ entidad ficticia, dos corridas, ninguna clave de API.
 
 ![Espacio de la corrida: cada evidencia con su categoría, relevancia, confianza y justificación, calificada por la muestra grabada](docs/img/dashboard-run-evidence-es.png)
 
-## Construido durante el hackathon
-
-El commit `Baseline: pre-hackathon snapshot` marca lo que existía antes: el
-pipeline de recolección, la normalización a STIX, la ingesta en OpenCTI, los
-reportes, las alertas y la API. Agregado desde entonces:
-
-| Funcionalidad | Pull requests |
-| --- | --- |
-| Proveedor Nebius Token Factory, rutas de modelo reasoning y fast, reintentos acotados | [#1](https://github.com/careb36/osint-orchestrator-oss/pull/1), [#4](https://github.com/careb36/osint-orchestrator-oss/pull/4) |
-| Recolector de investigación web con Tavily, búsqueda por nombre de entidad | [#2](https://github.com/careb36/osint-orchestrator-oss/pull/2), [#3](https://github.com/careb36/osint-orchestrator-oss/pull/3), [#13](https://github.com/careb36/osint-orchestrator-oss/pull/13) |
-| Calificación de evidencia con Nemotron, incorporada a la síntesis | [#29](https://github.com/careb36/osint-orchestrator-oss/pull/29), [#30](https://github.com/careb36/osint-orchestrator-oss/pull/30) |
-| Cadena de evidencia firmada, un directorio por corrida | [#23](https://github.com/careb36/osint-orchestrator-oss/pull/23), [#26](https://github.com/careb36/osint-orchestrator-oss/pull/26) |
-| Comprobación al arrancar de que los modelos configurados están disponibles | [#25](https://github.com/careb36/osint-orchestrator-oss/pull/25) |
-| Operación sin OpenCTI (`OPENCTI_ENABLED=false`) | [#23](https://github.com/careb36/osint-orchestrator-oss/pull/23) |
-| Correcciones encontradas corriendo el stack de punta a punta; prueba de humo de la imagen en CI | [#6](https://github.com/careb36/osint-orchestrator-oss/pull/6), [#16](https://github.com/careb36/osint-orchestrator-oss/pull/16), [#19](https://github.com/careb36/osint-orchestrator-oss/pull/19) |
-| Dashboard de operador (React): shell, vista general, triaje de targets y corridas, espacio de trabajo de la corrida con evidencia, reporte, manifiesto y exportación para entrega, historial de corridas, español e inglés, comprobaciones de accesibilidad | [#67](https://github.com/careb36/osint-orchestrator-oss/pull/67), [#68](https://github.com/careb36/osint-orchestrator-oss/pull/68), [#69](https://github.com/careb36/osint-orchestrator-oss/pull/69), [#70](https://github.com/careb36/osint-orchestrator-oss/pull/70), [#71](https://github.com/careb36/osint-orchestrator-oss/pull/71), [#75](https://github.com/careb36/osint-orchestrator-oss/pull/75), [#76](https://github.com/careb36/osint-orchestrator-oss/pull/76), [#77](https://github.com/careb36/osint-orchestrator-oss/pull/77) |
-| Andamiaje del dashboard, alcance, KPIs y definición de hecho; telemetría de preparación para producción y flujo de humo | [#45](https://github.com/careb36/osint-orchestrator-oss/pull/45), [#47](https://github.com/careb36/osint-orchestrator-oss/pull/47), [#57](https://github.com/careb36/osint-orchestrator-oss/pull/57), [#58](https://github.com/careb36/osint-orchestrator-oss/pull/58), [#60](https://github.com/careb36/osint-orchestrator-oss/pull/60), [#61](https://github.com/careb36/osint-orchestrator-oss/pull/61), [#62](https://github.com/careb36/osint-orchestrator-oss/pull/62), [#64](https://github.com/careb36/osint-orchestrator-oss/pull/64) |
-| Modo demo público, retirado después junto con la consola renderizada en el servidor | [#33](https://github.com/careb36/osint-orchestrator-oss/pull/33), [#35](https://github.com/careb36/osint-orchestrator-oss/pull/35), [#65](https://github.com/careb36/osint-orchestrator-oss/pull/65), [#73](https://github.com/careb36/osint-orchestrator-oss/pull/73), [#74](https://github.com/careb36/osint-orchestrator-oss/pull/74) |
-| Correcciones de integridad (cadena de evidencia, retención) y endurecimiento del texto del modelo y de internet | [#66](https://github.com/careb36/osint-orchestrator-oss/pull/66), [#78](https://github.com/careb36/osint-orchestrator-oss/pull/78) |
-| Casos de alerta con triaje de reconocer/resolver, regla on_run_failure y métricas; vista de Alertas en el dashboard | [#88](https://github.com/careb36/osint-orchestrator-oss/pull/88), [#89](https://github.com/careb36/osint-orchestrator-oss/pull/89) |
-| Ingesta externa de STIX 2.1 (ADR-011): `POST /bundles` y la CLI `ingest_bundle` con validación de esquema; overlay del worker de investigation-assistant | [#92](https://github.com/careb36/osint-orchestrator-oss/pull/92), [#118](https://github.com/careb36/osint-orchestrator-oss/pull/118) |
-| Correcciones en recolectores y normalizador: escaneos abandonados de SpiderFoot detenidos, OpenOSINT nunca lanza excepciones, ids de Note por target, segmentos de Tavily no falsificables | [#79](https://github.com/careb36/osint-orchestrator-oss/pull/79), [#80](https://github.com/careb36/osint-orchestrator-oss/pull/80) |
-| API y salud: 404 en chain/verify para targets desconocidos, limit/offset en `GET /runs`, `GET /ready` para sondas, claves de firma retiradas aceptadas al verificar | [#81](https://github.com/careb36/osint-orchestrator-oss/pull/81), [#82](https://github.com/careb36/osint-orchestrator-oss/pull/82), [#83](https://github.com/careb36/osint-orchestrator-oss/pull/83) |
-| Endurecimiento del despliegue: imagen como uid 1000, puertos de compose atados a loopback, tags fijadas, perfil de OpenCTI opcional y stack LTS, valores de Helm para los ajustes nuevos | [#84](https://github.com/careb36/osint-orchestrator-oss/pull/84), [#86](https://github.com/careb36/osint-orchestrator-oss/pull/86), [#107](https://github.com/careb36/osint-orchestrator-oss/pull/107), [#111](https://github.com/careb36/osint-orchestrator-oss/pull/111) |
-| CI y cadena de suministro: workflow de release, análisis Trivy y SBOM en las imágenes, mypy bloqueante, limpieza de tipos, esquema STIX fijado | [#87](https://github.com/careb36/osint-orchestrator-oss/pull/87), [#90](https://github.com/careb36/osint-orchestrator-oss/pull/90), [#99](https://github.com/careb36/osint-orchestrator-oss/pull/99), [#100](https://github.com/careb36/osint-orchestrator-oss/pull/100), [#104](https://github.com/careb36/osint-orchestrator-oss/pull/104), [#105](https://github.com/careb36/osint-orchestrator-oss/pull/105) |
-| Validación estricta de `targets.yaml`, corrección de la métrica de latencia, 404 en reportes purgados; ajustes muertos, docs obsoletas y un fallback inalcanzable eliminados | [#109](https://github.com/careb36/osint-orchestrator-oss/pull/109), [#110](https://github.com/careb36/osint-orchestrator-oss/pull/110), [#112](https://github.com/careb36/osint-orchestrator-oss/pull/112), [#117](https://github.com/careb36/osint-orchestrator-oss/pull/117) |
-| Cobertura de pruebas del planificador, rutas de error del pipeline, proveedores LLM, calificación, cadena de evidencia, sumidero y normalizador; corrección del flujo de humo de la UI | [#94](https://github.com/careb36/osint-orchestrator-oss/pull/94), [#113](https://github.com/careb36/osint-orchestrator-oss/pull/113), [#114](https://github.com/careb36/osint-orchestrator-oss/pull/114), [#116](https://github.com/careb36/osint-orchestrator-oss/pull/116) |
-| Rediseño Obsidian Sentinel del dashboard y la landing: barra de navegación, chip de salud en vivo, tarjetas responsivas, correcciones de accesibilidad; capturas en el README | [#119](https://github.com/careb36/osint-orchestrator-oss/pull/119), [#122](https://github.com/careb36/osint-orchestrator-oss/pull/122) |
-| Modelo de amenazas OWASP pytm con informe triado y un registro de hallazgos verificado en cada regeneración | [#120](https://github.com/careb36/osint-orchestrator-oss/pull/120) |
-| Corrida de muestra: dos corridas grabadas de una entidad ficticia reproducidas con el pipeline real, para que la consola enseñe el producto sin claves de API; un solo run activo por objetivo garantizado por la base de datos; inicio rápido en tres niveles | [#124](https://github.com/careb36/osint-orchestrator-oss/pull/124) |
-| La pestaña de evidencia nombra el proveedor y el modelo que calificó cada fila | [#125](https://github.com/careb36/osint-orchestrator-oss/pull/125) |
-| Documentación: bloque de configuración de Token Factory, enrutamiento de LLM explicado, reglas de agente por ruta, tablas del hackathon | [#85](https://github.com/careb36/osint-orchestrator-oss/pull/85), [#91](https://github.com/careb36/osint-orchestrator-oss/pull/91), [#115](https://github.com/careb36/osint-orchestrator-oss/pull/115), [#121](https://github.com/careb36/osint-orchestrator-oss/pull/121) |
-
 ## Uso responsable
 
 El orquestador ejecuta reconocimiento contra lo que figure en `targets.yaml`, y
@@ -249,10 +217,10 @@ El acceso personal distingue contadores y administración. Los expedientes conse
 
 ## Documentación
 
-La documentación de referencia está en inglés:
+La documentación de referencia está disponible en inglés y español:
 [Arquitectura](docs/architecture.md) · [Configuración](docs/configuration.md) ·
 [Operación](docs/operations.md) · [Despliegue](docs/deploy.md) · [Decisiones](docs/adr/) ·
 [Contribuir](CONTRIBUTING.md) · [Seguridad](SECURITY.md) ·
-[Changelog](CHANGELOG.md)
+[Changelog](CHANGELOG.md) · [Historial de la hackathon](docs/HACKATHON.md)
 
 Licencia MIT — ver [LICENSE](LICENSE).

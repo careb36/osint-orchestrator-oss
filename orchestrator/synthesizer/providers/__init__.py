@@ -68,6 +68,25 @@ class LLMClient(Protocol):
         ...
 
 
+def effective_provider(target: Target) -> str:
+    """Where *target*'s model prompts actually go: ``none``, ``ollama``,
+    ``anthropic``, ``openai`` or ``nebius``.
+
+    Mirrors the branches of :func:`get_client` (the global ``none`` switch
+    and the ``openai`` → Nebius remap) without building a client or reading
+    an API key, so the report header and the console can say where the
+    synthesis is processed. A missing key still makes get_client skip the
+    synthesis; the report says so in its synthesis section.
+    """
+    if settings.llm_provider == "none":
+        return "none"
+    if target.llm == "local":
+        return "ollama"
+    if target.llm == "openai" and settings.llm_provider == "nebius":
+        return "nebius"
+    return target.llm
+
+
 def get_client(target: Target) -> LLMClient | None:
     """
     Return the LLM client to use for *target*.
