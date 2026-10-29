@@ -28,7 +28,7 @@ Defaults shown are the ones shipped in `.env.example` for Docker.
 | `ORCHESTRATOR_RETENTION_DAYS` | `0` | Days to keep runs and report directories; `0` (default) never purges. For each target, its first run that met an alert rule and every run after it are kept whatever the period (the evidence chain must stay a contiguous run of manifests). |
 | `ORCHESTRATOR_RETENTION_CRON` | `30 3 * * *` | UTC cron of the purge job. |
 | `ORCHESTRATOR_API_KEY` | *(empty)* | API keys, comma-separated while rotating. Empty permits anonymous development only before any personal account exists; see [personal access](compliance-workflow.md). |
-| `ORCHESTRATOR_COOKIE_SECURE` | `true` | Require HTTPS for personal session cookies; use `false` only on local HTTP development. |
+| `ORCHESTRATOR_COOKIE_SECURE` | `true` | Keeps `Secure` on the personal session cookie, so it only travels over HTTPS. Browsers also accept it on `http://localhost`, which is why the local quick start works unchanged; set `false` only when the console is served over plain HTTP on another hostname. The Helm chart exposes it as `config.cookieSecure`. |
 | `ORCHESTRATOR_LOG_LEVEL` | `INFO` | `DEBUG` \| `INFO` \| `WARNING` \| `ERROR`. |
 | `ORCHESTRATOR_LOG_FORMAT` | `text` | `text` for a terminal, `json` for a log shipper. |
 | `ORCHESTRATOR_METRICS_ENABLED` | `true` | `false` makes `GET /metrics` return 404. |

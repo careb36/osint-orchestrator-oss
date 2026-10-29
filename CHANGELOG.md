@@ -245,6 +245,19 @@ from [SECURITY.md](SECURITY.md).
 - `CONTRIBUTING.md`, `SECURITY.md`, this changelog and a documentation index
   (`docs/README.md`) linking every guide and ADR.
 
+- The threat model covers the ADR-012 entities instead of only the automation
+  path: personal accounts, sessions, the dossiers with their revisions and
+  signed report versions, and the flows that carry a password, a session cookie
+  or a decision. `docs/threat-model.md` now triages 1,414 findings across 89
+  distinct threats (733 accepted, 23 mitigated, 658 transferred) and states
+  where the model deliberately marks a control as not met, which is why
+  `implementsPOLP` stays false: any signed-in person can list every dossier.
+  Regenerating with `scripts/threat_model.py` has to leave `git status` clean.
+
+- `CODE_OF_CONDUCT.md` (Contributor Covenant) and the issue-template chooser
+  config, linked from both READMEs, so the repository answers every item of the
+  GitHub community standards checklist.
+
 ### Changed
 
 - The Spanish writing skill said it was "the portable version for projects in
@@ -432,6 +445,36 @@ from [SECURITY.md](SECURITY.md).
 - `OPENCTI_ADMIN_PASSWORD` and `OPENCTI_ADMIN_TOKEN` are required (`:?`):
   with the template comments no longer leaking into the values, a blank one
   would otherwise boot OpenCTI with empty admin credentials.
+
+- README (both languages) carries two animated clips beside the screenshots:
+  the showcase replay in the console and the quick start from a clean clone
+  (`docs/img/demo-run.gif`, `docs/img/demo-dossier.gif`), recorded from the
+  pipeline rather than mocked up, so a reader sees the product before running
+  it.
+
+- `docs/architecture.md` and `docs/deploy.md` claim only the boundary the code
+  enforces. Starting a collection and deciding on the dossier it produces are
+  both things one accountant can do — `POST /targets/{id}/run` depends on
+  `require_api_key`, which accepts a personal session — so separating
+  collection from approval is a procedure, not a control. What does hold: only
+  an accountant decides (`dossiers.py::_reviewer` rejects an admin with 403),
+  and a machine key reaches the operational data routes but neither `/cases`
+  (`require_person`) nor `/accounts` (`require_admin`).
+
+- Dashboard toolchain on Vite 8 and Vitest 5 with the config migration those
+  majors need, so UI lint, tests and the production build keep running on
+  supported versions.
+
+- The Helm chart exposes `config.cookieSecure` (`ORCHESTRATOR_COOKIE_SECURE`)
+  instead of leaving the session cookie of ADR-012 to `extraEnv`. It defaults to
+  `true`, which is right behind a TLS ingress; a chart served over plain HTTP on
+  a real hostname needs `false`, because browsers accept a `Secure` cookie on
+  `http://localhost` but not on `http://osint.example.local`.
+
+- `docs/architecture.md` maps the modules the last two ADRs added — personal
+  accounts and sessions, dossiers, alert cases, run admission, external STIX
+  intake and the showcase replay — so the table is a map of the code and not
+  only of the pipeline it started as.
 
 ### Removed
 
@@ -641,6 +684,25 @@ from [SECURITY.md](SECURITY.md).
   range resolved to pycti 7.x, whose `x_opencti_modified_at` input the 6.8
   platform rejects, so every STIX Note (Tavily pages) failed to ingest. The
   image now installs `libmagic1`, which pycti 6.x needs at import time.
+
+- Release notes for a tag. The extractor ended the released section at the next
+  `## [` heading, but `CHANGELOG.md` writes historical sections as
+  `## 2026-09-14`, so promoting `[Unreleased]` and reading it back returned 730
+  lines: six dated sections and the link-reference footer. The first tag cut
+  after this changelog existed would have published the whole history as its
+  notes. The section now ends at any level-2 heading, and the extraction lives
+  in `scripts/release_notes.py` instead of a heredoc inside the workflow, which
+  is what makes it testable without tagging.
+
+- `pytest -m integration` would have tested localhost with an empty key. The
+  scrub that keeps a unit run from reading a developer's shell pinned three
+  variables by name, so a shell that had sourced `.env` still leaked
+  `OPENCTI_ENABLED` and the rest into it — and the obvious fix, scrubbing every
+  settings prefix, took the `ORCHESTRATOR_URL`, `OPENCTI_URL` and
+  `ORCHESTRATOR_API_KEY` that `tests/integration/test_e2e.py` reads at import
+  time, silently aiming the stack tests at the default port. `tests/env_guard.py`
+  now decides from the pytest selection: a unit-only run gets a clean
+  environment, a run that can reach `tests/integration` keeps the operator's.
 
 ### Security
 

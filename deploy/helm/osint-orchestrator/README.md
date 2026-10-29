@@ -98,6 +98,7 @@ actually change:
 | `config.spiderfootUrl` | `http://spiderfoot:5001` | In-cluster SpiderFoot URL |
 | `config.language` | `es` | Operator-facing language (ADR-004) |
 | `config.logFormat` | `json` | `json` or `text` |
+| `config.cookieSecure` | `true` | `ORCHESTRATOR_COOKIE_SECURE`: the personal session cookie carries `Secure`, so it only travels over HTTPS. Browsers accept it on `http://localhost` but not on any other `http://` host, so a chart served over plain HTTP on a real hostname needs `false` |
 | `config.extraEnv` | `{}` | Any further variable, verbatim; an entry here overrides a named `config.*` value with the same key, so values files written before a key had its own value keep working |
 | `targets.targets` / `targets.existingConfigMap` | `[]` / `""` | The `targets.yaml` content |
 | `persistence.size` | `5Gi` | Database + daily reports volume |

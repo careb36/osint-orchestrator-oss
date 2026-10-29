@@ -56,6 +56,12 @@ One run, in order (`orchestrator/pipeline.py`):
 | `synthesizer/` | LLM providers (Nebius, OpenAI-compatible, Anthropic, Ollama), model routing, evidence qualification, synthesis |
 | `reports/`, `evidence.py` | Run artefacts and the signed manifest chain |
 | `alerts/` | Webhook and SMTP dispatch with a retry queue |
+| `alert_cases.py` | One triage case per run that met an alert rule, with acknowledge/resolve |
+| `run_control.py` | Run admission: one active run per target across manual triggers and ticks |
+| `ingest_bundle.py` | External STIX 2.1 intake (ADR-011): `POST /bundles` and the CLI |
+| `personal_api.py`, `accounts.py` | Personal accounts: sign-in, revocable HttpOnly sessions, the accountant/administrator boundary and the browser-origin check |
+| `dossiers.py` | Professional dossiers (ADR-012): entity identity, reasoned evidence decisions, authenticated history, revisions and signed PDF versions |
+| `showcase.py` | Replays the recorded sample runs through the real pipeline, without API keys or collectors |
 | `i18n.py` | Operator-facing text in Spanish and English |
 
 ## LLM routing
