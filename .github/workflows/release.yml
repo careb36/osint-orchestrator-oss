@@ -23,17 +23,7 @@ jobs:
 
       - name: Release notes from CHANGELOG.md
         run: |
-          python3 - "${GITHUB_REF_NAME#v}" > /tmp/notes.md <<'PY'
-          import re, sys
-          version = sys.argv[1]
-          text = open("CHANGELOG.md", encoding="utf-8").read()
-          match = re.search(
-              rf"^## \[{re.escape(version)}\][^\n]*\n(.*?)(?=^## \[|\Z)", text, re.S | re.M
-          )
-          if match is None:
-              sys.exit(f"CHANGELOG.md has no '## [{version}]' section; add it before tagging")
-          print(match.group(1).strip())
-          PY
+          python3 scripts/release_notes.py "${GITHUB_REF_NAME#v}" > /tmp/notes.md
           test -s /tmp/notes.md
 
       - name: Create the release

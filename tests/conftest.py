@@ -28,6 +28,20 @@ from it in the same breath.
 3. `ORCHESTRATOR_ENV_FILE` pinned empty. Unit tests must never read a
    developer's local `.env`; this keeps outcomes identical across machines
    even when local files set optional LLM provider/model keys.
+
+4. Settings variables scrubbed. Pinning three variables by name was not
+   enough: a shell that had sourced `.env` (`set -a; . ./.env`) exported
+   `OPENCTI_ENABLED`, `ORCHESTRATOR_TARGETS_FILE`, `ORCHESTRATOR_SECRET_KEY`
+   and `ORCHESTRATOR_LOG_LEVEL` as well, and
+   `test_issue8_sink_failure_reraises_on_second_run` failed only because the
+   sink was already enabled outside pytest. CI runs with a clean environment,
+   so scrubbing is what makes a local run mean the same thing as a green build.
+
+   Not scrubbed when the session can reach `tests/integration`: that module
+   reads the real stack's endpoint and API key from the environment at import
+   time, so deleting them would quietly test localhost defaults instead. The
+   decision and the prefix list live in `tests/env_guard.py`, which is where
+   they are tested.
 """
 
 from __future__ import annotations
@@ -35,7 +49,15 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import sys
 import tempfile
+from pathlib import Path
+
+from tests.env_guard import keeps_environment, scrub
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if not keeps_environment(sys.argv[1:], _REPO_ROOT):
+    scrub()
 
 _TEST_DB_DIR = tempfile.mkdtemp(prefix="osint-orchestrator-tests-")
 os.environ["ORCHESTRATOR_DATABASE_URL"] = f"sqlite+aiosqlite:///{_TEST_DB_DIR}/orchestrator-test.db"

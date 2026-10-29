@@ -16,6 +16,8 @@ import re
 
 import pytest
 
+from tests import env_guard
+
 REPO_ROOT = pathlib.Path(__file__).parents[2]
 ENV_EXAMPLE = REPO_ROOT / ".env.example"
 # Reference tables live under docs/ (ADR-009), not in the README.
@@ -84,4 +86,26 @@ def test_settings_field_in_documented_environment_tables(field_name: str) -> Non
     assert env_var in _documented_table_keys(), (
         f"Settings field '{field_name}' (env var '{env_var}') is missing from "
         "docs/configuration.md environment tables."
+    )
+
+
+def _scrubbed_prefixes() -> set[str]:
+    """The env prefixes tests/env_guard.py deletes before the settings load."""
+    return set(env_guard.SETTINGS_PREFIXES)
+
+
+def test_env_guard_scrubs_every_settings_prefix() -> None:
+    """A new setting group must be scrubbed, or a local .env changes test outcomes.
+
+    The suite must mean the same thing locally as in CI. The scrub can only
+    delete variables by prefix (it runs before Settings can be imported), so a
+    group whose prefix is missing there silently inherits the developer's
+    environment — which is how OPENCTI_ENABLED broke an unrelated sink test.
+    """
+    declared = {field.split("_", 1)[0].upper() for field in _settings_fields() if "_" in field}
+    missing = declared - _scrubbed_prefixes()
+    assert not missing, (
+        "tests/env_guard.py SETTINGS_PREFIXES is missing: "
+        + ", ".join(sorted(missing))
+        + ". Add them so the suite ignores a developer's exported settings."
     )
