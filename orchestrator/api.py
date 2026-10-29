@@ -43,7 +43,12 @@ from sqlalchemy import select as sa_select
 from sqlmodel import col, select
 
 from orchestrator import __version__, alert_cases, metrics
-from orchestrator.auth import log_auth_status, log_secret_key_status, require_api_key
+from orchestrator.auth import (
+    log_auth_status,
+    log_secret_key_status,
+    require_admin_or_machine,
+    require_api_key,
+)
 from orchestrator.config import NEBIUS_DEFAULT_BASE_URL, settings
 from orchestrator.contracts import load_schema
 from orchestrator.database import create_db_and_tables, get_session
@@ -550,7 +555,12 @@ async def trigger_run(target_id: str, background_tasks: BackgroundTasks) -> dict
     return {"run_id": run_id, "status": "accepted", "target_id": target_id}
 
 
-@router.post("/scheduler/reload", response_model=dict[str, Any], tags=["scheduler"])
+@router.post(
+    "/scheduler/reload",
+    response_model=dict[str, Any],
+    tags=["scheduler"],
+    dependencies=[Depends(require_admin_or_machine)],
+)
 async def reload_scheduler_targets() -> dict[str, Any]:
     """
     Reload targets.yaml into APScheduler without restarting the API process.
@@ -560,7 +570,12 @@ async def reload_scheduler_targets() -> dict[str, Any]:
     return {"status": status, **summary}
 
 
-@router.post("/scheduler/reload/preview", response_model=dict[str, Any], tags=["scheduler"])
+@router.post(
+    "/scheduler/reload/preview",
+    response_model=dict[str, Any],
+    tags=["scheduler"],
+    dependencies=[Depends(require_admin_or_machine)],
+)
 async def preview_scheduler_reload_targets() -> dict[str, Any]:
     """
     Preview scheduler changes from targets.yaml without mutating existing jobs.
@@ -570,7 +585,12 @@ async def preview_scheduler_reload_targets() -> dict[str, Any]:
     return {"status": status, **summary}
 
 
-@router.post("/alerts/dlq/replay", response_model=dict[str, Any], tags=["alerts"])
+@router.post(
+    "/alerts/dlq/replay",
+    response_model=dict[str, Any],
+    tags=["alerts"],
+    dependencies=[Depends(require_admin_or_machine)],
+)
 async def replay_alert_dlq(
     channel: AlertChannel | None = _DLQ_CHANNEL_QUERY,
     run_id: int | None = None,
@@ -672,7 +692,12 @@ async def resolve_alert_case(
     return _alert_case_payload(case)
 
 
-@router.post("/opencti/outbox/replay", response_model=dict[str, Any], tags=["opencti"])
+@router.post(
+    "/opencti/outbox/replay",
+    response_model=dict[str, Any],
+    tags=["opencti"],
+    dependencies=[Depends(require_admin_or_machine)],
+)
 async def replay_opencti_outbox(
     run_id: int | None = None,
     limit: int = _DLQ_LIMIT_QUERY,
@@ -685,7 +710,12 @@ async def replay_opencti_outbox(
     return {"status": "replayed", **replayed, "processed_now": processed}
 
 
-@router.post("/bundles", response_model=dict[str, Any], tags=["bundles"])
+@router.post(
+    "/bundles",
+    response_model=dict[str, Any],
+    tags=["bundles"],
+    dependencies=[Depends(require_admin_or_machine)],
+)
 async def ingest_external_bundle(
     request: Request,
     work_name: str = Query(default="external-stix"),

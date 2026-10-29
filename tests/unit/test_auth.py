@@ -272,3 +272,39 @@ def test_openapi_documents_the_security_schemes(client: TestClient) -> None:
     schemes = client.get("/openapi.json").json()["components"]["securitySchemes"]
     assert any(s.get("type") == "apiKey" and s.get("name") == "X-API-Key" for s in schemes.values())
     assert any(s.get("scheme") == "bearer" for s in schemes.values())
+
+
+def test_admin_gate_is_per_route_not_a_path_denylist() -> None:
+    """An administrative route is closed because it opts in, not because of its path.
+
+    The old implementation gated inside require_api_key with a literal prefix
+    denylist (/scheduler/, /opencti/, /alerts/dlq, /bundles). A new mutating
+    endpoint outside those prefixes was accountant-accessible by default, and
+    the mistake was invisible: the route simply behaved like a professional
+    one. Listing the administrative paths here does not prove the gate exists
+    (that needs a request), it proves no *other* mutating route slipped in
+    without a decision -- adding one now requires editing this set.
+    """
+    admin_routes = {
+        ("POST", "/scheduler/reload"),
+        ("POST", "/scheduler/reload/preview"),
+        ("POST", "/alerts/dlq/replay"),
+        ("POST", "/opencti/outbox/replay"),
+        ("POST", "/bundles"),
+    }
+    professional_routes = {
+        ("POST", "/targets/{target_id}/run"),
+        ("POST", "/alerts/{case_id}/ack"),
+        ("POST", "/alerts/{case_id}/resolve"),
+    }
+    mutating = {
+        (method, route.path)
+        for route in router.routes
+        if isinstance(route, APIRoute)
+        for method in route.methods - {"HEAD", "OPTIONS", "GET"}
+    }
+    unexpected = mutating - admin_routes - professional_routes
+    assert unexpected == set(), (
+        "new mutating route(s) need an explicit decision: add them to "
+        f"admin_routes (with require_admin) or professional_routes: {sorted(unexpected)}"
+    )

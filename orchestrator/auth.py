@@ -76,11 +76,6 @@ async def require_api_key(
             raise HTTPException(401, t("access_required"))
         check_browser_request(request)
         request.state.actor = user
-        if (
-            request.url.path.startswith(("/scheduler/", "/opencti/", "/alerts/dlq", "/bundles"))
-            and user["role"] != "admin"
-        ):
-            raise HTTPException(403, t("access_denied"))
         return
     request.state.actor = None
     if not auth_enabled():
@@ -146,6 +141,23 @@ def require_person(request: Request) -> dict:
 
 def require_admin(request: Request) -> dict:
     actor = require_person(request)
+    if actor["role"] != "admin":
+        raise HTTPException(403, t("access_denied"))
+    return actor
+
+
+def require_admin_or_machine(request: Request) -> dict | None:
+    """Administrative route: a person must be an admin, a machine key may pass.
+
+    The machine-key path carries no actor (require_api_key sets it to None), and
+    the investigation-assistant worker posts bundles with its own key
+    (docs/operations.md), so demanding a person here would break a documented
+    deployment. Applied per route rather than as a literal path prefix, so a new
+    administrative endpoint is closed unless it opts in.
+    """
+    actor = getattr(request.state, "actor", None)
+    if actor is None:
+        return None
     if actor["role"] != "admin":
         raise HTTPException(403, t("access_denied"))
     return actor

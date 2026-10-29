@@ -505,3 +505,62 @@ async def test_validation_never_echoes_password_inputs(personal):
             response.json()["detail"]
             == "Revise los campos y las longitudes indicadas antes de continuar."
         )
+
+
+# Administrative routes: an accountant must be refused, an admin allowed. The
+# boundary is a per-route dependency rather than a path denylist, so a new
+# administrative endpoint is closed unless it opts in. These tests pin that:
+# they exercise the real dependency chain through a real session cookie.
+ADMIN_ONLY_CALLS = [
+    ("post", "/scheduler/reload"),
+    ("post", "/scheduler/reload/preview"),
+    ("post", "/alerts/dlq/replay"),
+    ("post", "/opencti/outbox/replay"),
+    ("post", "/bundles"),
+]
+
+
+@pytest.mark.parametrize(("method", "path"), ADMIN_ONLY_CALLS)
+async def test_administrative_routes_refuse_an_accountant(personal, method: str, path: str):
+    async with personal("analyst") as browser:
+        response = await getattr(browser, method)(path, json={})
+        assert response.status_code == 403, f"{method.upper()} {path} let an accountant through"
+
+
+@pytest.mark.parametrize(("method", "path"), ADMIN_ONLY_CALLS)
+async def test_administrative_routes_do_not_reject_an_admin(personal, method: str, path: str):
+    """403 specifically means 'not an admin', never 'broken' or 'unauthenticated'."""
+    async with personal("admin") as browser:
+        response = await getattr(browser, method)(path, json={})
+        assert response.status_code != 403, f"{method.upper()} {path} refused an admin"
+
+
+async def test_professional_routes_stay_open_to_an_accountant(personal):
+    """Triage is an accountant's job: the admin gate must not swallow it."""
+    async with personal("analyst") as browser:
+        for path in ("/targets", "/runs", "/alerts"):
+            assert (await browser.get(path)).status_code != 403
+
+
+async def test_a_machine_key_still_reaches_bundle_ingestion(personal):
+    """The worker posts bundles with its own API key, not a personal session.
+
+    Requiring an admin *person* here would break the documented
+    investigation-assistant deployment (docs/operations.md), which
+    authenticates with a machine key and carries no actor. The admin gate has
+    to refuse an accountant *session* without closing the machine path.
+    """
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app), base_url="https://testserver", headers=HEADERS
+    ) as machine:
+        response = await machine.post(
+            "/bundles",
+            json={
+                "type": "bundle",
+                "id": "bundle--00000000-0000-4000-8000-000000000000",
+                "objects": [],
+            },
+            headers={"X-API-Key": "test-machine-key"},
+        )
+        assert response.status_code != 401, "a machine key must authenticate"
+        assert response.status_code != 403, "the admin gate must not close the machine path"
