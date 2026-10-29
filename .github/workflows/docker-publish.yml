@@ -100,7 +100,7 @@ jobs:
       # left to the report as well.
       - name: Scan the image for vulnerabilities
         if: github.event_name == 'pull_request'
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1  # v0.35.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
         with:
           image-ref: osint-orchestrator:smoke
           format: table
@@ -114,7 +114,7 @@ jobs:
       # finding in the whole image, the Amass clients included. Never fails.
       - name: Report CRITICAL and HIGH vulnerabilities (advisory)
         if: github.event_name == 'pull_request'
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1  # v0.35.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
         with:
           image-ref: osint-orchestrator:smoke
           format: table
