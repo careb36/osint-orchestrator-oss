@@ -101,10 +101,39 @@ jobs:
   dependencies:
     name: Dependencies (Trivy)
     runs-on: ${{ fromJSON(vars.SECURITY_RUNS_ON || '"ubuntu-latest"') }}
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      - name: Install uv (pinned + checksum)
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -sSfL -o uv.tgz \
+            https://github.com/astral-sh/uv/releases/download/0.12.24/uv-x86_64-unknown-linux-gnu.tar.gz
+          echo "b4dfaef47d491a7296981f8374a4595f55dbf84e8937c8ecd2983574d8bb3da6  uv.tgz" | sha256sum -c -
+          tar -xzf uv.tgz --strip-components=1 uv-x86_64-unknown-linux-gnu/uv
+          mkdir -p "$RUNNER_TEMP/bin"
+          install -m 0755 uv "$RUNNER_TEMP/bin/uv"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/bin/uv" --version
+
+      # Trivy reads lockfiles, not manifests. With only pyproject.toml it
+      # resolves nothing for Python and still exits 0, so a vulnerable Python
+      # dependency is reported as a clean scan. Resolving the tree into a
+      # requirements file next to the scan root is what makes it visible.
+      - name: Resolve the Python tree into requirements.txt
+        run: |
+          uv pip compile pyproject.toml \
+            --python-version 3.11 \
+            --no-header \
+            --no-annotate \
+            --output-file requirements.txt
+          resolved=$(grep -cE '^[a-zA-Z0-9]' requirements.txt)
+          echo "Resolved $resolved Python packages"
+          # The guard for the failure this step exists to prevent: an empty or
+          # truncated file lets the scan below pass while reading no Python.
+          test "$resolved" -ge 50
 
       - name: Scan filesystem for known vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
