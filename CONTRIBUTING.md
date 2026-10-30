@@ -36,7 +36,10 @@ ruff format --check orchestrator/ tests/
 mypy orchestrator/ --ignore-missing-imports
 pytest tests/unit/ -v -m "not integration"
 
-# Only if you touched deploy/helm/ (both flags matter; see below)
+# Only if you touched deploy/helm/ (both flags matter; see below). Neither
+# command catches a variable the app does not read: Settings drops an
+# unknown name silently, so tests/unit/test_helm_env_contract.py holds
+# every rendered variable to a Settings field.
 helm lint deploy/helm/osint-orchestrator --strict
 helm template osint deploy/helm/osint-orchestrator --kube-version 1.30.0 > /dev/null
 ```

@@ -10,6 +10,23 @@ from [SECURITY.md](SECURITY.md).
 ## [Unreleased]
 
 ### Added
+- A guard on the Helm chart's environment contract
+  (`tests/unit/test_helm_env_contract.py`). `Settings` is declared with
+  `extra="ignore"`, so a variable the chart renders under a name the app does not
+  read is dropped without a word: the process starts, the value never applies,
+  and `helm lint --strict` and `helm template` both pass. The same commands also
+  pass on a chart whose mapping reads a values path that `values.yaml` does not
+  define — Helm renders that lookup as the literal string `<nil>`, which the app
+  happily accepts as a URL. Six checks over the 44 variables the chart emits by
+  default: each one is a `Settings` field, each `.Values.*` path it reads exists,
+  no variable is mapped twice in the template's dict literal, none is rendered
+  into both the ConfigMap and the Secret (where `envFrom` lets the later source
+  win silently), the Deployment still mounts both in that order, and
+  `config.extraEnv` still wins over a named value as the chart README promises.
+  The chart is read, not rendered, because the unit-test job does not install
+  `helm`; the static read was cross-checked against a real `helm template`
+  render (44 parsed, 44 rendered, empty difference both ways).
+
 - A guard on the ADR record (`tests/unit/test_adr_index.py`). Decisions live in
   `docs/adr/` and are listed in two tables — the index in `docs/README.md` and the
   `## Decisions` table of `docs/architecture.md` — and nothing kept either in
