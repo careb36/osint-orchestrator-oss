@@ -223,9 +223,24 @@ async def purge_expired(now: datetime | None = None) -> RetentionSummary:
         root_path = Path(root)
         if not root_path.is_dir():
             continue
+        if _is_filesystem_root(root_path):
+            # A root that resolves to "/" would make the date filter below the
+            # only thing between this job and arbitrary deletion.
+            logger.warning("Retention: refusing to purge from filesystem root %s", root_path)
+            summary.errors.append(f"unsafe root: {root}")
+            continue
+        resolved_root = root_path.resolve()
 
         for entry in sorted(root_path.iterdir()):
+            if entry.is_symlink():
+                # Checked before is_dir(): is_dir() follows the link, and rmtree
+                # refusing a symlink is CPython behaviour, not a promise we make.
+                logger.warning("Retention: skipping symlinked report entry %s", entry)
+                continue
             if not entry.is_dir():
+                continue
+            if not _resolves_inside(resolved_root, entry):
+                logger.warning("Retention: skipping %s, outside report root %s", entry, resolved_root)
                 continue
             # Accept only ISO date directories: YYYY-MM-DD
             try:
@@ -282,6 +297,21 @@ async def _surviving_run_dates(cutoff: datetime) -> set[str]:
 def _ensure_aware(value: datetime) -> datetime:
     """SQLite returns naive datetimes; compare everything as UTC-aware."""
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+def _is_filesystem_root(path: Path) -> bool:
+    """True when ``path`` resolves to a filesystem root (`/`, `C:\\`, ...)."""
+    resolved = path.resolve()
+    return resolved == Path(resolved.anchor)
+
+
+def _resolves_inside(root: Path, entry: Path) -> bool:
+    """True when ``entry`` resolves under the already-resolved ``root``."""
+    try:
+        entry.resolve().relative_to(root)
+    except ValueError:
+        return False
+    return True
 
 
 def _collect_report_dirs() -> set[str]:
