@@ -3,8 +3,11 @@
 #
 #   cp amass/datasources.example.yaml amass/datasources.yaml
 #
-# amass/datasources.yaml is git-ignored: it holds secrets and is mounted only
-# into the `amass` engine container, never into the orchestrator.
+# amass/datasources.yaml is git-ignored: it holds secrets. It is mounted into
+# the `amass` engine container and, read-only, into the orchestrator, because
+# the Amass v5 *client* (oam_enum, running in the orchestrator) is what reads
+# this file and forwards it to the engine inside the session configuration.
+# Without it the run simply goes unauthenticated — no failure.
 #
 # Every source listed upstream works without credentials when its entry is
 # absent; keyed sources return more (and rate-limit less). Full list of names:

@@ -139,6 +139,50 @@ def test_enum_argv_reflects_target_options() -> None:
     assert argv[argv.index("-timeout") + 1] == "3"
 
 
+@pytest.mark.parametrize(
+    ("config", "datasources", "expected"),
+    [
+        (None, None, False),  # nothing mounted
+        ("options:\n  datasources: ./ds.yaml\n", True, True),  # credentials present
+        ("options:\n  datasources: ./ds.yaml\n", False, False),  # named file missing
+        ("options:\n  bruteforce:\n    enabled: false\n", None, True),  # no datasources
+        ("options: [unclosed\n", None, False),  # unparseable
+    ],
+)
+def test_config_flag_only_when_credentials_are_usable(
+    tmp_path, monkeypatch, config, datasources, expected
+) -> None:
+    """``-config`` is passed only when the client can load it without failing."""
+    config_file = tmp_path / "config.yaml"
+    if config is not None:
+        config_file.write_text(config, encoding="utf-8")
+    if datasources is True:
+        (tmp_path / "ds.yaml").write_text("datasources: []\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "orchestrator.collectors.amass.settings.amass_config_file", str(config_file)
+    )
+    argv = _collector().enum_argv("enum.log")
+
+    assert ("-config" in argv) is expected
+    if expected:
+        assert argv[argv.index("-config") + 1] == str(config_file)
+
+
+def test_config_flag_points_at_the_client_side_mount(tmp_path, monkeypatch) -> None:
+    """The path is the orchestrator's own mount, not the engine's /.config/amass."""
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("options:\n  datasources: ./datasources.yaml\n", encoding="utf-8")
+    (tmp_path / "datasources.yaml").write_text("datasources: []\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "orchestrator.collectors.amass.settings.amass_config_file", str(config_file)
+    )
+
+    argv = _collector().enum_argv("enum.log")
+    assert argv[argv.index("-config") + 1] == str(config_file)
+    assert "/.config/amass" not in " ".join(argv)
+
+
 def test_subs_argv_never_uses_silent() -> None:
     """``-silent`` makes oam_subs discard stdout — the names we need."""
     argv = _collector().subs_argv()
