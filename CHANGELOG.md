@@ -9,6 +9,17 @@ from [SECURITY.md](SECURITY.md).
 
 ## [Unreleased]
 
+### Changed
+
+- Spanish operator-facing wording now matches the vocabulary of the people who
+  use the product: a run is an *ejecución* (not *corrida*), retention
+  *elimina* (not *purga*), the report lists *líneas de investigación
+  sugeridas* (not *pivotes*), and the professional account is an *analista*
+  (not *contador*). The console catalogue, the report and API-message
+  catalogue, `README.es.md` and the Spanish tests change together; the
+  English texts, the `accountant` role identifier and every persisted value
+  are untouched.
+
 ### Added
 - Two dashboard navigation defects, found by auditing the rail against the Laws
   of UX. `Dossiers` occupied the first navigation slot and pushed `Overview`, the

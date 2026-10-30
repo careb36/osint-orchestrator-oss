@@ -17,9 +17,9 @@ describe('handoff helpers', () => {
   });
 
   it('agrees in number in Spanish', () => {
-    expect(describeVerification(tEs, sampleVerification)).toBe('Cadena intacta: 1 corrida sellada verificada.');
+    expect(describeVerification(tEs, sampleVerification)).toBe('Cadena intacta: 1 ejecución sellada verificada.');
     expect(describeVerification(tEs, { ...sampleVerification, checked: 2, unsealed: 1 })).toBe(
-      'Cadena intacta: 2 corridas selladas verificadas. 1 corrida sin sellar no se cuenta.',
+      'Cadena intacta: 2 ejecuciones selladas verificadas. 1 ejecución sin sellar no se cuenta.',
     );
   });
 
