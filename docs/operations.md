@@ -195,14 +195,12 @@ Interactive reference: `/docs` (OpenAPI at `/openapi.json`). Public routes are
 | Method | Path | Description |
 | --- | --- | --- |
 | `GET` | `/` | Landing page with links to the dashboard, docs and health (no API key) |
-| `GET` | `/health` | Liveness: always 200 while the process answers; component checks in the body (no API key) |
-| `GET` | `/ready` | Readiness: the same body, 503 while the database is offline or the scheduler is not running (no API key) |
+| `GET` | `/health` | Liveness: always 200 while the process answers; the body carries the health snapshot (`ok`, `degraded`, `offline`) with the component checks, and the dashboard overview shows it (no API key) |
+| `GET` | `/ready` | Readiness: the same snapshot with an HTTP status a probe can act on — 200 ready, 503 while the database is offline or the scheduler is not running (no API key) |
 | `GET` | `/metrics` | Prometheus metrics (no API key) |
 | `GET` | `/console` | Operator dashboard shell (public, no data; every call it makes needs the API key, entered on the page). Serves the React build from `orchestrator/static/ui-dist`; without a build it answers `503` with build instructions |
 | `GET` | `/console/{route}` | Client-side routes of the dashboard (`/console/targets`, `/console/runs/{id}`): same shell, the router renders the view. `404` without a build |
 | `GET` | `/console/assets/{file}` | Hashed script and stylesheet of the dashboard build (immutable cache; no path traversal) |
-| `GET` | `/health` | Service health snapshot (`ok`, `degraded`, `offline`) shown on the dashboard overview |
-| `GET` | `/ready` | Same snapshot with an HTTP status a probe can act on: 200 ready, 503 not ready |
 | `GET` | `/analytics/risk-trends` | Per-target risk and new-observable trends for the dashboard's risk columns and target detail |
 | `GET` | `/targets` | List configured targets |
 | `GET` | `/targets/{id}` | Get a single target |

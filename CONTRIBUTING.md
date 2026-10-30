@@ -86,6 +86,7 @@ results.
 A change is not done until its documentation is complete:
 
 - API changes → the endpoint table in `docs/operations.md`.
+  `tests/unit/test_api_docs.py` fails otherwise.
 - New/changed settings → `.env.example` (comment on the line above a blank
   value) and the environment tables in `docs/configuration.md`.
 - New metrics → the metrics table in `docs/operations.md`, with the labels
@@ -159,7 +160,8 @@ head, before it is merged:
 - Repository guards: no credentials, `README.md`/`README.es.md` still
   mirrors (`test_readme_parity.py`), every page under `docs/` linked from its
   index (`test_doc_links.py`), the metrics table in `docs/operations.md`
-  matching `orchestrator/metrics.py` (`test_metrics_docs.py`), and `.gitignore`,
+  matching `orchestrator/metrics.py` (`test_metrics_docs.py`), the endpoint table
+  matching the routes the app serves (`test_api_docs.py`), and `.gitignore`,
   workflows and `pyproject.toml` untouched unless the issue asked for it.
 
 ## Public release guard
