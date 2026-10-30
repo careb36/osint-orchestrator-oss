@@ -90,8 +90,12 @@ def _datasources_ready(config: Path) -> bool:
     unauthenticated run rather than break enumeration.
     """
     try:
-        data = yaml.safe_load(config.read_text(encoding="utf-8")) or {}
-    except (OSError, yaml.YAMLError):
+        data = yaml.safe_load(config.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError):
+        return False
+    if data is None:  # empty file: nothing to resolve, nothing to fail on
+        data = {}
+    if not isinstance(data, dict):
         return False
     options = data.get("options") or {}
     if not isinstance(options, dict):

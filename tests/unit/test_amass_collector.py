@@ -147,6 +147,11 @@ def test_enum_argv_reflects_target_options() -> None:
         ("options:\n  datasources: ./ds.yaml\n", False, False),  # named file missing
         ("options:\n  bruteforce:\n    enabled: false\n", None, True),  # no datasources
         ("options: [unclosed\n", None, False),  # unparseable
+        ("- just\n- a list\n", None, False),  # non-mapping root
+        ("42\n", None, False),  # scalar root
+        ("options: just-a-string\n", None, False),  # options is not a mapping
+        ("", None, True),  # empty: defaults, nothing to resolve
+        ("\udcff\udcfe not utf-8\n", None, False),  # undecodable bytes
     ],
 )
 def test_config_flag_only_when_credentials_are_usable(
@@ -155,7 +160,7 @@ def test_config_flag_only_when_credentials_are_usable(
     """``-config`` is passed only when the client can load it without failing."""
     config_file = tmp_path / "config.yaml"
     if config is not None:
-        config_file.write_text(config, encoding="utf-8")
+        config_file.write_bytes(config.encode("utf-8", "surrogateescape"))
     if datasources is True:
         (tmp_path / "ds.yaml").write_text("datasources: []\n", encoding="utf-8")
 
