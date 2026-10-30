@@ -10,6 +10,17 @@ from [SECURITY.md](SECURITY.md).
 ## [Unreleased]
 
 ### Added
+- A guard on the API reference (`tests/unit/test_api_docs.py`), and a fix for
+  the drift it found. The `docs/operations.md` endpoint table listed `/health`
+  and `/ready` twice, with two different descriptions: an edit had landed on one
+  copy and not the other, and a reviewer comparing rows by eye counted two
+  entries as two endpoints. The table now has one row per route, and three
+  checks keep it that way — no duplicate rows, no documented endpoint the app
+  does not serve, and no route area that no page under `docs/` ever names.
+  Path parameters are compared by position (`/runs/{id}` and `/runs/{run_id}`
+  are the same route), so renaming a parameter is not a failure while renaming
+  a segment is.
+
 - A guard on the metrics reference (`tests/unit/test_metrics_docs.py`).
   `AGENTS.md` requires a new metric in `orchestrator/metrics.py` to get a row in
   the `docs/operations.md` table "with exactly the labels declared in code",
