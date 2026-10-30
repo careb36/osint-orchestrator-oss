@@ -174,6 +174,13 @@ bash scripts/check_public_release.sh              # tracked tree + gitleaks
 CHECK_HISTORY=1 bash scripts/check_public_release.sh   # also scan git history
 ```
 
+The secrets pass reads the files that could reach the repository: those git
+tracks plus the untracked ones it does not ignore. Your `.env` is never
+scanned, so keeping live credentials there — as the quick start tells you to —
+does not make the guard fail locally while CI passes. Install gitleaks (CI
+pins v8.21.2 and checks its SHA-256); without it the pass reports `SKIP` and
+verifies nothing.
+
 The forbidden-reference pattern lives in that script only. Extend it there.
 
 ### Responsible use

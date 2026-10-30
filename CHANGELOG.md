@@ -524,6 +524,17 @@ from [SECURITY.md](SECURITY.md).
 - Dead `SPIDERFOOT_CORRELATION` key from `.env.example` (read by nothing).
 
 ### Fixed
+- The public-release guard no longer contradicts CI on a developer's machine.
+  The secrets pass ran `gitleaks --no-git --source .`, which reads git-ignored
+  files, and the quick start tells every operator to keep live credentials in
+  `.env`: the guard then failed locally on a file the public repository cannot
+  see, while CI (a clean checkout without `.env`) passed. Nine findings, all in
+  one ignored file. It now scans what could reach the repository — tracked
+  files plus the untracked ones git does not ignore — by copying that set to a
+  temporary directory, so a finding still names `.env` and not a `/tmp` path.
+  `tests/unit/test_public_release_guard.py` pins the scope, the history mode
+  and the exit status; reverting the fix turns two of its tests red.
+
 
 - STIX objects no longer get a fresh `modified` on every run. `stix2` defaults
   `created` and `modified` to `now()`, which the normaliser never overrode for
