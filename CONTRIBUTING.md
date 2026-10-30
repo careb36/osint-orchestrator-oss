@@ -88,7 +88,8 @@ A change is not done until its documentation is complete:
 - API changes → the endpoint table in `docs/operations.md`.
 - New/changed settings → `.env.example` (comment on the line above a blank
   value) and the environment tables in `docs/configuration.md`.
-- New metrics → the metrics table in `docs/operations.md`.
+- New metrics → the metrics table in `docs/operations.md`, with the labels
+  the code declares. `tests/unit/test_metrics_docs.py` fails otherwise.
 - Operator-facing workflow changes → the relevant guide under `docs/`.
 - Documentation is English ([ADR-009](docs/adr/ADR-009-documentation-language.md)).
   The README is the only translated file: `README.es.md` is updated **in the
@@ -156,9 +157,10 @@ head, before it is merged:
 - Each numbered item and each test of the issue, verified against the code
   rather than against the PR description.
 - Repository guards: no credentials, `README.md`/`README.es.md` still
-  mirrors, the metrics table in `docs/operations.md` matching
-  `orchestrator/metrics.py`, and `.gitignore`, workflows and `pyproject.toml`
-  untouched unless the issue asked for it.
+  mirrors (`test_readme_parity.py`), every page under `docs/` linked from its
+  index (`test_doc_links.py`), the metrics table in `docs/operations.md`
+  matching `orchestrator/metrics.py` (`test_metrics_docs.py`), and `.gitignore`,
+  workflows and `pyproject.toml` untouched unless the issue asked for it.
 
 ## Public release guard
 
