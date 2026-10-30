@@ -13,7 +13,9 @@ win — and a PR fixing the disagreement is welcome.
    the *Responsible use* section of the README.
 2. **Read the relevant ADR before changing architecture**
    ([`docs/adr/`](docs/adr/)). Do not contradict an ADR in code without
-   proposing a new ADR (or an amendment) in the same PR.
+   proposing a new ADR (or an amendment) in the same PR, and list the new ADR in
+   both `docs/README.md` and the `## Decisions` table of `docs/architecture.md` —
+   `tests/unit/test_adr_index.py` fails otherwise.
 3. **Language policy ([ADR-004](docs/adr/ADR-004-language-policy.md)) is
    non-negotiable.** Code, comments, docstrings, logs, commits and PRs are
    English. Operator-facing prose goes through `orchestrator/i18n.py` with

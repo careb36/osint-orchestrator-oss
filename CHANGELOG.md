@@ -10,6 +10,19 @@ from [SECURITY.md](SECURITY.md).
 ## [Unreleased]
 
 ### Added
+- A guard on the ADR record (`tests/unit/test_adr_index.py`). Decisions live in
+  `docs/adr/` and are listed in two tables — the index in `docs/README.md` and the
+  `## Decisions` table of `docs/architecture.md` — and nothing kept either in
+  step with the directory. The index-completeness guard globs `docs/*.md`, which
+  does not descend, so an ADR-014 could have been accepted and linked from
+  nowhere: still rendering, still numbered, still cited by its author, invisible
+  to whoever reads the Decision table as the complete record. Seven checks: an
+  ADR listed in each table, every row resolving to a file, the `[nnn]` label
+  agreeing with the filename, no number listed twice, both tables listing the
+  same set, each file's heading carrying its own number, and each ADR stating a
+  status. The two tables' one-line summaries are deliberately not compared — the
+  index abbreviates and the architecture page expands.
+
 - A guard on the API reference (`tests/unit/test_api_docs.py`), and a fix for
   the drift it found. The `docs/operations.md` endpoint table listed `/health`
   and `/ready` twice, with two different descriptions: an edit had landed on one
