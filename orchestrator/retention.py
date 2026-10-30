@@ -240,7 +240,9 @@ async def purge_expired(now: datetime | None = None) -> RetentionSummary:
             if not entry.is_dir():
                 continue
             if not _resolves_inside(resolved_root, entry):
-                logger.warning("Retention: skipping %s, outside report root %s", entry, resolved_root)
+                logger.warning(
+                    "Retention: skipping %s, outside report root %s", entry, resolved_root
+                )
                 continue
             # Accept only ISO date directories: YYYY-MM-DD
             try:
