@@ -62,3 +62,82 @@ def test_the_index_links_every_page_under_docs() -> None:
         f"pages under docs/ that docs/README.md never links: {unlisted}. "
         "Add them to the index in the section a reader would look in."
     )
+
+
+# `[label](target)`, but not `![alt](image)`. A target without a `#` is the
+# other test's business; this one is only about the fragment.
+_ANCHOR_LINK = re.compile(r"(?<!!)\[[^\]]*\]\(([^)\s]+)\)")
+_HEADING = re.compile(r"^(#{1,6})\s+(.*)$", re.M)
+_FENCE = re.compile(r"```.*?```", re.S)
+_CAMEL = re.compile(r"-{2,}")
+
+
+def _slug(heading: str) -> str:
+    """GitHub's heading fragment: lowercase, code and links keep their text."""
+    text = heading.strip().lower()
+    text = re.sub(r"`([^`]*)`", r"\1", text)
+    text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)
+    text = re.sub(r"[^\w\s-]", "", text).strip()
+    return re.sub(r"\s+", "-", text)
+
+
+def _headings(path: Path) -> set[str]:
+    """Every fragment a heading in *path* can be reached by.
+
+    Fenced code is dropped so a `# comment` inside a shell block is not read as
+    a heading. Duplicate headings get the `-1`, `-2` suffixes GitHub appends.
+    """
+    text = _FENCE.sub("", path.read_text(encoding="utf-8"))
+    fragments: set[str] = set()
+    seen: dict[str, int] = {}
+    for match in _HEADING.finditer(text):
+        slug = _slug(match.group(2))
+        count = seen.get(slug, 0)
+        seen[slug] = count + 1
+        fragments.add(slug if not count else f"{slug}-{count}")
+    return fragments
+
+
+def _matches(anchor: str, fragments: set[str]) -> bool:
+    # Runs of hyphens are collapsed on both sides: a heading whose punctuation
+    # is stripped can yield `a--b` from one slugger and `a-b` from another, and
+    # that difference is not a broken link.
+    wanted = _CAMEL.sub("-", anchor)
+    return any(_CAMEL.sub("-", fragment) == wanted for fragment in fragments)
+
+
+def test_internal_anchor_links_reach_a_heading() -> None:
+    """`operations.md#evidence-chain` must land on a heading, not on the top.
+
+    The sibling test only checks that the *file* exists, so a link to a renamed
+    heading still passed: the browser silently ignores the unknown fragment and
+    renders the page from the start. `docs/configuration.md` pointed at
+    `#evidence-chain` while the heading is "Reports and evidence chain", so an
+    operator rotating `ORCHESTRATOR_SECRET_KEY_PREVIOUS` arrived at the top of a
+    long page with no indication of where the procedure was.
+    """
+    checked = 0
+    broken: dict[str, list[str]] = {}
+    for path in _tracked_text_files():
+        if path.suffix != ".md" or path.name == "CHANGELOG.md":
+            continue
+        text = _FENCE.sub("", path.read_text(encoding="utf-8"))
+        for target in _ANCHOR_LINK.findall(text):
+            if target.startswith(("http://", "https://", "mailto:")):
+                continue
+            destination, _, anchor = target.partition("#")
+            if not anchor:
+                continue
+            resolved = (path.parent / destination).resolve() if destination else path
+            if not resolved.exists():
+                continue  # the other test reports a missing file
+            checked += 1
+            if not _matches(anchor, _headings(resolved)):
+                broken.setdefault(f"{path.relative_to(REPO_ROOT)} -> {target}", []).append(
+                    str(resolved.relative_to(REPO_ROOT))
+                )
+    assert checked >= 8, f"only {checked} anchored links found; the scan is not reading them"
+    assert broken == {}, (
+        f"anchored links that reach no heading: {broken}. Fix the fragment or the "
+        "heading, whichever is the typo."
+    )

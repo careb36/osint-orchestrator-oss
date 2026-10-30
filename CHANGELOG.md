@@ -10,6 +10,21 @@ from [SECURITY.md](SECURITY.md).
 ## [Unreleased]
 
 ### Added
+- A guard on the fragments documentation links point at
+  (`tests/unit/test_doc_links.py`). The sibling check only proved that the
+  *file* in a `[label](docs/page.md)` link exists, so a link to a renamed
+  heading passed: a browser ignores an unknown `#fragment` and renders the page
+  from the top, which looks like a working link that lands nowhere.
+  `docs/configuration.md` pointed `ORCHESTRATOR_SECRET_KEY_PREVIOUS` at
+  `operations.md#evidence-chain` while the heading is "Reports and evidence
+  chain", so the operator rotating a signing key arrived at the beginning of a
+  long page with no sign of the procedure they were sent to. Twelve anchored
+  links are resolved now — including the three the security checklist makes into
+  `docs/operations.md`, the two ADR-006 makes into `#optional-services`, and the
+  numbered `## 3. Security model…` heading `docs/deploy.md` cross-references —
+  with duplicates handled the way GitHub numbers them and runs of hyphens
+  compared loosely, so a slugger difference is not reported as a break.
+
 - A guard on the fields a call site may put in a log record
   (`tests/unit/test_log_extra_contract.py`). `AGENTS.md` tells a contributor not
   to name an `extra=` field `ts`, `level`, `logger`, `msg`, `request_id`, `exc`
