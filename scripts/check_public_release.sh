@@ -34,9 +34,25 @@ fi
 echo "== Secrets (gitleaks)"
 if command -v gitleaks >/dev/null 2>&1; then
   if [ "${CHECK_HISTORY:-0}" = "1" ]; then
+    # History mode reads git objects, so the working copy plays no part.
     gitleaks detect --source . --redact || status=1
   else
-    gitleaks detect --no-git --source . --redact || status=1
+    # Scan what could reach the repository — the tracked files plus the
+    # untracked ones git does not ignore — and not the working copy as a whole.
+    # `gitleaks --no-git --source .` reads ignored files too, and the README
+    # tells every operator to keep live credentials in `.env`: the guard then
+    # failed locally on a leak the public repository cannot see, while CI (a
+    # clean checkout, no `.env`) passed. A guard that disagrees with CI for
+    # following the documentation teaches people to ignore it.
+    secrets_dir=$(mktemp -d)
+    trap 'rm -rf "$secrets_dir"' EXIT
+    while IFS= read -r -d '' tracked; do
+      [ -f "$tracked" ] || continue  # deleted in the working tree, still indexed
+      mkdir -p "$secrets_dir/$(dirname "$tracked")"
+      cp "$tracked" "$secrets_dir/$tracked"
+    done < <(git ls-files -z -c -o --exclude-standard)
+    # Run from inside the copy so a finding names `.env`, not `/tmp/…/.env`.
+    ( cd "$secrets_dir" && gitleaks detect --no-git --source . --redact ) || status=1
   fi
 else
   echo "SKIP: gitleaks is not installed (https://github.com/gitleaks/gitleaks)"
