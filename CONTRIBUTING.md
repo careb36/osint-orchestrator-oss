@@ -96,6 +96,11 @@ A change is not done until its documentation is complete:
   value) and the environment tables in `docs/configuration.md`.
 - New metrics → the metrics table in `docs/operations.md`, with the labels
   the code declares. `tests/unit/test_metrics_docs.py` fails otherwise.
+- New or renamed heading → the links that point at it. Every
+  `page.md#fragment` under version control must reach a heading in that page;
+  an unknown fragment is not an error to the browser, it renders the page from
+  the top, so a deep link to a renamed section looks fine and lands nowhere.
+  `tests/unit/test_doc_links.py` resolves them.
 - Operator-facing workflow changes → the relevant guide under `docs/`.
 - Documentation is English ([ADR-009](docs/adr/ADR-009-documentation-language.md)).
   The README is the only translated file: `README.es.md` is updated **in the
