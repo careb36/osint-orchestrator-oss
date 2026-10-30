@@ -10,6 +10,17 @@ from [SECURITY.md](SECURITY.md).
 ## [Unreleased]
 
 ### Added
+- `AGENTS.md` no longer states a logging rule that is true for five of the seven
+  names it lists. It said a field named `ts`, `level`, `logger`, `msg`,
+  `request_id`, `exc` or `stack` "is emitted as `extra_<name>` instead". Measured
+  through the real call path, `ts`, `level`, `logger`, `exc` and `stack` are
+  renamed, `msg` raises `KeyError` inside the log call before any formatter runs,
+  and `request_id` is dropped. An agent following the old sentence would have
+  written `extra={"msg": ...}` believing the value survived under a prefix, and
+  found the failure at runtime in whichever `except` block was doing the logging.
+  The file now names the three outcomes and points at
+  `tests/unit/test_log_extra_contract.py`, which holds every call site to them.
+
 - A guard on the fragments documentation links point at
   (`tests/unit/test_doc_links.py`). The sibling check only proved that the
   *file* in a `[label](docs/page.md)` link exists, so a link to a renamed

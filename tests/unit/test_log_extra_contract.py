@@ -190,3 +190,44 @@ def test_text_format_carries_the_fields_the_operations_doc_promises() -> None:
     assert "KeyError" not in line
     for field in ("asctime", "levelname", "name", "request_id", "message"):
         assert f"%({field})s" in TEXT_FORMAT
+
+
+def test_agents_md_names_every_key_the_formatter_reserves() -> None:
+    """The rule an agent reads must list the keys the code actually reserves.
+
+    `AGENTS.md` is what a delegated agent follows, so a stale list there is worse
+    than no list: it told agents that all seven names are renamed, when `msg`
+    raises and `request_id` is dropped. This pins the list to `_STABLE_KEYS`, in
+    the direction that drifts — a key added to the formatter and not to the rule.
+    """
+    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    anchor = "structured context in `extra="
+    assert anchor in agents, (
+        "AGENTS.md no longer carries the logging-conventions bullet this guard "
+        "reads; retarget the anchor or delete the guard deliberately"
+    )
+    bullet = next(
+        (line for line in agents.splitlines() if anchor in line),
+        "",
+    )
+    missing = sorted(name for name in _STABLE_KEYS if f"`{name}`" not in bullet)
+    assert missing == [], (
+        f"AGENTS.md's logging rule never names {missing}, which the formatter "
+        "reserves. Add them, with the consequence each one has."
+    )
+    # The names were all listed when the rule was wrong: what failed was the
+    # consequence, which claimed every one of them is renamed. So the three
+    # outcomes have to be stated, not just the set.
+    assert "KeyError" in bullet, (
+        "AGENTS.md's logging rule no longer says that `msg` and other LogRecord "
+        "attributes raise KeyError inside the log call. That is the outcome an "
+        "author is most likely to assume wrong."
+    )
+    assert "dropped" in bullet, (
+        "AGENTS.md's logging rule no longer says that a `request_id` field is "
+        "dropped rather than renamed."
+    )
+    assert "test_log_extra_contract.py" in bullet, (
+        "AGENTS.md's logging rule should point at the guard that enforces it, so "
+        "the next reader knows the list is not prose."
+    )
