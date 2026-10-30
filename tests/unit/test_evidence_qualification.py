@@ -701,7 +701,7 @@ async def test_duplicate_index_and_bool_values_are_not_qualified(
     first_answer = client.response
 
     async def _answer(system: str, user: str, **kwargs) -> str:
-        client.calls.append({"user": user})
+        client.calls.append({"user": user, "model_route": kwargs.get("model_route")})
         # The retry of the two unqualified items gets nothing usable either.
         return json.dumps(first_answer if len(client.calls) == 1 else {"items": []})
 
@@ -711,12 +711,44 @@ async def test_duplicate_index_and_bool_values_are_not_qualified(
         rows = await qualify_evidence(target, 1, _items(3), client=client)
 
     assert [(row.url, row.category) for row in rows] == [("https://example.org/0", "sanctions")]
-    # The gap is visible to the operator in the message itself, and the two
-    # unqualified items were asked for once more, and only once.
+    # The gap is visible to the operator in the message itself; the two
+    # unqualified items were retried once on the fast route, then handed to
+    # the reasoning route, which also returns nothing usable here.
     assert "attempt=1 qualified=1 of 3" in caplog.text
     assert "attempt=2 qualified=0 of 2" in caplog.text
-    assert len(client.calls) == 2
+    assert len(client.calls) == 3
+    assert client.calls[2]["model_route"] == "reasoning"
     assert "https://example.org/0" not in client.calls[1]["user"]
+
+
+async def test_unqualified_items_fall_back_to_the_reasoning_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "llm_qualify_enabled", True)
+    monkeypatch.setattr(settings, "llm_qualify_max_items", 30)
+    client = _RouteCapturingClient({})
+    fast_answers = iter(
+        [
+            json.dumps({"items": [_entry(0)]}),  # fast attempt 1: only index 0
+            json.dumps({"items": []}),  # fast attempt 2: nothing usable
+        ]
+    )
+
+    async def _answer(system: str, user: str, **kwargs) -> str:
+        route = kwargs.get("model_route")
+        client.calls.append({"route": route})
+        if route == "reasoning":
+            return json.dumps({"items": [_entry(0)]})
+        return next(fast_answers)
+
+    client.complete = _answer
+    target = Target(id="t1", fqdn="example.com", authorization="self-owned", purpose="test")
+
+    rows = await qualify_evidence(target, 1, _items(2), client=client)
+
+    assert sorted(row.url for row in rows) == ["https://example.org/0", "https://example.org/1"]
+    assert [call["route"] for call in client.calls] == ["fast", "fast", "reasoning"]
+    assert {row.model for row in rows} == {"fast-model", "reasoning-model"}
 
 
 async def test_items_left_out_by_a_truncated_answer_are_qualified_on_retry(
