@@ -1,5 +1,10 @@
-# amass/config.yaml — configuration of the Amass engine sidecar
-# (mounted read-only at /.config/amass/config.yaml in the `amass` service).
+# amass/config.yaml — configuration of the Amass engine sidecar.
+#
+# Mounted read-only twice, because Amass v5 loads it in *both* places: at
+# /.config/amass/config.yaml in the `amass` service, and at
+# /app/amass/config/config.yaml in the orchestrator, whose CLI clients read it
+# (and, through options.datasources below, the credentials) before posting the
+# session configuration to the engine. Creating datasources.yaml is optional.
 #
 # Scope is intentionally empty: the orchestrator passes the domain of each
 # target on the command line (oam_enum -d <fqdn>), so one engine serves every

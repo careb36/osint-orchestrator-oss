@@ -175,6 +175,11 @@ class Settings(BaseSettings):
     # Directory shared with the engine container (its /.config/amass): the
     # engine writes asset.db there and oam_subs reads it from this path.
     amass_data_dir: str = "/app/amass/data"
+    # Configuration the CLI clients load themselves. Amass v5 reads config.yaml
+    # in the *client* — and, through options.datasources, the data-source
+    # credentials — then posts the session config to the engine. The mount has
+    # to reach the orchestrator, not only the engine sidecar.
+    amass_config_file: str = "/app/amass/config/config.yaml"
     # CLI binaries (copied from the upstream image in the Dockerfile). Override
     # with absolute paths when running the orchestrator outside Docker.
     amass_enum_bin: str = "oam_enum"

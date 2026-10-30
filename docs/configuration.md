@@ -91,6 +91,7 @@ queries.
 | `SOCIALOSINT_TIMEOUT_SECONDS` | `300` | Total wall-clock bound for a full SocialOSINT run. |
 | `AMASS_ENGINE_URL` | `http://amass:4000` | Amass engine sidecar URL (compose profile `amass`). |
 | `AMASS_DATA_DIR` | `/app/amass/data` | Volume shared with the engine; `asset.db` is read from here. |
+| `AMASS_CONFIG_FILE` | `/app/amass/config/config.yaml` | Client-side Amass configuration. The CLI clients load it (and `options.datasources`) themselves, so it must be mounted into the orchestrator container too. |
 | `AMASS_ENUM_BIN` | `oam_enum` | Amass CLI clients (absolute paths when running outside Docker). |
 | `AMASS_SUBS_BIN` | `oam_subs` | Amass CLI clients (absolute paths when running outside Docker). |
 | `AMASS_TIMEOUT_SECONDS` | `1800` | Default wall-clock bound for a full Amass run (enum + subs). |

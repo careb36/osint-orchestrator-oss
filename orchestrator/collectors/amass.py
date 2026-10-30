@@ -6,8 +6,12 @@ enumeration and persists everything it learns into an asset database) and thin
 CLI clients that talk to it. We keep that split:
 
   - The engine runs as a sidecar container (docker-compose profile ``amass``,
-    image ``owaspamass/amass``). Data-source credentials live only in its
-    ``datasources.yaml``; the orchestrator never sees them.
+    image ``owaspamass/amass``). Data-source credentials live in
+    ``amass/datasources.yaml``, and in Amass v5 it is the *client* that loads
+    them: ``oam_enum`` reads ``config.yaml`` (and, through
+    ``options.datasources``, the credentials file) and posts the resulting
+    session configuration to the engine. So the orchestrator container needs
+    those files too, not just the engine.
   - This collector drives the engine with the two CLI clients copied into the
     orchestrator image from the same upstream image:
       1. ``oam_enum -engine <url> -d <fqdn> -dir <data_dir> ...`` submits the
@@ -50,6 +54,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
+import yaml
 
 from orchestrator.collectors import BaseCollector
 from orchestrator.config import settings
@@ -74,6 +79,31 @@ _LABEL_RE = re.compile(r"^[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?$")
 
 class AmassError(RuntimeError):
     """A CLI client failed; the message is safe to surface to operators."""
+
+
+def _datasources_ready(config: Path) -> bool:
+    """True when the client can load ``config`` without failing on a missing file.
+
+    ``oam_enum`` resolves ``options.datasources`` relative to the config file's
+    own directory and aborts when the file is absent. Credentials are optional,
+    so a config that names a file nobody created must fall back to the
+    unauthenticated run rather than break enumeration.
+    """
+    try:
+        data = yaml.safe_load(config.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError):
+        return False
+    if data is None:  # empty file: nothing to resolve, nothing to fail on
+        data = {}
+    if not isinstance(data, dict):
+        return False
+    options = data.get("options") or {}
+    if not isinstance(options, dict):
+        return False
+    relative = options.get("datasources")
+    if not isinstance(relative, str) or not relative:
+        return True
+    return (config.parent / relative).resolve().is_file()
 
 
 def _strip_url_userinfo(url: str) -> str:
@@ -167,6 +197,7 @@ class AmassCollector(BaseCollector):
         self._data_dir = settings.amass_data_dir
         self._enum_bin = settings.amass_enum_bin
         self._subs_bin = settings.amass_subs_bin
+        self._config_file = Path(settings.amass_config_file)
 
     # ─── Command lines ────────────────────────────────────────────────────────
 
@@ -196,7 +227,14 @@ class AmassCollector(BaseCollector):
             argv.extend(["-include", ",".join(cfg.include)])
         if cfg.exclude:
             argv.extend(["-exclude", ",".join(cfg.exclude)])
+        argv.extend(self.config_argv())
         return argv
+
+    def config_argv(self) -> list[str]:
+        """``-config`` when a usable configuration file is mounted here."""
+        if not _datasources_ready(self._config_file):
+            return []
+        return ["-config", str(self._config_file)]
 
     def subs_argv(self) -> list[str]:
         """Build the ``oam_subs`` command line that reads the results back."""
@@ -219,6 +257,18 @@ class AmassCollector(BaseCollector):
         cfg = self.target.collectors.amass
         fqdn = self.target.fqdn
         safe_engine = _strip_url_userinfo(self._engine_url)
+        if self.config_argv():
+            logger.info(
+                "Amass: loading data-source credentials from %s",
+                self._config_file,
+                extra={"collector": "amass"},
+            )
+        else:
+            logger.info(
+                "Amass: no usable configuration at %s; running without data-source credentials",
+                self._config_file,
+                extra={"collector": "amass"},
+            )
         stage = "health"
         try:
             async with asyncio.timeout(cfg.timeout_seconds):

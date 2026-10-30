@@ -261,6 +261,10 @@ services:
       # Shared with the Amass engine (profile "amass"): the engine writes its
       # asset database here and the collector reads it back with oam_subs.
       - amass-data:/app/amass/data
+      # Amass v5 loads its configuration — data-source credentials included — in
+      # the *client* and posts it to the engine in the session, so the clients
+      # running in this container need the same files the engine sidecar has.
+      - ./amass:/app/amass/config:ro
     ports:
       # Publish on loopback only: direct API access without the auth overlay.
       # The auth overlay (docker-compose.auth.yml) routes through the compose
