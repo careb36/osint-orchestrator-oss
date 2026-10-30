@@ -10,6 +10,12 @@ from [SECURITY.md](SECURITY.md).
 ## [Unreleased]
 
 ### Added
+- A guard on the documentation index (`tests/unit/test_doc_links.py`). The link
+  check proved every referenced page exists; nothing proved the index linked
+  every page, so a new guide could land under `docs/` and be reachable only by
+  guessing its name. A page under `docs/` that `docs/README.md` never links now
+  fails the suite.
+
 - A guard on README parity (`tests/unit/test_readme_parity.py`). ADR-009
   requires `README.es.md` to change with `README.md`, "with the same sections",
   and `CONTRIBUTING.md` listed it as something a reviewer checks by eye. Four

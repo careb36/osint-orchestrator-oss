@@ -12,6 +12,8 @@ import subprocess
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+DOCS = REPO_ROOT / "docs"
+INDEX = DOCS / "README.md"
 _TEXT_SUFFIXES = {".md", ".py", ".toml", ".yml", ".yaml", ".txt", ".example", ""}
 # A page path, optionally written relative to the citing file with a leading
 # dot segment or two. The lookbehind keeps a page under the dashboard's own
@@ -49,3 +51,14 @@ def test_every_referenced_docs_file_exists() -> None:
             if not any(candidate.exists() for candidate in candidates):
                 missing.setdefault(match, []).append(str(path.relative_to(REPO_ROOT)))
     assert missing == {}, f"references to documentation files that do not exist: {missing}"
+
+
+def test_the_index_links_every_page_under_docs() -> None:
+    """A new page that the index never mentions is a page nobody finds."""
+    index = INDEX.read_text(encoding="utf-8")
+    pages = {path.name for path in DOCS.glob("*.md")} - {INDEX.name}
+    unlisted = sorted(page for page in pages if f"({page})" not in index)
+    assert unlisted == [], (
+        f"pages under docs/ that docs/README.md never links: {unlisted}. "
+        "Add them to the index in the section a reader would look in."
+    )
