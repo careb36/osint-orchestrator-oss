@@ -552,7 +552,18 @@ with a gap in it:
 
 Regenerate the report after changing the model, the architecture or a triage
 rationale, and review the diff: an accepted finding is a decision on record,
-never a silence. The accepted set is deliberate — plaintext host-internal
+never a silence.
+
+CI cannot run the generator, so `tests/unit/test_threat_model_report.py` holds
+the committed report to itself with no pytm: the headline total and the count
+of distinct threats must match the findings rendered, the severity sections
+must add up to that total, the triage summary must match the responses, every
+element class used must be documented, and `scripts/threat_model_findings.txt`
+must list exactly the `(threat, element)` pairs the report shows and stay
+sorted. It catches a hand edit, a dropped section or a ledger regenerated
+without the report — the drifts that would make a public number wrong while
+the suite stayed green. It cannot tell you the model still describes the code;
+that still needs the regeneration above. The accepted set is deliberate — plaintext host-internal
 flows and stores on a single trusted host (ADR-005), the shipped OIDC overlay
 without TLS termination, static API keys and tokens (ADR-005), the
 loopback-only unauthenticated sidecars, the unsigned webhook by default, the

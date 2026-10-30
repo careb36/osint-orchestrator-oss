@@ -10,6 +10,18 @@ from [SECURITY.md](SECURITY.md).
 ## [Unreleased]
 
 ### Added
+- A guard on the generated threat model (`tests/unit/test_threat_model_report.py`).
+  `docs/threat-model.md` is produced by `scripts/threat_model.py`, which needs
+  pytm in a throwaway virtualenv and cannot run in CI, so nothing held the
+  report to its own numbers: a hand edit, a dropped section or a ledger
+  regenerated without the report would have left a public claim ("1414 findings
+  across 89 distinct threats") false with a green suite. Six checks, no
+  dependency: the headline and the distinct-threat count against the findings
+  rendered, the severity sections against the total, the triage summary against
+  the responses, the element classes against those documented, and the ledger
+  against the report, sorted and without duplicates. Mutation-tested against
+  eight drift scenarios.
+
 
 - Weekly check for the three dependency pins Dependabot cannot see. Dependabot
   reads package versions, so a dependency referenced by a git commit, a compose
