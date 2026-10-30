@@ -94,6 +94,10 @@ A change is not done until its documentation is complete:
   The README is the only translated file: `README.es.md` is updated **in the
   same PR** as `README.md`, with the same sections. Keep both short; reference
   material belongs in `docs/`.
+  `tests/unit/test_readme_parity.py` fails if the two pages disagree on the
+  number of sections, on the command blocks, on the documentation pages they
+  link to or on the screenshots they show, so a step added to one language and
+  not the other is caught before review.
 
 ## Delegating a task to a coding agent
 

@@ -10,6 +10,15 @@ from [SECURITY.md](SECURITY.md).
 ## [Unreleased]
 
 ### Added
+- A guard on README parity (`tests/unit/test_readme_parity.py`). ADR-009
+  requires `README.es.md` to change with `README.md`, "with the same sections",
+  and `CONTRIBUTING.md` listed it as something a reviewer checks by eye. Four
+  checks now fail when the two pages disagree on the number of sections, on the
+  fenced command blocks, on the documentation pages they link to, or on the
+  screenshots they show — the pairing of the per-language dashboard screenshots
+  is normalised before comparing, so translating one but not adding it still
+  fails while `-en`/`-es` pairs stay valid.
+
 - A guard on the generated threat model (`tests/unit/test_threat_model_report.py`).
   `docs/threat-model.md` is produced by `scripts/threat_model.py`, which needs
   pytm in a throwaway virtualenv and cannot run in CI, so nothing held the
