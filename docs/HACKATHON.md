@@ -53,6 +53,7 @@ alerts and the API. Added since:
 | The two READMEs must agree on sections, command blocks, documentation links and screenshots, so a step added in one language cannot leave the other silently behind | [#185](https://github.com/careb36/osint-orchestrator-oss/pull/185) |
 | Every page under `docs/` must be linked from its index, so a new guide cannot be reachable only by guessing its filename | [#186](https://github.com/careb36/osint-orchestrator-oss/pull/186) |
 | The metrics table must match the code in names and labels, so an operator's query cannot silently return nothing | [#187](https://github.com/careb36/osint-orchestrator-oss/pull/187) |
+| The endpoint table must match the routes the app serves — no duplicate rows, no path that answers 404 — so a caller can trust it over the server | [#188](https://github.com/careb36/osint-orchestrator-oss/pull/188) |
 | This hackathon history moved out of the README into its own page; per-path agent rules | [#143](https://github.com/careb36/osint-orchestrator-oss/pull/143), [#144](https://github.com/careb36/osint-orchestrator-oss/pull/144), [#137](https://github.com/careb36/osint-orchestrator-oss/pull/137) |
 
 ## Español
@@ -108,4 +109,5 @@ OpenCTI, los reportes, las alertas y la API. Agregado desde entonces:
 | Los dos README deben coincidir en secciones, bloques de comandos, enlaces a documentación y capturas, así un paso añadido en un idioma no deja al otro en silencio atrás | [#185](https://github.com/careb36/osint-orchestrator-oss/pull/185) |
 | Toda página bajo `docs/` debe estar enlazada desde su índice, así una guía nueva no queda alcanzable solo adivinando su nombre de fichero | [#186](https://github.com/careb36/osint-orchestrator-oss/pull/186) |
 | La tabla de métricas debe coincidir con el código en nombres y labels, así la consulta de un operador no puede devolver nada en silencio | [#187](https://github.com/careb36/osint-orchestrator-oss/pull/187) |
+| La tabla de endpoints debe coincidir con las rutas que sirve la app — sin filas duplicadas, sin rutas que devuelvan 404 — para que quien integra pueda fiarse de ella antes que del servidor | [#188](https://github.com/careb36/osint-orchestrator-oss/pull/188) |
 | Este historial de la hackathon se mudó del README a su propia página; reglas de agente por ruta | [#143](https://github.com/careb36/osint-orchestrator-oss/pull/143), [#144](https://github.com/careb36/osint-orchestrator-oss/pull/144), [#137](https://github.com/careb36/osint-orchestrator-oss/pull/137) |
