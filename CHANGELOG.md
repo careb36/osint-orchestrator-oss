@@ -10,6 +10,23 @@ from [SECURITY.md](SECURITY.md).
 ## [Unreleased]
 
 ### Added
+- A guard on the fields a call site may put in a log record
+  (`tests/unit/test_log_extra_contract.py`). `AGENTS.md` tells a contributor not
+  to name an `extra=` field `ts`, `level`, `logger`, `msg`, `request_id`, `exc`
+  or `stack`, and says the field comes out as `extra_<name>`. Measured through
+  the real call path, that is true for five of the seven: `msg` raises `KeyError`
+  inside `Logger.makeRecord` **before any formatter runs**, so the log call
+  itself fails — usually inside the except-block that was trying to explain
+  another failure — and `request_id` is dropped rather than renamed, because the
+  reserved-attribute check skips it first. `test_logging_config.py` could not
+  catch either: its `_record()` helper builds the record with `setattr`, which
+  bypasses `makeRecord`, so the crash path was never exercised. The new guard
+  reads the call sites with `ast` — 52 distinct field names across the package —
+  and fails if any of them is a name logging reserves, scoped to real logger
+  methods so pydantic's `ConfigDict(extra="forbid")` is not mistaken for a log
+  field. The three behaviours are now pinned by a parametrised test instead of a
+  sentence that is wrong for two of the seven names.
+
 - A guard on the Helm chart's environment contract
   (`tests/unit/test_helm_env_contract.py`). `Settings` is declared with
   `extra="ignore"`, so a variable the chart renders under a name the app does not
