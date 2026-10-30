@@ -25,7 +25,7 @@ export function TargetDetailPage() {
   const target = useQuery({ queryKey: ['target', targetId], queryFn: () => api.getTarget(targetId), enabled: Boolean(targetId) });
   const runs = useQuery({ queryKey: ['runs', targetId], queryFn: () => api.getRuns(targetId), enabled: Boolean(targetId) });
   const trends = useQuery({ queryKey: ['risk-trends'], queryFn: api.getRiskTrends });
-  const { start, isPending, notice } = useStartRun();
+  const { start, isPendingFor, notice } = useStartRun();
   const controls = useListControls<RunSortKey>({ defaults: DEFAULTS, defaultSort: { key: 'started', dir: 'desc' }, sortKeys: SORT_KEYS, allowed: ALLOWED });
 
   const title = target.data?.fqdn ?? targetId;
@@ -58,8 +58,13 @@ export function TargetDetailPage() {
         <>
           <Link to="/targets">{t('target.back')}</Link>
           {target.data ? (
-            <button type="button" className="primary-action" disabled={isPending || active || !target.data.enabled} onClick={() => start(targetId)}>
-              {isPending ? t('run.starting') : active ? t('run.running') : t('run.start')}
+            <button
+              type="button"
+              className="primary-action"
+              disabled={isPendingFor(targetId) || active || !target.data.enabled}
+              onClick={() => start(targetId)}
+            >
+              {isPendingFor(targetId) ? t('run.starting') : active ? t('run.running') : t('run.start')}
             </button>
           ) : null}
         </>
