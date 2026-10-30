@@ -265,6 +265,44 @@ async def qualify_evidence(
         if not retry or attempt == 2:
             break
         pending = [retry[i : i + _BATCH_SIZE] for i in range(0, len(retry), _BATCH_SIZE)]
+    # The fast model truncates or returns unparseable JSON for some content;
+    # the reasoning model is more reliable at structured output, so the items
+    # still unqualified after both fast passes get one reasoning pass.
+    if retry:
+        reasoning_model = client.model_for_route("reasoning")
+        reasoning_batches = [retry[i : i + _BATCH_SIZE] for i in range(0, len(retry), _BATCH_SIZE)]
+        for batch in reasoning_batches:
+            try:
+                raw = await client.complete(
+                    _QUALIFY_SYSTEM_PROMPT,
+                    _build_user_prompt(target, batch),
+                    timeout=settings.llm_timeout_seconds,
+                    model_route="reasoning",
+                    response_schema=_RESPONSE_SCHEMA,
+                )
+            except Exception as exc:  # noqa: BLE001
+                failures.append(str(exc))
+                logger.exception(
+                    "Evidence qualification reasoning fallback failed target=%s run_id=%d",
+                    target.id,
+                    run_id,
+                    extra={"target_id": target.id, "run_id": run_id, "error_detail": str(exc)},
+                )
+                continue
+            payload = _extract_json(raw)
+            batch_rows = (
+                _validated_rows(
+                    payload=payload,
+                    batch=batch,
+                    run_id=run_id,
+                    target_id=target.id,
+                    provider=provider,
+                    model=reasoning_model,
+                )
+                if payload is not None
+                else []
+            )
+            rows.extend(batch_rows)
     logger.info(
         "Evidence qualified target=%s run_id=%d qualified=%d of %d model=%s",
         target.id,
