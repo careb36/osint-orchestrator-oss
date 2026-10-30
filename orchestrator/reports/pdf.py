@@ -45,6 +45,13 @@ _TRANSLITERATE = str.maketrans(
     {
         "—": "-",  # em dash
         "–": "-",  # en dash
+        "‐": "-",  # U+2010 hyphen
+        "‑": "-",  # U+2011 non-breaking hyphen
+        "‒": "-",  # U+2012 figure dash
+        "―": "-",  # U+2015 horizontal bar
+        "−": "-",  # U+2212 minus sign
+        "​": "",  # zero-width space
+        "﻿": "",  # zero-width no-break space (BOM)
         "…": "...",
         "“": '"',
         "”": '"',

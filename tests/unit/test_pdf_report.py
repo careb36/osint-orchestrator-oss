@@ -75,6 +75,19 @@ def test_inline_text_flattens_links_emphasis_and_non_latin1() -> None:
     assert inline_text("中文") == "??"
 
 
+def test_inline_text_normalises_model_dashes() -> None:
+    """Non-breaking hyphens and the dash family LLMs emit map to plain ``-``."""
+    assert inline_text("high‑relevance patent‐issue") == "high-relevance patent-issue"
+    assert inline_text("a‒b ― c − d") == "a-b - c - d"
+    assert inline_text("zero​width﻿") == "zerowidth"
+
+
+def test_render_pdf_accepts_model_dashes(tmp_path: Path) -> None:
+    out = tmp_path / "report.pdf"
+    render_pdf(out, "# T\n\nRisk: high‑relevance litigation.", "en")
+    assert out.exists()
+
+
 def test_parse_blocks_recognises_headings_bullets_tables_and_paragraphs() -> None:
     blocks = parse_blocks(SAMPLE_MD)
     kinds = [block.kind for block in blocks]
