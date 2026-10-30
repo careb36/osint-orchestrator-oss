@@ -7,6 +7,7 @@ from __future__ import annotations
 import shutil
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -31,7 +32,11 @@ from orchestrator.models import (
     RunStatus,
     SeenObservable,
 )
-from orchestrator.retention import purge_expired
+from orchestrator.retention import (
+    _is_filesystem_root,
+    _resolves_inside,
+    purge_expired,
+)
 from orchestrator.scheduler import (
     register_alert_retry_job,
     register_opencti_outbox_job,
@@ -738,3 +743,143 @@ def test_register_opencti_outbox_job_registers_when_enabled(monkeypatch, clean_r
     monkeypatch.setattr("orchestrator.scheduler.settings.opencti_outbox_cron", "*/5 * * * *")
     register_opencti_outbox_job()
     assert scheduler.get_job("opencti-outbox") is not None
+
+
+@pytest.mark.asyncio
+async def test_symlinked_date_directory_is_skipped(tmp_path, monkeypatch):
+    """A date-named symlink must be skipped, not followed out of the root."""
+    engine = _make_engine()
+    await _setup_db(engine)
+
+    reports = tmp_path / "daily_reports"
+    reports.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    victim = outside / "report.md"
+    victim.write_text("must survive")
+    (reports / "2026-01-01").symlink_to(outside)
+
+    monkeypatch.setattr("orchestrator.retention.get_session", _session_factory(engine))
+    monkeypatch.setattr("orchestrator.retention.settings.orchestrator_retention_days", 90)
+    monkeypatch.setattr(
+        "orchestrator.retention.settings.targets_file", str(tmp_path / "notfound.yaml")
+    )
+    monkeypatch.setattr("orchestrator.retention._collect_report_dirs", lambda: {str(reports)})
+
+    summary = await purge_expired(now=NOW)
+
+    assert summary.report_dirs_deleted == 0
+    assert victim.exists(), "a symlink must never reach the target's contents"
+    assert (reports / "2026-01-01").is_symlink(), "the link itself is left alone"
+    # The skip must be deliberate. Relying on rmtree to refuse the symlink also
+    # leaves the target intact, but records a failure; this pins the difference.
+    assert summary.errors == []
+
+
+@pytest.mark.asyncio
+async def test_symlinked_date_directory_inside_the_root_is_skipped(tmp_path, monkeypatch):
+    """Isolate the symlink guard: the link target is inside the root, so the
+    containment check lets it through and only the symlink check can stop it."""
+    engine = _make_engine()
+    await _setup_db(engine)
+
+    reports = tmp_path / "daily_reports"
+    target = reports / "2026-01-15"
+    target.mkdir(parents=True)
+    (target / "report.md").write_text("x")
+    link = reports / "2026-01-01"
+    link.symlink_to(target)
+
+    monkeypatch.setattr("orchestrator.retention.get_session", _session_factory(engine))
+    monkeypatch.setattr("orchestrator.retention.settings.orchestrator_retention_days", 90)
+    monkeypatch.setattr(
+        "orchestrator.retention.settings.targets_file", str(tmp_path / "notfound.yaml")
+    )
+    monkeypatch.setattr("orchestrator.retention._collect_report_dirs", lambda: {str(reports)})
+
+    summary = await purge_expired(now=NOW)
+
+    assert link.is_symlink(), "the link is skipped, not followed"
+    assert summary.errors == [], "skipping a symlink is a choice, not a failure"
+    assert summary.report_dirs_deleted == 1, "the real dated directory is still purged"
+
+
+def test_filesystem_root_is_refused(tmp_path):
+    """A root that resolves to "/" is refused before any directory is listed."""
+    assert _is_filesystem_root(Path("/"))
+    assert _is_filesystem_root(Path("/../.."))
+    assert not _is_filesystem_root(tmp_path)
+    assert not _is_filesystem_root(Path("daily_reports"))
+
+
+def test_resolves_inside_rejects_escapes(tmp_path):
+    """Containment is decided on the resolved path, not on the string prefix."""
+    root = tmp_path / "reports"
+    root.mkdir()
+    inside = root / "2026-01-01"
+    inside.mkdir()
+    sibling = tmp_path / "reports-elsewhere"
+    sibling.mkdir()
+
+    assert _resolves_inside(root.resolve(), inside)
+    assert not _resolves_inside(root.resolve(), sibling)
+    assert not _resolves_inside(root.resolve(), root.parent), "the root itself is not inside"
+
+    # A root reached through a symlink must resolve on both sides: comparing the
+    # unresolved entry against the resolved root would reject every real directory.
+    real = tmp_path / "real"
+    (real / "reports" / "2026-01-01").mkdir(parents=True)
+    link = tmp_path / "link"
+    link.symlink_to(real)
+    assert _resolves_inside((link / "reports").resolve(), link / "reports" / "2026-01-01")
+
+
+@pytest.mark.asyncio
+async def test_filesystem_root_guard_is_consulted(tmp_path, monkeypatch):
+    """The purge loop must ask whether a root is a filesystem root before walking it."""
+    engine = _make_engine()
+    await _setup_db(engine)
+
+    reports = tmp_path / "daily_reports"
+    old_dir = reports / "2026-01-01"
+    old_dir.mkdir(parents=True)
+    (old_dir / "report.md").write_text("x")
+
+    monkeypatch.setattr("orchestrator.retention.get_session", _session_factory(engine))
+    monkeypatch.setattr("orchestrator.retention.settings.orchestrator_retention_days", 90)
+    monkeypatch.setattr(
+        "orchestrator.retention.settings.targets_file", str(tmp_path / "notfound.yaml")
+    )
+    monkeypatch.setattr("orchestrator.retention._collect_report_dirs", lambda: {str(reports)})
+    monkeypatch.setattr("orchestrator.retention._is_filesystem_root", lambda _p: True)
+
+    summary = await purge_expired(now=NOW)
+
+    assert old_dir.exists(), "a refused root must not be walked"
+    assert summary.report_dirs_deleted == 0
+    assert any("unsafe root" in err for err in summary.errors)
+
+
+@pytest.mark.asyncio
+async def test_containment_guard_is_consulted(tmp_path, monkeypatch):
+    """An entry the containment check rejects must not be removed."""
+    engine = _make_engine()
+    await _setup_db(engine)
+
+    reports = tmp_path / "daily_reports"
+    old_dir = reports / "2026-01-01"
+    old_dir.mkdir(parents=True)
+    (old_dir / "report.md").write_text("x")
+
+    monkeypatch.setattr("orchestrator.retention.get_session", _session_factory(engine))
+    monkeypatch.setattr("orchestrator.retention.settings.orchestrator_retention_days", 90)
+    monkeypatch.setattr(
+        "orchestrator.retention.settings.targets_file", str(tmp_path / "notfound.yaml")
+    )
+    monkeypatch.setattr("orchestrator.retention._collect_report_dirs", lambda: {str(reports)})
+    monkeypatch.setattr("orchestrator.retention._resolves_inside", lambda _root, _entry: False)
+
+    summary = await purge_expired(now=NOW)
+
+    assert old_dir.exists(), "a rejected entry must survive"
+    assert summary.report_dirs_deleted == 0
