@@ -32,7 +32,7 @@ export function TargetsPage() {
   const targets = useQuery({ queryKey: ['targets'], queryFn: () => api.getTargets() });
   const runs = useQuery({ queryKey: ['runs'], queryFn: () => api.getRuns() });
   const trends = useQuery({ queryKey: ['risk-trends'], queryFn: api.getRiskTrends });
-  const { start, isPending, notice } = useStartRun();
+  const { start, isPending, isPendingFor, notice } = useStartRun();
   const controls = useListControls<TargetSortKey>({ defaults: DEFAULTS, defaultSort: { key: 'attention', dir: 'asc' }, sortKeys: SORT_KEYS, allowed: ALLOWED });
 
   if (targets.isLoading) {
@@ -163,7 +163,7 @@ export function TargetsPage() {
                 </td>
                 <td role="cell" data-label={t('col.actions')}>
                   <button type="button" className="ghost-button" disabled={isPending || active || !target.enabled} onClick={() => start(target.id)}>
-                    {active ? t('run.running') : t('run.start')}
+                    {isPendingFor(target.id) ? t('run.starting') : active ? t('run.running') : t('run.start')}
                     <span className="visually-hidden">{t('run.startFor', { targetId: target.id })}</span>
                   </button>
                 </td>

@@ -30,9 +30,26 @@ Search, filter and sort state lives in the URL query string (`useListControls`):
 `?q=…`, one key per filter, and `sort=<column>:<asc|desc>`. A value equal to
 its default is dropped from the URL, so a plain route stays plain.
 
+## Navigation conventions
+
+The order of the route map above is the order of the rail, and it is
+authoritative: `/` leads because it is the landing route, day-to-day views
+follow in the order an operator uses them, and the personal destinations — the
+only conditional ones — close the list (`Serial Position Effect`). A route that
+asks to be in the navigation also needs a glyph in `RAIL_ICONS` (`src/App.tsx`);
+the icon column has a fixed width so a missing glyph leaves a blank slot rather
+than a label that jumps left of its neighbours.
+
+`src/navigation.test.tsx` parses this document and compares it with
+`APP_ROUTES`, so editing the order or the `personalOnly` flag here without
+editing `src/routes.ts` (or the other way round) fails the suite.
+
 ## Contributor rules
 
-1. Add a route once to the centralized route list in `src/routes.ts`.
+1. Add a route once to the centralized route list in `src/routes.ts`, and a row
+   to the route map above with the same path and navigation column.
 2. Reuse `PageLayout`, `LoadingState`, `EmptyState`, and `ErrorState` for major views.
 3. Keep navigation labels short and consistent with the existing shell.
 4. If a new route is added, update the route list and tests before shipping.
+5. A route in the navigation needs an entry in `RAIL_ICONS`, or the rail breaks
+   its own alignment.

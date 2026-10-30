@@ -10,6 +10,32 @@ from [SECURITY.md](SECURITY.md).
 ## [Unreleased]
 
 ### Added
+- Two dashboard navigation defects, found by auditing the rail against the Laws
+  of UX. `Dossiers` occupied the first navigation slot and pushed `Overview`, the
+  landing route, to second place, against the order of the route map in
+  `ui/docs/routes.md`; and `Dossiers` and `My account` shipped with an empty
+  `.rail-icon` while the other four entries carried a glyph, so their labels
+  started 17px left of their neighbours and the rail read as two groups. The
+  order now matches the document, both entries have icons, and the icon column
+  has a fixed width so a missing glyph can no longer shift a label.
+  `ui/src/navigation.test.tsx` parses the route map and compares it with
+  `APP_ROUTES`, so the order, the `personalOnly` flags and the glyphs cannot
+  drift again.
+
+- The button that starts a run now says which row it is working on. One
+  mutation instance serves every row of a table, so `isPending` disabled all of
+  them at once and nothing indicated which operator click had registered;
+  `useStartRun().isPendingFor(targetId)` labels the clicked row "Starting…" and
+  leaves the rest merely disabled, in the overview, the target list, the target
+  detail and the handoff follow-up block. This is the Doherty Threshold applied
+  to a reply the operator has to be able to attribute.
+
+- `ui/docs/ux-laws.md` records the UX laws the dashboard applies, where each
+  decision lives and what holds it in place, plus the ones considered and left
+  out with the reason. It lists a law only when the code applies it and a test
+  or a type enforces it; Fitts's Law is marked as visually inspected because no
+  automated check covers it.
+
 - `AGENTS.md` no longer states a logging rule that is true for five of the seven
   names it lists. It said a field named `ts`, `level`, `logger`, `msg`,
   `request_id`, `exc` or `stack` "is emitted as `extra_<name>` instead". Measured

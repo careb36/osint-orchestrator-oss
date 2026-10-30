@@ -59,7 +59,7 @@ export function TargetDetailPage() {
           <Link to="/targets">{t('target.back')}</Link>
           {target.data ? (
             <button type="button" className="primary-action" disabled={isPending || active || !target.data.enabled} onClick={() => start(targetId)}>
-              {active ? t('run.running') : t('run.start')}
+              {isPending ? t('run.starting') : active ? t('run.running') : t('run.start')}
             </button>
           ) : null}
         </>

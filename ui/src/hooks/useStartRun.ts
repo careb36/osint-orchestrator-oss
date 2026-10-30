@@ -32,5 +32,16 @@ export function useStartRun() {
     },
   });
 
-  return { start: mutation.mutate, isPending: mutation.isPending, notice };
+  /**
+   * Whether the in-flight request belongs to this target.
+   *
+   * The mutation is one instance shared by every row of a table, so `isPending`
+   * is true for all of them at once and a bare disabled button cannot say which
+   * click registered. Doherty Threshold: the reply to a click has to arrive
+   * within 400ms and be attributable, so the row that was clicked names what it
+   * is doing while the rest stay merely disabled.
+   */
+  const isPendingFor = (targetId: string) => mutation.isPending && mutation.variables === targetId;
+
+  return { start: mutation.mutate, isPending: mutation.isPending, isPendingFor, notice };
 }
