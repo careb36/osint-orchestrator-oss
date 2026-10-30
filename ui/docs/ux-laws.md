@@ -11,7 +11,7 @@ and a test or a type enforces it.
 
 | Law | Decision | Lives in | Held by |
 | --- | --- | --- | --- |
-| Serial Position Effect | The landing route `/` takes the first navigation slot, day-to-day views follow in the order they are used, and the personal destinations close the list. The order in the route map is authoritative. | `src/routes.ts` | `src/navigation.test.tsx` parses `docs/routes.md` and compares it with `APP_ROUTES` |
+| Serial Position Effect | The landing route `/` takes the first navigation slot, day-to-day views follow in the order they are used, and the personal destinations close the list. The order in the route map is authoritative. | `src/routes.ts` | `src/navigation.test.tsx` parses `ui/docs/routes.md` and compares it with `APP_ROUTES` |
 | Law of Similarity | Every rail entry carries a glyph, and the glyph column has a fixed width, so the six entries read as one group and the labels share a left edge. | `src/App.tsx` (`RAIL_ICONS`), `src/styles.css` (`.rail-icon`) | `src/navigation.test.tsx`: no entry may render an empty glyph slot |
 | Von Restorff Effect | The overview sorts targets by attention tier, so what needs a human leads the table and a calm target never sits above an at-risk one. | `src/lib/overview.ts` (`ATTENTION`, `buildTargetRows`) | `src/lib/overview.test.ts` |
 | Doherty Threshold | A click is answered immediately and attributably: the row whose run was started says so, while the other rows are only disabled. | `src/hooks/useStartRun.ts` (`isPendingFor`) | `src/App.test.tsx`, "names the row that is starting, one row only" |
