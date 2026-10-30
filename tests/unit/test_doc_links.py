@@ -69,11 +69,15 @@ def test_the_index_links_every_page_under_docs() -> None:
 _ANCHOR_LINK = re.compile(r"(?<!!)\[[^\]]*\]\(([^)\s]+)\)")
 _HEADING = re.compile(r"^(#{1,6})\s+(.*)$", re.M)
 _FENCE = re.compile(r"```.*?```", re.S)
-_CAMEL = re.compile(r"-{2,}")
 
 
 def _slug(heading: str) -> str:
-    """GitHub's heading fragment: lowercase, code and links keep their text."""
+    """GitHub's heading fragment: lowercase, code and links keep their text.
+
+    Punctuation is dropped and each space becomes a hyphen, so a heading with an
+    arrow yields a run of hyphens. Runs are significant: the fragment must match
+    what GitHub generates, or the browser ignores it and renders from the top.
+    """
     text = heading.strip().lower()
     text = re.sub(r"`([^`]*)`", r"\1", text)
     text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)
@@ -96,14 +100,6 @@ def _headings(path: Path) -> set[str]:
         seen[slug] = count + 1
         fragments.add(slug if not count else f"{slug}-{count}")
     return fragments
-
-
-def _matches(anchor: str, fragments: set[str]) -> bool:
-    # Runs of hyphens are collapsed on both sides: a heading whose punctuation
-    # is stripped can yield `a--b` from one slugger and `a-b` from another, and
-    # that difference is not a broken link.
-    wanted = _CAMEL.sub("-", anchor)
-    return any(_CAMEL.sub("-", fragment) == wanted for fragment in fragments)
 
 
 def test_internal_anchor_links_reach_a_heading() -> None:
@@ -130,9 +126,20 @@ def test_internal_anchor_links_reach_a_heading() -> None:
                 continue
             resolved = (path.parent / destination).resolve() if destination else path
             if not resolved.exists():
-                continue  # the other test reports a missing file
+                # Not the sibling test's job: its pattern only matches targets
+                # that contain `docs/`, so a page-relative `operation.md#x` typo
+                # would be reported by neither. Anchors on a non-page (a Python
+                # line number) are not headings and are left alone.
+                if resolved.suffix == ".md":
+                    checked += 1
+                    broken.setdefault(f"{path.relative_to(REPO_ROOT)} -> {target}", []).append(
+                        "no such file"
+                    )
+                continue
+            if resolved.suffix != ".md":
+                continue
             checked += 1
-            if not _matches(anchor, _headings(resolved)):
+            if anchor not in _headings(resolved):
                 broken.setdefault(f"{path.relative_to(REPO_ROOT)} -> {target}", []).append(
                     str(resolved.relative_to(REPO_ROOT))
                 )

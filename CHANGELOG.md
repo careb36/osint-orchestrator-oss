@@ -19,11 +19,15 @@ from [SECURITY.md](SECURITY.md).
   `operations.md#evidence-chain` while the heading is "Reports and evidence
   chain", so the operator rotating a signing key arrived at the beginning of a
   long page with no sign of the procedure they were sent to. Twelve anchored
-  links are resolved now — including the three the security checklist makes into
-  `docs/operations.md`, the two ADR-006 makes into `#optional-services`, and the
-  numbered `## 3. Security model…` heading `docs/deploy.md` cross-references —
-  with duplicates handled the way GitHub numbers them and runs of hyphens
-  compared loosely, so a slugger difference is not reported as a break.
+  links are resolved now — including the four `SECURITY.md` and `docs/deploy.md`
+  make into `docs/operations.md`, the two ADR-006 makes into
+  `#optional-services`, and the two self-anchors in the READMEs — with duplicate
+  headings numbered the way GitHub numbers them. The fragment is compared
+  exactly: a heading containing an arrow genuinely slugs to a run of hyphens, so
+  tolerating a single hyphen there would accept a link the browser ignores. The
+  check also reports a page-relative target that does not exist
+  (`operation.md#x` in `docs/`), which neither this test nor its sibling caught
+  before: the sibling's pattern requires the path to contain `docs/`.
 
 - A guard on the fields a call site may put in a log record
   (`tests/unit/test_log_extra_contract.py`). `AGENTS.md` tells a contributor not
