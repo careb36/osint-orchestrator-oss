@@ -10,6 +10,16 @@ from [SECURITY.md](SECURITY.md).
 ## [Unreleased]
 
 ### Added
+- A guard on the metrics reference (`tests/unit/test_metrics_docs.py`).
+  `AGENTS.md` requires a new metric in `orchestrator/metrics.py` to get a row in
+  the `docs/operations.md` table "with exactly the labels declared in code",
+  and `CONTRIBUTING.md` listed the two matching as a reviewer check. Nothing
+  enforced it. Three checks now compare the table against the module in both
+  directions and the label lists name by name, so a renamed label or a dropped
+  row fails instead of leaving an operator with a query that silently returns
+  nothing. A fourth pins the Prometheus name mapping (`_total` for counters,
+  `_info` for info-metrics) against a real exposition payload.
+
 - A guard on the documentation index (`tests/unit/test_doc_links.py`). The link
   check proved every referenced page exists; nothing proved the index linked
   every page, so a new guide could land under `docs/` and be reachable only by
