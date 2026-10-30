@@ -43,10 +43,15 @@ _RESERVED_ATTRS = frozenset(logging.LogRecord("", logging.INFO, "", 0, "", (), N
     "taskName",
 }
 
-# Keys the JSON shape guarantees. An `extra=` field with one of these names is
-# emitted under an `extra_` prefix rather than clobbering the real value — a
-# log line whose "level" is not the log level would poison every dashboard
-# built on it.
+# Keys the JSON shape guarantees. An `extra=` field with one of these names must
+# not clobber the real value — a log line whose "level" is not the log level
+# would poison every dashboard built on it.
+#
+# The outcomes are not uniform, and `msg` cannot be helped from here: Python's
+# Logger.makeRecord raises KeyError for any name already on the LogRecord, and
+# it runs before this formatter. ts/level/logger/exc/stack are renamed to
+# extra_<name>; msg crashes the call; request_id is skipped below because it is
+# also in _RESERVED_ATTRS, so it is dropped rather than renamed.
 _STABLE_KEYS = frozenset({"ts", "level", "logger", "msg", "request_id", "exc", "stack"})
 
 
@@ -71,8 +76,11 @@ class JsonFormatter(logging.Formatter):
         """Serialise a record to one stable-keyed JSON line.
 
         The request id is read from the contextvar (never from ``extra=``) so
-        a caller cannot forge correlation; ``extra`` fields colliding with
-        stable keys are emitted under an ``extra_`` prefix.
+        a caller cannot forge correlation. An ``extra`` field colliding with a
+        stable key is renamed to ``extra_<name>``, except ``request_id``, which
+        the reserved-attribute check skips first and so drops entirely, and
+        ``msg``, which never reaches this method (``Logger.makeRecord`` rejects
+        it first). ``tests/unit/test_log_extra_contract.py`` pins the three.
         """
         ts = datetime.fromtimestamp(record.created, UTC)
         payload: dict[str, object] = {

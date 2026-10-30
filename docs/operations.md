@@ -371,7 +371,17 @@ period your regulation requires rather than an operational one.
 
 **Logs.** `ORCHESTRATOR_LOG_FORMAT=json` emits one object per line with
 `target_id`, `run_id`, `collector` and a request id (`X-Request-ID`, generated
-when absent). With `text`, only the message is printed.
+when absent). With `text`, each line carries the timestamp, the level, the
+logger name, the request id in brackets (`[-]` outside a request) and the
+message; the structured fields are dropped, because a plain line has no room
+for them.
+
+Either way the request id is read from the request context, never from a
+structured field, so a call site cannot forge the correlation. A field named
+`level`, `logger`, `ts`, `exc` or `stack` is emitted as `extra_<name>`; `msg`
+raises `KeyError` inside the log call and every other `LogRecord` attribute
+(`name`, `module`, `args`, …) does too; a field named `request_id` is dropped.
+`tests/unit/test_log_extra_contract.py` holds the call sites to that.
 
 **Startup checks.** The service logs a WARNING for an empty API key and for an
 empty or default signing key, and checks that the configured cloud LLM models
