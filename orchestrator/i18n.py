@@ -50,7 +50,7 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "en": "No collection source was executed.",
     },
     "reviewer_required": {
-        "es": "Esta decisión debe registrarla una cuenta de contador.",
+        "es": "Esta decisión debe registrarla una cuenta de analista.",
         "en": "A personal accountant account must record this decision.",
     },
     "dossier_report_title": {
@@ -168,11 +168,11 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "en": "Report for run {run_id} not found",
     },
     "report_pdf_not_found": {
-        "es": "La corrida {run_id} no tiene informe en PDF",
+        "es": "La ejecución {run_id} no tiene informe en PDF",
         "en": "Run {run_id} has no PDF report",
     },
     "bundle.not_found": {
-        "es": "La corrida {run_id} no tiene artefactos para exportar",
+        "es": "La ejecución {run_id} no tiene artefactos para exportar",
         "en": "Run {run_id} has no artefacts to export",
     },
     "synthesis_skipped": {

@@ -34,7 +34,7 @@ targets:
         # (`auto` deja que openosint deduzca el tipo a partir del objetivo).
         investigation_type: domain
         # Presupuesto de la investigación: cotas duras de la búsqueda por
-        # pivoteo. Sin ellas, una ejecución programada puede expandirse sin
+        # expansión. Sin ellas, una ejecución programada puede expandirse sin
         # límite.
         max_depth: 2              # saltos de BFS desde la entidad semilla
         max_entities: 40          # entidades distintas desde las que pivotar

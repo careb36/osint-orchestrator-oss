@@ -21,7 +21,7 @@ describe('UI catalogue', () => {
 
   it('defaults to Spanish and interpolates variables', () => {
     expect(defaultLocale).toBe('es');
-    expect(translate('es', 'run.accepted', { runId: 7, targetId: 'acme' })).toBe('Corrida #7 aceptada para acme.');
+    expect(translate('es', 'run.accepted', { runId: 7, targetId: 'acme' })).toBe('Ejecución #7 aceptada para acme.');
     expect(translate('en', 'run.accepted', { runId: 7, targetId: 'acme' })).toBe('Run #7 accepted for acme.');
     expect(format('{a} and {missing}', { a: 1 })).toBe('1 and {missing}');
   });

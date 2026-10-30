@@ -348,7 +348,7 @@ describe('App shell', () => {
 
   it('translates a rejected run by its status and keeps the server detail', async () => {
     installFetchMock({
-      routes: [{ pattern: /^\/targets\/example-corp\/run$/, status: 409, body: { detail: 'Ya hay una corrida en curso para example-corp' } }],
+      routes: [{ pattern: /^\/targets\/example-corp\/run$/, status: 409, body: { detail: 'Ya hay una ejecución en curso para example-corp' } }],
     });
     const user = userEvent.setup();
     renderApp(['/targets']);
@@ -358,7 +358,7 @@ describe('App shell', () => {
 
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent(/a run is already in progress/i);
-    expect(alert).toHaveTextContent(/server detail: ya hay una corrida en curso/i);
+    expect(alert).toHaveTextContent(/server detail: ya hay una ejecución en curso/i);
   });
 
   it('falls back to a generic sentence with the code for a status outside the map', async () => {

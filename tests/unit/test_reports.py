@@ -139,9 +139,9 @@ async def test_new_section_only_contains_is_new_true(tmp_path: Path) -> None:
     # The identifiers live in the annex; the delta section lists values.
     assert "domain-name--1" in text
     assert "ipv4-addr--1" in text
-    new_section = text.split("## Novedades desde la corrida anterior", 1)[1].split("## Errores", 1)[
-        0
-    ]
+    new_section = text.split("## Novedades desde la ejecución anterior", 1)[1].split(
+        "## Errores", 1
+    )[0]
     assert "- dominio: `example.com`" in new_section
     assert "1.2.3.4" not in new_section
     assert "domain-name--1" not in new_section
@@ -171,7 +171,7 @@ async def test_report_reads_executive_part_first_and_annex_last(tmp_path: Path) 
     order = [
         text.index("## Síntesis"),
         text.index("## Evidencia calificada"),
-        text.index("## Novedades desde la corrida anterior"),
+        text.index("## Novedades desde la ejecución anterior"),
         text.index("## Errores"),
         text.index("## Anexo técnico"),
         text.index("### Estado por recolector"),
@@ -184,7 +184,7 @@ async def test_report_reads_executive_part_first_and_annex_last(tmp_path: Path) 
     assert "- **Estado:** exitosa (`success`)" in text
     assert "**Riesgo**: alto (`high`) — Motivo de prueba." in text
     assert "**Lo nuevo según el modelo**:\n- Dominio nuevo example.com" in text
-    assert "**Pivotes sugeridos**:\n- Registro mercantil" in text
+    assert "**Líneas de investigación sugeridas**:\n- Registro mercantil" in text
     assert "| openosint | correcto | 2 |" in text
     assert "**dominio** (`domain-name`)" in text
     assert "- resuelve a: `example.com` -> `1.2.3.4` (domain-name--1 -> ipv4-addr--1)" in text
@@ -238,7 +238,7 @@ async def test_report_without_finding_says_so_and_points_to_the_evidence(tmp_pat
     text = (
         await generate_report(_sample_report_data(), report_dir=str(tmp_path), finding=None)
     ).read_text(encoding="utf-8")
-    assert "Esta corrida no incluye evaluación automática de riesgo" in text
+    assert "Esta ejecución no incluye evaluación automática de riesgo" in text
     assert "- **Evaluación automática:** sin evaluación automática" in text
 
 

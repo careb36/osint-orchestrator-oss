@@ -66,9 +66,12 @@ _TEXT: dict[str, dict[str, str]] = {
         "es": "**Lo nuevo según el modelo**",
         "en": "**What the model reports as new**",
     },
-    "synthesis_pivots": {"es": "**Pivotes sugeridos**", "en": "**Suggested pivots**"},
+    "synthesis_pivots": {
+        "es": "**Líneas de investigación sugeridas**",
+        "en": "**Suggested pivots**",
+    },
     "synthesis_hint": {
-        "es": "Esta corrida no incluye evaluación automática de riesgo; revise la evidencia calificada.",
+        "es": "Esta ejecución no incluye evaluación automática de riesgo; revise la evidencia calificada.",
         "en": "This run carries no automatic risk assessment; review the qualified evidence.",
     },
     "qualified_evidence": {"es": "## Evidencia calificada", "en": "## Qualified evidence"},
@@ -88,7 +91,7 @@ _TEXT: dict[str, dict[str, str]] = {
         ),
     },
     "new_first": {
-        "es": "## Novedades desde la corrida anterior",
+        "es": "## Novedades desde la ejecución anterior",
         "en": "## New since the previous run",
     },
     "errors": {"es": "## Errores", "en": "## Errors"},

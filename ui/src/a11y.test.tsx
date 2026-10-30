@@ -82,7 +82,7 @@ describe('accessibility (axe)', () => {
     installFetchMock();
     const user = userEvent.setup();
     renderApp(['/runs/42']);
-    await screen.findByRole('heading', { name: /corrida #42/i });
+    await screen.findByRole('heading', { name: /ejecución #42/i });
     await user.click(screen.getByRole('tab', { name: /evidencia/i }));
     await screen.findAllByRole('table');
     await user.click(screen.getByRole('button', { name: /verificar cadena de evidencia/i }));
