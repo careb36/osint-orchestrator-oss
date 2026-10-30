@@ -36,7 +36,7 @@ export function HomePage() {
     refetchInterval: (query) => (hasActive(query.state.data) ? ACTIVE_REFRESH_MS : false),
   });
   const trends = useQuery({ queryKey: ['risk-trends'], queryFn: api.getRiskTrends });
-  const { start, isPending, notice } = useStartRun();
+  const { start, isPending, isPendingFor, notice } = useStartRun();
   const queryClient = useQueryClient();
 
   const runList = runs.data ?? [];
@@ -209,7 +209,7 @@ export function HomePage() {
                   <td role="cell" data-label={t('col.newObservables')}>{lastRun ? lastRun.new_observables : '—'}</td>
                   <td role="cell" data-label={t('col.actions')}>
                     <button type="button" className="ghost-button" disabled={isPending || active || !target.enabled} onClick={() => start(target.id)}>
-                      {active ? t('run.running') : t('run.start')}
+                      {isPendingFor(target.id) ? t('run.starting') : active ? t('run.running') : t('run.start')}
                       <span className="visually-hidden">{t('run.startFor', { targetId: target.id })}</span>
                     </button>
                   </td>

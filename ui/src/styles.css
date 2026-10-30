@@ -291,6 +291,12 @@ code {
 
 .rail-icon {
   display: inline-flex;
+  /* Fixed column: the labels must share one left edge even if a glyph is
+     missing, so a forgotten icon degrades to a blank slot, not to a label that
+     jumps 17px left of its neighbours (Law of Similarity). */
+  flex: 0 0 17px;
+  width: 17px;
+  justify-content: center;
   opacity: 0.85;
 }
 

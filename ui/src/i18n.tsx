@@ -200,6 +200,7 @@ const en = {
   'run.failed.status': 'The run could not be started (status {status}).',
   'run.serverDetail': 'Server detail: {detail}',
   'run.start': 'Start run',
+  'run.starting': 'Starting…',
   'run.running': 'Running…',
   'run.startFor': ' for {targetId}',
   // common
@@ -652,6 +653,7 @@ const es: Record<MessageKey, string> = {
   'run.failed.status': 'No se pudo iniciar la corrida (estado {status}).',
   'run.serverDetail': 'Detalle del servidor: {detail}',
   'run.start': 'Iniciar corrida',
+  'run.starting': 'Iniciando…',
   'run.running': 'En curso…',
   'run.startFor': ' para {targetId}',
   never: 'nunca',

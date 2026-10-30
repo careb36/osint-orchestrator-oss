@@ -477,10 +477,14 @@ export function RunWorkspacePage() {
                 <button
                   type="button"
                   className="ghost-button"
-                  disabled={followUp.isPending || runActive}
+                  disabled={followUp.isPendingFor(run.data!.target_id) || runActive}
                   onClick={() => followUp.start(run.data!.target_id)}
                 >
-                  {runActive ? t('run.running') : t('handoff.followUp')}
+                  {followUp.isPendingFor(run.data!.target_id)
+                    ? t('run.starting')
+                    : runActive
+                      ? t('run.running')
+                      : t('handoff.followUp')}
                 </button>
               </div>
               <RunNotice notice={followUp.notice} />

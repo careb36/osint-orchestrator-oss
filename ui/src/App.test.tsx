@@ -7,7 +7,7 @@ import { ApiKeyProvider } from './auth';
 import { LOCALE_STORAGE_KEY, LocaleProvider, type Locale } from './i18n';
 import { API_KEY_STORAGE_KEY } from './lib/api';
 import { uiTelemetry } from './lib/telemetry';
-import { installFetchMock, sampleHealth, sampleRuns } from './test/mockApi';
+import { installFetchMock, sampleHealth, sampleRuns, sampleTargets } from './test/mockApi';
 
 // The assertions below read the English catalogue; Spanish is the default
 // for operators and has its own tests at the end of this file.
@@ -19,6 +19,34 @@ const newQueryClient = () =>
       },
     },
   });
+
+// The shared mock only serves immediate bodies, so a test that asserts on a
+// pending state needs a fetch that stays in flight until it says otherwise.
+const installGatedFetch = () => {
+  let release: (() => void) | undefined;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const respond = (body: unknown) =>
+    new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://test.local');
+      if (url.pathname === '/auth/status') return respond({ personal_access: false });
+      if (url.pathname === '/health') return respond(sampleHealth);
+      if (url.pathname === '/targets') return respond(sampleTargets);
+      const single = /^\/targets\/([^/]+)$/.exec(url.pathname);
+      if (single) return respond(sampleTargets.find((t) => t.id === single[1]) ?? {});
+      if (url.pathname === '/runs') return respond(sampleRuns);
+      if (url.pathname === '/analytics/risk-trends') return respond([]);
+      if (url.pathname.endsWith('/run')) {
+        await gate;
+        return respond({ run_id: 99, target_id: 'example-corp' });
+      }
+      return new Response('{}', { status: 404 });
+    }),
+  );
+  return () => release?.();
+};
 
 const renderApp = (initialEntries = ['/'], locale: Locale = 'en', queryClient = newQueryClient()) => {
   return render(
@@ -276,6 +304,46 @@ describe('App shell', () => {
     expect(await screen.findByText(/outdated login portal/i)).toBeInTheDocument();
     expect(screen.getByText(/2 new since last run/i)).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /nothing running/i })).toBeInTheDocument();
+  });
+
+  it('names the row that is starting, one row only', async () => {
+    // Doherty Threshold: the click has to be answered within 400ms and the
+    // answer has to be attributable. One mutation instance serves every row, so
+    // `isPending` alone disables all of them and leaves the operator unable to
+    // tell which target they actually started.
+    //
+    // The shared mock only serves immediate bodies, so this test keeps its own
+    // fetch: the run request has to stay in flight while the assertion runs.
+    const release = installGatedFetch();
+    const user = userEvent.setup();
+    renderApp();
+
+    await screen.findByRole('table');
+    await user.click(screen.getByRole('button', { name: /start run for example-corp/i }));
+
+    // The clicked row says what it is doing; the rest are merely disabled.
+    expect(await screen.findByRole('button', { name: /starting… for example-corp/i })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /starting… for paused-target/i })).toBeNull();
+    expect(screen.getByRole('button', { name: /start run for paused-target/i })).toBeDisabled();
+
+    release();
+    await waitFor(() => expect(screen.getByRole('button', { name: /start run for example-corp/i })).toBeEnabled());
+  });
+
+  it('says so on the target detail while that target is starting', async () => {
+    // Same attribution rule as the tables: the button must name its own target,
+    // so a page that reached for the mutation-wide flag would leave the operator
+    // with a disabled button and no answer.
+    const release = installGatedFetch();
+    const user = userEvent.setup();
+    renderApp(['/targets/example-corp']);
+
+    await screen.findByRole('heading', { name: 'example.com' });
+    await user.click(screen.getByRole('button', { name: /^start run/i }));
+    expect(await screen.findByRole('button', { name: /^starting…/i })).toBeDisabled();
+
+    release();
+    await waitFor(() => expect(screen.getByRole('button', { name: /^start run/i })).toBeEnabled());
   });
 
   it('translates a rejected run by its status and keeps the server detail', async () => {

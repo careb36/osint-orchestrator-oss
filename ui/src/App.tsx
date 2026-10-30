@@ -80,6 +80,21 @@ const RAIL_ICONS: Record<string, ReactNode> = {
       <circle cx="10" cy="13.3" r="0.9" fill="currentColor" stroke="none" />
     </svg>
   ),
+  // Every route in APP_ROUTES needs one: the rail reads as a group only if the
+  // glyph column is continuous (Law of Similarity, Law of Uniform Connectedness).
+  '/cases': (
+    <svg viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+      <path d="M5.2 2.9h5.4l4 4v10.2H5.2z" strokeLinejoin="round" />
+      <path d="M10.4 2.9v4.2h4.2" strokeLinejoin="round" />
+      <path d="M7.6 10.6h4.8M7.6 13.2h4.8" strokeLinecap="round" />
+    </svg>
+  ),
+  '/account': (
+    <svg viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+      <circle cx="10" cy="6.9" r="3.1" />
+      <path d="M3.9 16.7c0-3 2.7-4.7 6.1-4.7s6.1 1.7 6.1 4.7" strokeLinecap="round" />
+    </svg>
+  ),
 };
 
 /**
