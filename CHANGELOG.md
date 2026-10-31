@@ -11,6 +11,9 @@ from [SECURITY.md](SECURITY.md).
 
 ### Changed
 
+- The six Spanish screenshots under `docs/img/` are retaken from the showcase
+  console after the vocabulary change, so the README no longer shows
+  *Corridas* where the product now says *Ejecuciones*.
 - Spanish operator-facing wording now matches the vocabulary of the people who
   use the product: a run is an *ejecución* (not *corrida*), retention
   *elimina* (not *purga*), the report lists *líneas de investigación
