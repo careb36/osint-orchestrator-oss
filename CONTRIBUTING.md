@@ -241,6 +241,23 @@ repository falls back to GitHub-hosted; never set `CI_RUNS_ON` to the
 self-hosted labels on a public repository, where a fork's pull request would
 run code on that machine.
 
+## Tags and releases
+
+Product versions are `v*` tags pushed by a maintainer: `release.yml` turns
+each one into a GitHub Release with that version's CHANGELOG section, and
+`docker-publish.yml` publishes its image.
+
+Any other milestone (for example the state of `main` at a hackathon deadline)
+is made with the *Tag release* workflow (`tag-release.yml`), run from the
+Actions tab or the API with a tag name, a full commit SHA on `main`, a title
+and notes. It creates an annotated tag and a release, marked as pre-release
+by default so it is never shown as the latest version. It refuses names
+starting with `v`, a commit that is not on `main` and a tag that already
+exists on another commit; tags are never moved. If a run pushed the tag but
+failed before the release, running it again with the same inputs creates only
+the release. A coding agent whose session can run workflows but cannot push tags
+uses this path too.
+
 ## Security issues
 
 Do **not** open a public issue for a vulnerability. Follow the private
