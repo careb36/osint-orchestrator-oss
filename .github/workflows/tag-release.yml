@@ -1,0 +1,116 @@
+name: Tag release
+
+# Creates an annotated tag on a commit of main and a GitHub Release for it,
+# on demand. It exists for milestones that are not product versions (for
+# example the state of main at a hackathon deadline) and for sessions that
+# can push branches and run workflows but cannot push tags themselves.
+#
+# Product versions stay on the v* path in release.yml: a tag pushed with the
+# workflow's GITHUB_TOKEN does not trigger other workflows, so a v* tag made
+# here would get no image and no CHANGELOG notes. This workflow refuses them.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag name (letters, digits, dot, dash; not v*)"
+        required: true
+        type: string
+      target:
+        description: "Full 40-character SHA of a commit on main"
+        required: true
+        type: string
+      title:
+        description: "Release title"
+        required: true
+        type: string
+      notes:
+        description: "Release notes (Markdown); also the tag message"
+        required: true
+        type: string
+      prerelease:
+        description: "Mark as pre-release so it is not shown as the latest version"
+        required: false
+        type: boolean
+        default: true
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  tag-release:
+    name: Tag and release
+    runs-on: ${{ fromJSON(vars.CI_RUNS_ON || (github.event.repository.private && '["self-hosted","linux","x64","osint"]' || '"ubuntu-latest"')) }}
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+
+      # Inputs are untrusted text: they reach the shell only through the
+      # environment, never interpolated into the script.
+      - name: Validate the inputs
+        env:
+          TAG: ${{ inputs.tag }}
+          TARGET: ${{ inputs.target }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "${TAG}" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9.-]{0,99}$'; then
+            echo "::error::Tag name must be letters, digits, dot and dash, starting with a letter or digit."
+            exit 1
+          fi
+          case "${TAG}" in
+            v[0-9]*) echo "::error::Version tags (v*) go through release.yml so they get an image and CHANGELOG notes."; exit 1 ;;
+          esac
+          if ! printf '%s' "${TARGET}" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::Target must be a full 40-character commit SHA."
+            exit 1
+          fi
+          if [ "$(git cat-file -t "${TARGET}" 2>/dev/null || true)" != "commit" ]; then
+            echo "::error::Target ${TARGET} is not a commit in this repository."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "${TARGET}" origin/main; then
+            echo "::error::Target ${TARGET} is not on main."
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null; then
+            echo "::error::Tag ${TAG} already exists; tags are never moved."
+            exit 1
+          fi
+
+      - name: Create and push the annotated tag
+        env:
+          TAG: ${{ inputs.tag }}
+          TARGET: ${{ inputs.target }}
+          NOTES: ${{ inputs.notes }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          printf '%s\n\nRequested by %s through the Tag release workflow.\n' "${NOTES}" "${ACTOR}" > "${RUNNER_TEMP}/tag-message.txt"
+          git tag -a "${TAG}" "${TARGET}" -F "${RUNNER_TEMP}/tag-message.txt"
+          git push origin "refs/tags/${TAG}"
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          TITLE: ${{ inputs.title }}
+          NOTES: ${{ inputs.notes }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "${NOTES}" > "${RUNNER_TEMP}/release-notes.md"
+          flags=()
+          if [ "${PRERELEASE}" = "true" ]; then flags+=(--prerelease); fi
+          gh release create "${TAG}" \
+            --title "${TITLE}" \
+            --notes-file "${RUNNER_TEMP}/release-notes.md" \
+            --verify-tag \
+            "${flags[@]}"
