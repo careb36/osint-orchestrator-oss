@@ -27,8 +27,10 @@ from [SECURITY.md](SECURITY.md).
 
 - *Tag release* workflow (`tag-release.yml`): creates an annotated tag on a
   commit of `main` and a GitHub Release for it on demand, for milestones that
-  are not product versions. It refuses `v*` tags, commits outside `main` and
-  existing tags. Documented under *Tags and releases* in CONTRIBUTING.md.
+  are not product versions. It refuses names starting with `v`, commits
+  outside `main` and a tag that already exists on another commit; a rerun
+  after a failed release step creates only the release. Documented under
+  *Tags and releases* in CONTRIBUTING.md.
 - Two dashboard navigation defects, found by auditing the rail against the Laws
   of UX. `Dossiers` occupied the first navigation slot and pushed `Overview`, the
   landing route, to second place, against the order of the route map in

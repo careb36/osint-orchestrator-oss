@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag name (letters, digits, dot, dash; not v*)"
+        description: "Tag name (letters, digits, dot, dash; not starting with v)"
         required: true
         type: string
       target:
@@ -54,17 +54,20 @@ jobs:
       # Inputs are untrusted text: they reach the shell only through the
       # environment, never interpolated into the script.
       - name: Validate the inputs
+        id: check
         env:
           TAG: ${{ inputs.tag }}
           TARGET: ${{ inputs.target }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if ! printf '%s' "${TAG}" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9.-]{0,99}$'; then
             echo "::error::Tag name must be letters, digits, dot and dash, starting with a letter or digit."
             exit 1
           fi
+          # release.yml and docker-publish.yml own the whole v* namespace.
           case "${TAG}" in
-            v[0-9]*) echo "::error::Version tags (v*) go through release.yml so they get an image and CHANGELOG notes."; exit 1 ;;
+            v*) echo "::error::Tags starting with v are reserved for release.yml, which gives them an image and CHANGELOG notes."; exit 1 ;;
           esac
           if ! printf '%s' "${TARGET}" | grep -Eq '^[0-9a-f]{40}$'; then
             echo "::error::Target must be a full 40-character commit SHA."
@@ -78,12 +81,28 @@ jobs:
             echo "::error::Target ${TARGET} is not on main."
             exit 1
           fi
+          # An existing tag is accepted only to finish a run whose release step
+          # failed after the tag was pushed: it must already point at the
+          # requested commit and have no release yet. It is never rewritten.
           if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null; then
-            echo "::error::Tag ${TAG} already exists; tags are never moved."
-            exit 1
+            git fetch --quiet origin "refs/tags/${TAG}:refs/tags/${TAG}"
+            current="$(git rev-parse "refs/tags/${TAG}^{commit}")"
+            if [ "${current}" != "${TARGET}" ]; then
+              echo "::error::Tag ${TAG} already exists on ${current}, not on ${TARGET}; tags are never moved."
+              exit 1
+            fi
+            if gh release view "${TAG}" >/dev/null 2>&1; then
+              echo "::error::Tag ${TAG} and its release already exist; nothing to do."
+              exit 1
+            fi
+            echo "Tag ${TAG} already points at ${TARGET} without a release: only the release will be created."
+            echo "tag_exists=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "tag_exists=false" >> "${GITHUB_OUTPUT}"
           fi
 
       - name: Create and push the annotated tag
+        if: steps.check.outputs.tag_exists == 'false'
         env:
           TAG: ${{ inputs.tag }}
           TARGET: ${{ inputs.target }}
