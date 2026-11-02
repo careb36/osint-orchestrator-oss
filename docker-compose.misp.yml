@@ -26,7 +26,7 @@ services:
   # See docs/operations.md (Optional services) for startup and the API key.
 
   misp-db:
-    image: mariadb:10.11.19
+    image: mariadb:13.0.2
     profiles: ["misp"]
     restart: unless-stopped
     environment:
