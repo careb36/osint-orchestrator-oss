@@ -19,7 +19,7 @@
 #
 # See docs/operations.md (Optional services) for the integration notes.
 
-FROM python:3.11-slim
+FROM python:3.15-slim
 
 # libmagic1 is required by the agent for file-type detection
 RUN apt-get update \
