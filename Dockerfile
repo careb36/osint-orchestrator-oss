@@ -15,7 +15,7 @@ RUN --mount=type=secret,id=proxy_ca \
 COPY ui/ ./
 RUN npm run build
 
-FROM python:3.11-slim
+FROM python:3.15-slim
 
 WORKDIR /app
 
